@@ -21,6 +21,7 @@
           <a href="#goals">Goals</a>
           <a href="#tasks">Tasks</a>
           <a href="#workflows">Workflows</a>
+          <a href="#scheduler">Scheduler</a>
           <a href="#agents">Agents</a>
           <a href="#skills">Skills</a>
           <a href="#tools">Tools</a>
@@ -32,6 +33,7 @@
           <a href="#risks">Risks</a>
           <a href="#audit">Audit Logs</a>
           <a href="#structured-logs">Structured Logs</a>
+          <a href="#domain-events">Domain Events</a>
           <a href="#database">Database</a>
           <a href="#reviews">Reviews</a>
           <a href="#memory">Memory</a>
@@ -101,6 +103,14 @@
           <div class="metric">
             <span>Workflow Runs</span>
             <strong id="workflow-run-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Active Schedules</span>
+            <strong id="active-scheduled-job-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Domain Events</span>
+            <strong id="domain-event-count">0</strong>
           </div>
           <div class="metric">
             <span>Model Tokens</span>
@@ -684,6 +694,60 @@ A documentation and API workflow helper with tests.</textarea>
             <div id="backup-result" class="result" role="status"></div>
             <div id="backups-list" class="list"></div>
           </section>
+
+          <section class="panel" id="scheduler">
+            <div class="panel-header">
+              <div>
+                <h2>Scheduler</h2>
+                <p>Create and operate durable internal task schedules.</p>
+              </div>
+              <span id="scheduled-job-count" class="pill">0</span>
+            </div>
+            <form id="schedule-form" class="task-form">
+              <label>
+                Name
+                <input id="schedule-name" value="Daily operating task" />
+              </label>
+              <label>
+                Action
+                <select id="schedule-action">
+                  <option value="create_task">Create Task</option>
+                  <option value="run_task">Run Existing Task</option>
+                </select>
+              </label>
+              <label>
+                Next Run
+                <input id="schedule-next-run" type="datetime-local" />
+              </label>
+              <label>
+                Interval Seconds
+                <input id="schedule-interval" type="number" min="60" placeholder="One-time" />
+              </label>
+              <label>
+                Max Runs
+                <input id="schedule-max-runs" type="number" min="1" placeholder="Unlimited" />
+              </label>
+              <label>
+                Task ID
+                <input id="schedule-task-id" placeholder="Required for Run Existing Task" />
+              </label>
+              <label>
+                New Task Title
+                <input id="schedule-task-title" value="Scheduled operating note" />
+              </label>
+              <label>
+                New Task Description
+                <textarea id="schedule-task-description">Create an internal operating note from the scheduler.</textarea>
+              </label>
+              <div class="actions">
+                <button type="submit">Create Schedule</button>
+                <button id="scheduler-tick" type="button" class="secondary">Tick Now</button>
+              </div>
+            </form>
+            <div id="scheduler-result" class="result" role="status"></div>
+            <div id="schedules-list" class="list"></div>
+            <div id="scheduled-executions-list" class="list"></div>
+          </section>
         </section>
 
         <section class="grid lower">
@@ -699,6 +763,13 @@ A documentation and API workflow helper with tests.</textarea>
               <h2>Structured JSON Logs</h2>
             </div>
             <div id="structured-logs-list" class="table-list"></div>
+          </section>
+
+          <section class="panel wide" id="domain-events">
+            <div class="panel-header">
+              <h2>Domain Events</h2>
+            </div>
+            <div id="domain-events-list" class="table-list"></div>
           </section>
 
           <section class="panel" id="database">

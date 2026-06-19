@@ -16,6 +16,9 @@ It connects to the FastAPI backend through:
 GET /dashboard/summary
 GET /database/schema
 GET /system/integrity
+GET /events
+GET /schedules
+GET /scheduler/executions
 GET /goals
 GET /agents
 GET /skills
@@ -50,6 +53,11 @@ POST /backups
 POST /backups/{backup_id}/verify
 POST /backups/{backup_id}/restore-request
 POST /backups/{backup_id}/restore
+POST /schedules
+POST /schedules/{schedule_id}/pause
+POST /schedules/{schedule_id}/resume
+POST /schedules/{schedule_id}/cancel
+POST /scheduler/tick
 POST /agent-messages
 POST /agent-meetings
 POST /tasks/{task_id}/handoff
@@ -82,6 +90,7 @@ POST /agents/proposals/{proposal_id}/register
 ## Current Capabilities
 
 - View system health and core counts.
+- Create, pause, resume, cancel, and tick durable schedules; inspect execution history and domain events.
 - View active persistence backend, schema version, and applied SQLite migrations.
 - View system integrity checks for persistence, schema, audit guards, backups, incidents, approvals, and budget policy.
 - View task status distribution.

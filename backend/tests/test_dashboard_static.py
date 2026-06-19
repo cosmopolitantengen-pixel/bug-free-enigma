@@ -33,6 +33,8 @@ class DashboardStaticTests(unittest.TestCase):
             "db-schema-version",
             "workflow-run-count",
             "workflow-step-count",
+            "active-scheduled-job-count",
+            "domain-event-count",
             "workflow-runs-list",
             "workflow-steps-list",
             "model-token-count",
@@ -69,6 +71,21 @@ class DashboardStaticTests(unittest.TestCase):
             "backup-reason",
             "backup-result",
             "backups-list",
+            "scheduled-job-count",
+            "schedule-form",
+            "schedule-name",
+            "schedule-action",
+            "schedule-next-run",
+            "schedule-interval",
+            "schedule-max-runs",
+            "schedule-task-id",
+            "schedule-task-title",
+            "schedule-task-description",
+            "scheduler-tick",
+            "scheduler-result",
+            "schedules-list",
+            "scheduled-executions-list",
+            "domain-events-list",
             "agent-message-form",
             "agent-broadcast-form",
             "agent-broadcast-from",
@@ -212,12 +229,20 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn("/cost-logs", script)
         self.assertIn("/incidents", script)
         self.assertIn("/backups", script)
+        self.assertIn("/schedules", script)
+        self.assertIn("/scheduler/executions", script)
+        self.assertIn("/scheduler/tick", script)
+        self.assertIn("/events?limit=20", script)
         self.assertIn("/verify", script)
         self.assertIn("/restore-request", script)
         self.assertIn("Apply Approved Restore", script)
         self.assertIn("verifyBackup", script)
         self.assertIn("requestBackupRestore", script)
         self.assertIn("executeBackupRestore", script)
+        self.assertIn("createScheduledJob", script)
+        self.assertIn("tickScheduler", script)
+        self.assertIn("updateScheduledJob", script)
+        self.assertIn("data-schedule-action", script)
         self.assertIn("data-backup-action", script)
         self.assertIn("/agent-messages", script)
         self.assertIn("/agent-meetings", script)

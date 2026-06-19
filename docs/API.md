@@ -9,6 +9,15 @@ POST /auth/logout
 
 GET /database/schema
 GET /system/integrity
+GET /events
+
+GET /schedules
+POST /schedules
+POST /schedules/{id}/pause
+POST /schedules/{id}/resume
+POST /schedules/{id}/cancel
+GET /scheduler/executions
+POST /scheduler/tick
 
 GET /agents
 POST /agents
@@ -116,6 +125,8 @@ GET /dashboard/summary
 ## API Contract Rule
 
 API handlers should be thin. Permission, risk, approval, audit, Agent, Skill, and Workflow behavior belongs in core services first, then the API calls those services.
+
+The scheduler API persists one-time and recurring internal jobs, supports pause/resume/cancel controls, records every execution, and exposes an explicit Human Root tick. `GET /events` provides filtered append-only domain events by event type, source type, or task.
 
 ## Current Implementation
 

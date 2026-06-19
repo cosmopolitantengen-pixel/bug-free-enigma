@@ -11,6 +11,9 @@ from app.core.enums import (
     RiskLevel,
     IncidentStatus,
     GoalStatus,
+    ScheduleAction,
+    ScheduleExecutionStatus,
+    ScheduleStatus,
     TaskStatus,
     ToolRunStatus,
     WorkflowRunStatus,
@@ -353,6 +356,50 @@ class BackupRecord:
     backup_checksum: str | None = None
     backup_id: str = field(default_factory=lambda: new_id("backup"))
     created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class DomainEvent:
+    event_type: str
+    source_type: str
+    source_id: str
+    actor_id: str
+    payload: dict[str, Any]
+    task_id: str | None = None
+    event_id: str = field(default_factory=lambda: new_id("event"))
+    created_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass
+class ScheduledJob:
+    name: str
+    action: ScheduleAction
+    payload: dict[str, Any]
+    created_by: str
+    next_run_at: datetime
+    interval_seconds: int | None = None
+    max_runs: int | None = None
+    schedule_id: str = field(default_factory=lambda: new_id("schedule"))
+    status: ScheduleStatus = ScheduleStatus.ACTIVE
+    run_count: int = 0
+    failure_count: int = 0
+    last_run_at: datetime | None = None
+    last_error: str | None = None
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class ScheduledExecution:
+    schedule_id: str
+    action: ScheduleAction
+    status: ScheduleExecutionStatus
+    actor_id: str
+    output_ref: str | None = None
+    error: str | None = None
+    execution_id: str = field(default_factory=lambda: new_id("schedule_run"))
+    started_at: datetime = field(default_factory=utc_now)
+    completed_at: datetime = field(default_factory=utc_now)
 
 
 @dataclass(frozen=True)

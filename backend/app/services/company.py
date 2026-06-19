@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 from app.auth.service import AuthService
 from app.bootstrap import CompanyOS, build_company_os
-from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus
-from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, Incident, Skill, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
+from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
+from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
 from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, TaskStatus, ToolRunStatus
 from app.core.models import ActionRequest, AuditEvent, KnowledgeDoc, MemoryRecord, Task, utc_now
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
@@ -70,6 +71,9 @@ class CompanyApplicationService:
         loaded_agent_conflicts = self.persistence.load_agent_conflicts()
         loaded_task_reviews = self.persistence.load_task_reviews()
         loaded_strategic_goals = self.persistence.load_strategic_goals()
+        loaded_domain_events = self.persistence.load_domain_events()
+        loaded_scheduled_jobs = self.persistence.load_scheduled_jobs()
+        loaded_scheduled_executions = self.persistence.load_scheduled_executions()
         self.auth = AuthService(users={user.email: user for user in loaded_users})
         self.tasks = {task.task_id: task for task in loaded_tasks}
         self.skill_proposals = {proposal.proposal_id: proposal for proposal in loaded_skill_proposals}
@@ -100,6 +104,9 @@ class CompanyApplicationService:
             strategic_goals=loaded_strategic_goals,
             workflow_runs=loaded_workflow_runs,
             workflow_steps=loaded_workflow_steps,
+            domain_events=loaded_domain_events,
+            scheduled_jobs=loaded_scheduled_jobs,
+            scheduled_executions=loaded_scheduled_executions,
         )
 
     def sync(self) -> None:
@@ -133,6 +140,9 @@ class CompanyApplicationService:
             agent_conflicts=list(self.company_os.communication.list_conflicts()),
             task_reviews=list(self.company_os.reviews.list()),
             strategic_goals=list(self.company_os.goals.list()),
+            domain_events=list(self.company_os.events.list()),
+            scheduled_jobs=list(self.company_os.scheduler.list()),
+            scheduled_executions=list(self.company_os.scheduler.list_executions()),
         )
 
     def register_user(self, email: str, password: str) -> dict:
@@ -171,6 +181,7 @@ class CompanyApplicationService:
             self._incident_integrity_check(),
             self._approval_integrity_check(),
             self._budget_integrity_check(),
+            self._scheduler_integrity_check(),
         ]
         issue_count = len([check for check in checks if check["status"] in {"warning", "critical"}])
         if any(check["status"] == "critical" for check in checks):
@@ -1098,6 +1109,162 @@ class CompanyApplicationService:
             "restored_counts": restored_counts,
             "result": "restored",
             "incident": None,
+        }
+
+    def list_domain_events(
+        self,
+        event_type: str | None = None,
+        source_type: str | None = None,
+        task_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        if limit <= 0 or limit > 500:
+            raise ValueError("event limit must be between 1 and 500")
+        events = self.company_os.events.list(event_type, source_type, task_id)
+        return [to_plain(event) for event in events[-limit:]]
+
+    def list_scheduled_jobs(
+        self,
+        status: str | None = None,
+        action: str | None = None,
+    ) -> list[dict]:
+        return [to_plain(job) for job in self.company_os.scheduler.list(status, action)]
+
+    def list_scheduled_executions(self, schedule_id: str | None = None) -> list[dict]:
+        return [
+            to_plain(execution)
+            for execution in self.company_os.scheduler.list_executions(schedule_id)
+        ]
+
+    def create_scheduled_job(
+        self,
+        name: str,
+        action: ScheduleAction,
+        payload: dict,
+        created_by: str,
+        next_run_at: datetime,
+        interval_seconds: int | None = None,
+        max_runs: int | None = None,
+    ) -> dict:
+        if not name.strip():
+            raise ValueError("schedule name is required")
+        self._authorize_schedule_actor(created_by)
+        next_run_at = self._aware_utc(next_run_at, "next_run_at")
+        if interval_seconds is not None and interval_seconds < 60:
+            raise ValueError("recurring schedule interval must be at least 60 seconds")
+        if max_runs is not None and max_runs <= 0:
+            raise ValueError("schedule max_runs must be greater than zero")
+        if max_runs is not None and interval_seconds is None and max_runs != 1:
+            raise ValueError("one-time schedules can only use max_runs=1")
+        clean_payload = self._validate_schedule_payload(action, payload)
+
+        job = self.company_os.scheduler.create(
+            ScheduledJob(
+                name=name.strip(),
+                action=action,
+                payload=clean_payload,
+                created_by=created_by,
+                next_run_at=next_run_at,
+                interval_seconds=interval_seconds,
+                max_runs=max_runs,
+            )
+        )
+        self._publish_domain_event(
+            event_type="schedule.created",
+            source_type="schedule",
+            source_id=job.schedule_id,
+            actor_id=created_by,
+            payload={"action": job.action.value, "next_run_at": job.next_run_at.isoformat()},
+            task_id=job.payload.get("task_id"),
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="scheduled_job_created",
+                actor_id=created_by,
+                action="create_schedule",
+                task_id=job.payload.get("task_id"),
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=job.status.value,
+                input_ref=job.action.value,
+                output_ref=job.schedule_id,
+            )
+        )
+        self.sync()
+        return to_plain(job)
+
+    def pause_scheduled_job(self, schedule_id: str, actor_id: str) -> dict:
+        job = self.company_os.scheduler.get(schedule_id)
+        self._authorize_schedule_control(job, actor_id)
+        if job.status != ScheduleStatus.ACTIVE:
+            raise ValueError("only active schedules can be paused")
+        job.status = ScheduleStatus.PAUSED
+        job.updated_at = utc_now()
+        self._record_schedule_state_change(job, actor_id, "paused")
+        return to_plain(job)
+
+    def resume_scheduled_job(self, schedule_id: str, actor_id: str) -> dict:
+        job = self.company_os.scheduler.get(schedule_id)
+        self._authorize_schedule_control(job, actor_id)
+        if job.status != ScheduleStatus.PAUSED:
+            raise ValueError("only paused schedules can be resumed")
+        job.status = ScheduleStatus.ACTIVE
+        job.updated_at = utc_now()
+        self._record_schedule_state_change(job, actor_id, "resumed")
+        return to_plain(job)
+
+    def cancel_scheduled_job(self, schedule_id: str, actor_id: str) -> dict:
+        job = self.company_os.scheduler.get(schedule_id)
+        self._authorize_schedule_control(job, actor_id)
+        if job.status not in {ScheduleStatus.ACTIVE, ScheduleStatus.PAUSED}:
+            raise ValueError("only active or paused schedules can be cancelled")
+        job.status = ScheduleStatus.CANCELLED
+        job.updated_at = utc_now()
+        self._record_schedule_state_change(job, actor_id, "cancelled")
+        return to_plain(job)
+
+    def tick_scheduler(
+        self,
+        actor_id: str = "human_root",
+        now: datetime | None = None,
+        limit: int = 50,
+    ) -> dict:
+        if actor_id != "human_root":
+            raise ValueError("only human_root can tick the scheduler")
+        if limit <= 0 or limit > 100:
+            raise ValueError("scheduler tick limit must be between 1 and 100")
+        tick_time = self._aware_utc(now or utc_now(), "now")
+        due_jobs = sorted(
+            (
+                job
+                for job in self.company_os.scheduler.list(status=ScheduleStatus.ACTIVE.value)
+                if job.next_run_at <= tick_time
+            ),
+            key=lambda item: (item.next_run_at, item.schedule_id),
+        )[:limit]
+        executions = [
+            self._execute_scheduled_job(job, actor_id, tick_time)
+            for job in due_jobs
+        ]
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="scheduler_tick",
+                actor_id=actor_id,
+                action="tick_scheduler",
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=f"{len(executions)} executed",
+                input_ref=tick_time.isoformat(),
+                output_ref=None,
+            )
+        )
+        self.sync()
+        return {
+            "tick_time": tick_time.isoformat(),
+            "due_count": len(due_jobs),
+            "executed_count": len(executions),
+            "executions": [to_plain(execution) for execution in executions],
         }
 
     def acknowledge_incident(self, incident_id: str, actor_id: str, note: str | None = None) -> dict:
@@ -2208,6 +2375,9 @@ class CompanyApplicationService:
         improvement_proposals = list(self.improvement_proposals.values())
         github_absorptions = list(self.github_absorptions.values())
         strategic_goals = self.company_os.goals.list()
+        domain_events = self.company_os.events.list()
+        scheduled_jobs = self.company_os.scheduler.list()
+        scheduled_executions = self.company_os.scheduler.list_executions()
         budget = self.company_os.budget.summary()
         agents = self.company_os.agents.list()
         skills = self.company_os.skills.list()
@@ -2274,6 +2444,15 @@ class CompanyApplicationService:
             "strategic_goal_count": len(strategic_goals),
             "active_strategic_goal_count": len([goal for goal in strategic_goals if goal.status == GoalStatus.ACTIVE]),
             "average_goal_progress": self._average_goal_progress(strategic_goals),
+            "domain_event_count": len(domain_events),
+            "scheduled_job_count": len(scheduled_jobs),
+            "active_scheduled_job_count": len(
+                [job for job in scheduled_jobs if job.status == ScheduleStatus.ACTIVE]
+            ),
+            "scheduled_execution_count": len(scheduled_executions),
+            "failed_scheduled_job_count": len(
+                [job for job in scheduled_jobs if job.status == ScheduleStatus.FAILED]
+            ),
             "budget_used_tokens": budget["used_tokens"],
             "budget_used_cost": budget["used_cost"],
             "budget_policy_name": budget["policy_name"],
@@ -2325,6 +2504,11 @@ class CompanyApplicationService:
             "recent_improvement_proposals": [to_plain(proposal) for proposal in improvement_proposals[-10:]],
             "recent_github_absorptions": [to_plain(proposal) for proposal in github_absorptions[-10:]],
             "recent_strategic_goals": [to_plain(goal) for goal in strategic_goals[-10:]],
+            "recent_domain_events": [to_plain(event) for event in domain_events[-10:]],
+            "recent_scheduled_jobs": [to_plain(job) for job in scheduled_jobs[-10:]],
+            "recent_scheduled_executions": [
+                to_plain(execution) for execution in scheduled_executions[-10:]
+            ],
         }
 
     def _report_incident(
@@ -2370,6 +2554,197 @@ class CompanyApplicationService:
         run.result = json.dumps(to_plain(adapter_result), sort_keys=True)
         run.completed_at = utc_now()
 
+    def _authorize_schedule_actor(self, actor_id: str) -> None:
+        if actor_id == "human_root":
+            return
+        agent = self.company_os.agents.get(actor_id)
+        request = ActionRequest(
+            action="create_schedule",
+            actor_id=actor_id,
+            task_id=None,
+            permission_level=PermissionLevel.L2_INTERNAL_WRITE,
+            reason="Create an internal scheduled job.",
+            target="scheduler",
+        )
+        permission = self.company_os.permissions.evaluate(agent, request)
+        risk = self.company_os.risks.assess(request)
+        if permission.decision != ActionDecision.ALLOW or risk.blocked or risk.requires_approval:
+            raise ValueError(f"schedule creation is not allowed: {permission.reason}")
+
+    def _authorize_schedule_control(self, job: ScheduledJob, actor_id: str) -> None:
+        if actor_id != "human_root" and actor_id != job.created_by:
+            raise ValueError("only human_root or the schedule creator can change this schedule")
+        self._authorize_schedule_actor(actor_id)
+
+    def _validate_schedule_payload(self, action: ScheduleAction, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("schedule payload must be an object")
+        if action == ScheduleAction.CREATE_TASK:
+            title = payload.get("title")
+            description = payload.get("description")
+            if not isinstance(title, str) or not title.strip():
+                raise ValueError("create_task schedule requires a title")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError("create_task schedule requires a description")
+            return {"title": title.strip(), "description": description.strip()}
+        if action == ScheduleAction.RUN_TASK:
+            task_id = payload.get("task_id")
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise ValueError("run_task schedule requires a task_id")
+            self.tasks[task_id]
+            return {"task_id": task_id}
+        raise ValueError("unsupported schedule action")
+
+    def _aware_utc(self, value: datetime, field_name: str) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError(f"{field_name} must include a timezone")
+        return value.astimezone(timezone.utc)
+
+    def _publish_domain_event(
+        self,
+        event_type: str,
+        source_type: str,
+        source_id: str,
+        actor_id: str,
+        payload: dict,
+        task_id: str | None = None,
+    ) -> DomainEvent:
+        return self.company_os.events.publish(
+            DomainEvent(
+                event_type=event_type,
+                source_type=source_type,
+                source_id=source_id,
+                actor_id=actor_id,
+                payload=payload,
+                task_id=task_id,
+            )
+        )
+
+    def _record_schedule_state_change(
+        self,
+        job: ScheduledJob,
+        actor_id: str,
+        transition: str,
+    ) -> None:
+        self._publish_domain_event(
+            event_type=f"schedule.{transition}",
+            source_type="schedule",
+            source_id=job.schedule_id,
+            actor_id=actor_id,
+            payload={"status": job.status.value},
+            task_id=job.payload.get("task_id"),
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type=f"scheduled_job_{transition}",
+                actor_id=actor_id,
+                action=f"{transition}_schedule",
+                task_id=job.payload.get("task_id"),
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=job.status.value,
+                input_ref=None,
+                output_ref=job.schedule_id,
+            )
+        )
+        self.sync()
+
+    def _execute_scheduled_job(
+        self,
+        job: ScheduledJob,
+        actor_id: str,
+        now: datetime,
+    ) -> ScheduledExecution:
+        output_ref = None
+        error = None
+        status = ScheduleExecutionStatus.COMPLETED
+        try:
+            if job.action == ScheduleAction.CREATE_TASK:
+                task = self.create_task(
+                    job.payload["title"],
+                    job.payload["description"],
+                    user_id=job.created_by,
+                )
+                output_ref = task["task_id"]
+            elif job.action == ScheduleAction.RUN_TASK:
+                output_ref = job.payload["task_id"]
+                result = self.run_task(output_ref)
+                if result["blocked"]:
+                    raise ValueError(result["output"] or "scheduled task execution was blocked")
+            else:
+                raise ValueError("unsupported schedule action")
+        except Exception as exc:
+            status = ScheduleExecutionStatus.FAILED
+            error = str(exc)
+
+        job.run_count += 1
+        job.last_run_at = now
+        job.last_error = error
+        if status == ScheduleExecutionStatus.FAILED:
+            job.failure_count += 1
+
+        reached_limit = job.max_runs is not None and job.run_count >= job.max_runs
+        if job.interval_seconds is not None and not reached_limit:
+            job.next_run_at = now + timedelta(seconds=job.interval_seconds)
+            job.status = ScheduleStatus.ACTIVE
+        elif status == ScheduleExecutionStatus.COMPLETED:
+            job.status = ScheduleStatus.COMPLETED
+        else:
+            job.status = ScheduleStatus.FAILED
+        job.updated_at = now
+
+        execution = self.company_os.scheduler.record_execution(
+            ScheduledExecution(
+                schedule_id=job.schedule_id,
+                action=job.action,
+                status=status,
+                actor_id=actor_id,
+                output_ref=output_ref,
+                error=error,
+                started_at=now,
+                completed_at=now,
+            )
+        )
+        self._publish_domain_event(
+            event_type=f"schedule.execution.{status.value}",
+            source_type="schedule",
+            source_id=job.schedule_id,
+            actor_id=actor_id,
+            payload={
+                "execution_id": execution.execution_id,
+                "action": job.action.value,
+                "output_ref": output_ref,
+                "error": error,
+            },
+            task_id=job.payload.get("task_id") or output_ref,
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type=f"scheduled_job_{status.value}",
+                actor_id=actor_id,
+                action=job.action.value,
+                task_id=job.payload.get("task_id") or output_ref,
+                risk_level=RiskLevel.LOW if error is None else RiskLevel.MEDIUM,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=status.value,
+                input_ref=job.schedule_id,
+                output_ref=output_ref,
+                error=error,
+            )
+        )
+        if error is not None:
+            self._report_incident(
+                title="Scheduled job failed",
+                description=f"Schedule {job.schedule_id} failed: {error}",
+                source_type="schedule",
+                source_id=job.schedule_id,
+                risk_level=RiskLevel.MEDIUM,
+                task_id=job.payload.get("task_id"),
+                actor_id=actor_id,
+                recommendation="Inspect the schedule payload, target task state, and audit trail before retrying.",
+            )
+        return execution
+
     def _state_snapshot(self) -> dict:
         return {
             "tasks": to_plain(list(self.tasks.values())),
@@ -2397,6 +2772,7 @@ class CompanyApplicationService:
             "agent_broadcasts": to_plain(self.company_os.communication.list_broadcasts()),
             "agent_conflicts": to_plain(self.company_os.communication.list_conflicts()),
             "task_reviews": to_plain(self.company_os.reviews.list()),
+            "scheduled_jobs": to_plain(self.company_os.scheduler.list()),
         }
 
     def _backup_checksum(self, snapshot: dict) -> str:
@@ -2514,6 +2890,26 @@ class CompanyApplicationService:
             "name": "budget_policy",
             "status": status,
             "message": message,
+        }
+
+    def _scheduler_integrity_check(self) -> dict:
+        jobs = self.company_os.scheduler.list()
+        failed = [job for job in jobs if job.status == ScheduleStatus.FAILED]
+        overdue = [
+            job
+            for job in jobs
+            if job.status == ScheduleStatus.ACTIVE and job.next_run_at < utc_now()
+        ]
+        if failed:
+            status = "critical"
+        elif overdue:
+            status = "warning"
+        else:
+            status = "ok"
+        return {
+            "name": "scheduler",
+            "status": status,
+            "message": f"{len(failed)} failed and {len(overdue)} overdue scheduled jobs.",
         }
 
     def _count_by_value(self, values) -> dict[str, int]:

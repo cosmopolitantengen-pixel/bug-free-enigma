@@ -14,6 +14,9 @@ from app.core.enums import (
     RiskLevel,
     SandboxStatus,
     GoalStatus,
+    ScheduleAction,
+    ScheduleExecutionStatus,
+    ScheduleStatus,
     TaskStatus,
     ToolRunStatus,
     WorkflowRunStatus,
@@ -29,6 +32,7 @@ from app.core.models import (
     AuditEvent,
     BackupRecord,
     CostLog,
+    DomainEvent,
     BudgetPolicy,
     EvaluationRecord,
     Incident,
@@ -36,6 +40,8 @@ from app.core.models import (
     MemoryRecord,
     ModelUsageRecord,
     RiskAssessment,
+    ScheduledExecution,
+    ScheduledJob,
     StrategicGoal,
     Task,
     TaskHandoff,
@@ -50,7 +56,7 @@ from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementPr
 from app.services.serializers import to_plain
 
 
-SQLITE_SCHEMA_VERSION = 3
+SQLITE_SCHEMA_VERSION = 4
 BASELINE_MIGRATION_VERSION = 1
 BASELINE_MIGRATION_ID = "0001_initial_local_state"
 BASELINE_MIGRATION_DESCRIPTION = "Create initial local AI Company OS state tables."
@@ -60,6 +66,9 @@ AUDIT_GUARD_MIGRATION_DESCRIPTION = "Prevent updates and deletes on SQLite audit
 BACKUP_RESTORE_LEDGER_MIGRATION_VERSION = 3
 BACKUP_RESTORE_LEDGER_MIGRATION_ID = "0003_backup_restore_execution_ledger"
 BACKUP_RESTORE_LEDGER_MIGRATION_DESCRIPTION = "Record one-time backup restore approval consumption."
+SCHEDULER_EVENT_MIGRATION_VERSION = 4
+SCHEDULER_EVENT_MIGRATION_ID = "0004_scheduler_event_bus"
+SCHEDULER_EVENT_MIGRATION_DESCRIPTION = "Add durable schedules, executions, and append-only domain events."
 
 
 class SQLiteStateStore:
@@ -372,6 +381,18 @@ class SQLiteStateStore:
         rows = self._select_payloads("strategic_goals", "created_at")
         return [_strategic_goal_from_plain(row) for row in rows]
 
+    def load_domain_events(self) -> list[DomainEvent]:
+        rows = self._select_payloads("domain_events", "created_at")
+        return [_domain_event_from_plain(row) for row in rows]
+
+    def load_scheduled_jobs(self) -> list[ScheduledJob]:
+        rows = self._select_payloads("scheduled_jobs", "next_run_at")
+        return [_scheduled_job_from_plain(row) for row in rows]
+
+    def load_scheduled_executions(self) -> list[ScheduledExecution]:
+        rows = self._select_payloads("scheduled_executions", "started_at")
+        return [_scheduled_execution_from_plain(row) for row in rows]
+
     def load_github_absorptions(self) -> list[GitHubAbsorption]:
         rows = self._select_payloads("github_absorptions", "proposal_id")
         return [_github_absorption_from_plain(row) for row in rows]
@@ -572,6 +593,41 @@ class SQLiteStateStore:
             )
             connection.commit()
 
+    def save_domain_event(self, event: DomainEvent) -> None:
+        payload = _json(to_plain(event))
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO domain_events (event_id, created_at, payload_json) VALUES (?, ?, ?)",
+                (event.event_id, event.created_at.isoformat(), payload),
+            )
+            connection.commit()
+
+    def save_scheduled_job(self, job: ScheduledJob) -> None:
+        payload = _json(to_plain(job))
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT INTO scheduled_jobs (schedule_id, next_run_at, payload_json) VALUES (?, ?, ?) "
+                "ON CONFLICT(schedule_id) DO UPDATE SET "
+                "next_run_at = excluded.next_run_at, payload_json = excluded.payload_json",
+                (job.schedule_id, job.next_run_at.isoformat(), payload),
+            )
+            connection.commit()
+
+    def save_scheduled_execution(self, execution: ScheduledExecution) -> None:
+        payload = _json(to_plain(execution))
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO scheduled_executions "
+                "(execution_id, schedule_id, started_at, payload_json) VALUES (?, ?, ?, ?)",
+                (
+                    execution.execution_id,
+                    execution.schedule_id,
+                    execution.started_at.isoformat(),
+                    payload,
+                ),
+            )
+            connection.commit()
+
     def sync_state(
         self,
         users: list[User],
@@ -601,6 +657,9 @@ class SQLiteStateStore:
         agent_conflicts: list[AgentConflict],
         task_reviews: list[TaskReview],
         strategic_goals: list[StrategicGoal],
+        domain_events: list[DomainEvent],
+        scheduled_jobs: list[ScheduledJob],
+        scheduled_executions: list[ScheduledExecution],
     ) -> None:
         for user in users:
             self.save_user(user)
@@ -655,6 +714,12 @@ class SQLiteStateStore:
             self.save_task_review(review)
         for goal in strategic_goals:
             self.save_strategic_goal(goal)
+        for event in domain_events:
+            self.save_domain_event(event)
+        for job in scheduled_jobs:
+            self.save_scheduled_job(job)
+        for execution in scheduled_executions:
+            self.save_scheduled_execution(execution)
 
     def restore_snapshot(
         self,
@@ -737,11 +802,15 @@ class SQLiteStateStore:
                 "task_reviews",
                 (("review_id", "review_id"), ("created_at", "created_at")),
             ),
+            "scheduled_jobs": (
+                "scheduled_jobs",
+                (("schedule_id", "schedule_id"), ("next_run_at", "next_run_at")),
+            ),
         }
 
         prepared: dict[str, tuple[str, tuple[tuple[str, str], ...], list[dict[str, Any]]]] = {}
         for snapshot_key, (table, columns) in collection_specs.items():
-            records = snapshot.get(snapshot_key)
+            records = snapshot.get(snapshot_key, [] if snapshot_key == "scheduled_jobs" else None)
             if not isinstance(records, list):
                 raise ValueError(f"backup snapshot field {snapshot_key} must be a list")
             for record in records:
@@ -851,6 +920,8 @@ class SQLiteStateStore:
             self._apply_audit_append_only_guards(connection)
         if self._current_schema_version(connection) < BACKUP_RESTORE_LEDGER_MIGRATION_VERSION:
             self._apply_backup_restore_execution_ledger(connection)
+        if self._current_schema_version(connection) < SCHEDULER_EVENT_MIGRATION_VERSION:
+            self._apply_scheduler_event_bus(connection)
 
     def _apply_audit_append_only_guards(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
@@ -903,6 +974,53 @@ class SQLiteStateStore:
             ),
         )
         connection.execute(f"PRAGMA user_version = {BACKUP_RESTORE_LEDGER_MIGRATION_VERSION}")
+
+    def _apply_scheduler_event_bus(self, connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS domain_events (
+                event_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                schedule_id TEXT PRIMARY KEY,
+                next_run_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduled_executions (
+                execution_id TEXT PRIMARY KEY,
+                schedule_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE TRIGGER IF NOT EXISTS domain_events_no_update
+            BEFORE UPDATE ON domain_events
+            BEGIN
+                SELECT RAISE(ABORT, 'domain_events are append-only');
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS domain_events_no_delete
+            BEFORE DELETE ON domain_events
+            BEGIN
+                SELECT RAISE(ABORT, 'domain_events are append-only');
+            END;
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (migration_id, version, description, applied_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                SCHEDULER_EVENT_MIGRATION_ID,
+                SCHEDULER_EVENT_MIGRATION_VERSION,
+                SCHEDULER_EVENT_MIGRATION_DESCRIPTION,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.execute(f"PRAGMA user_version = {SCHEDULER_EVENT_MIGRATION_VERSION}")
 
     def _current_schema_version(self, connection: sqlite3.Connection) -> int:
         cursor = connection.execute("PRAGMA user_version")
@@ -1274,6 +1392,53 @@ def _backup_from_plain(payload: dict[str, Any]) -> BackupRecord:
         backup_checksum=payload.get("backup_checksum"),
         backup_id=payload["backup_id"],
         created_at=_dt(payload["created_at"]) or datetime.min,
+    )
+
+
+def _domain_event_from_plain(payload: dict[str, Any]) -> DomainEvent:
+    return DomainEvent(
+        event_type=payload["event_type"],
+        source_type=payload["source_type"],
+        source_id=payload["source_id"],
+        actor_id=payload["actor_id"],
+        payload=dict(payload.get("payload", {})),
+        task_id=payload.get("task_id"),
+        event_id=payload["event_id"],
+        created_at=_dt(payload["created_at"]) or datetime.min,
+    )
+
+
+def _scheduled_job_from_plain(payload: dict[str, Any]) -> ScheduledJob:
+    return ScheduledJob(
+        name=payload["name"],
+        action=ScheduleAction(payload["action"]),
+        payload=dict(payload.get("payload", {})),
+        created_by=payload["created_by"],
+        next_run_at=_dt(payload["next_run_at"]) or datetime.min,
+        interval_seconds=payload.get("interval_seconds"),
+        max_runs=payload.get("max_runs"),
+        schedule_id=payload["schedule_id"],
+        status=ScheduleStatus(payload.get("status", ScheduleStatus.ACTIVE.value)),
+        run_count=int(payload.get("run_count", 0)),
+        failure_count=int(payload.get("failure_count", 0)),
+        last_run_at=_dt(payload.get("last_run_at")),
+        last_error=payload.get("last_error"),
+        created_at=_dt(payload["created_at"]) or datetime.min,
+        updated_at=_dt(payload["updated_at"]) or datetime.min,
+    )
+
+
+def _scheduled_execution_from_plain(payload: dict[str, Any]) -> ScheduledExecution:
+    return ScheduledExecution(
+        schedule_id=payload["schedule_id"],
+        action=ScheduleAction(payload["action"]),
+        status=ScheduleExecutionStatus(payload["status"]),
+        actor_id=payload["actor_id"],
+        output_ref=payload.get("output_ref"),
+        error=payload.get("error"),
+        execution_id=payload["execution_id"],
+        started_at=_dt(payload["started_at"]) or datetime.min,
+        completed_at=_dt(payload["completed_at"]) or datetime.min,
     )
 
 

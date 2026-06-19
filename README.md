@@ -14,6 +14,7 @@ The first version focuses on the operating foundation:
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
 - Memory and Knowledge Base receive completed work so the system can improve over time.
+- Durable schedules can create or run internal tasks and publish append-only domain events.
 
 ## Current Scope
 

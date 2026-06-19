@@ -52,12 +52,16 @@ class ApiRouteTests(unittest.TestCase):
 
             self.assertEqual(sqlite_schema.status_code, 200)
             self.assertEqual(sqlite_schema.json()["backend"], "sqlite")
-            self.assertEqual(sqlite_schema.json()["schema_version"], 3)
+            self.assertEqual(sqlite_schema.json()["schema_version"], 4)
             self.assertEqual(sqlite_schema.json()["migrations"][0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(sqlite_schema.json()["migrations"][1]["migration_id"], "0002_audit_append_only_guards")
             self.assertEqual(
                 sqlite_schema.json()["migrations"][2]["migration_id"],
                 "0003_backup_restore_execution_ledger",
+            )
+            self.assertEqual(
+                sqlite_schema.json()["migrations"][3]["migration_id"],
+                "0004_scheduler_event_bus",
             )
 
     def test_system_integrity_reports_sqlite_guards_and_backup_state(self):
@@ -1049,6 +1053,149 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("strategic_goal_linked", [event["event_type"] for event in audit.json()])
         self.assertEqual(audit.json()[-1]["event_type"], "strategic_goal_progress_updated")
 
+    def test_scheduler_runs_one_time_and_recurring_task_creation(self):
+        one_time = self.client.post(
+            "/schedules",
+            json={
+                "name": "One-time task",
+                "action": "create_task",
+                "payload": {"title": "Scheduled once", "description": "Created by scheduler."},
+                "next_run_at": "2030-01-01T00:00:00+00:00",
+            },
+        )
+        recurring = self.client.post(
+            "/schedules",
+            json={
+                "name": "Recurring task",
+                "action": "create_task",
+                "payload": {"title": "Scheduled recurring", "description": "Created twice."},
+                "next_run_at": "2030-01-01T00:00:00+00:00",
+                "interval_seconds": 60,
+                "max_runs": 2,
+            },
+        )
+        first_tick = self.client.post(
+            "/scheduler/tick",
+            json={"now": "2030-01-01T00:00:00+00:00"},
+        )
+        second_tick = self.client.post(
+            "/scheduler/tick",
+            json={"now": "2030-01-01T00:01:00+00:00"},
+        )
+        third_tick = self.client.post(
+            "/scheduler/tick",
+            json={"now": "2030-01-01T00:02:00+00:00"},
+        )
+        schedules = self.client.get("/schedules").json()
+        executions = self.client.get("/scheduler/executions").json()
+        events = self.client.get("/events", params={"source_type": "schedule"}).json()
+
+        self.assertEqual(one_time.status_code, 200)
+        self.assertEqual(recurring.status_code, 200)
+        self.assertEqual(first_tick.json()["executed_count"], 2)
+        self.assertEqual(second_tick.json()["executed_count"], 1)
+        self.assertEqual(third_tick.json()["executed_count"], 0)
+        self.assertEqual(len(self.client.get("/tasks").json()), 3)
+        self.assertEqual(len(executions), 3)
+        self.assertTrue(all(item["status"] == "completed" for item in executions))
+        self.assertTrue(all(job["status"] == "completed" for job in schedules))
+        self.assertEqual(
+            len([event for event in events if event["event_type"] == "schedule.execution.completed"]),
+            3,
+        )
+        self.assertEqual(
+            len(self.client.get("/scheduler/executions", params={"schedule_id": recurring.json()["schedule_id"]}).json()),
+            2,
+        )
+
+    def test_scheduler_pause_resume_cancel_and_failure_paths(self):
+        paused = self.client.post(
+            "/schedules",
+            json={
+                "name": "Controlled schedule",
+                "action": "create_task",
+                "payload": {"title": "Controlled", "description": "Pause this first."},
+                "next_run_at": "2030-02-01T00:00:00+00:00",
+                "interval_seconds": 60,
+            },
+        ).json()
+        pause = self.client.post(
+            f"/schedules/{paused['schedule_id']}/pause",
+            json={"actor_id": "human_root"},
+        )
+        skipped_tick = self.client.post(
+            "/scheduler/tick",
+            json={"now": "2030-02-01T00:00:00+00:00"},
+        )
+        resume = self.client.post(
+            f"/schedules/{paused['schedule_id']}/resume",
+            json={"actor_id": "human_root"},
+        )
+        executed_tick = self.client.post(
+            "/scheduler/tick",
+            json={"now": "2030-02-01T00:00:00+00:00"},
+        )
+        cancel = self.client.post(
+            f"/schedules/{paused['schedule_id']}/cancel",
+            json={"actor_id": "human_root"},
+        )
+
+        task = self.client.post(
+            "/tasks",
+            json={"title": "Budget-blocked target", "description": "Scheduled run must fail."},
+        ).json()
+        failing = self.client.post(
+            "/schedules",
+            json={
+                "name": "Failing run",
+                "action": "run_task",
+                "payload": {"task_id": task["task_id"]},
+                "next_run_at": "2030-02-01T00:02:00+00:00",
+            },
+        ).json()
+        self.client.post(
+            "/budget/policy",
+            json={
+                "actor_id": "human_root",
+                "name": "Scheduler Failure Budget",
+                "max_tokens_per_call": 1,
+                "max_total_tokens": 10,
+                "max_estimated_cost": 1,
+                "cost_per_token": 0.000001,
+                "currency": "USD",
+                "enabled": True,
+            },
+        )
+        failed_tick = self.client.post(
+            "/scheduler/tick",
+            json={"now": "2030-02-01T00:02:00+00:00"},
+        )
+        failed_job = self.client.get("/schedules", params={"status": "failed"}).json()[0]
+
+        self.assertEqual(pause.json()["status"], "paused")
+        self.assertEqual(skipped_tick.json()["executed_count"], 0)
+        self.assertEqual(resume.json()["status"], "active")
+        self.assertEqual(executed_tick.json()["executed_count"], 1)
+        self.assertEqual(cancel.json()["status"], "cancelled")
+        self.assertEqual(failed_tick.json()["executions"][0]["status"], "failed")
+        self.assertEqual(failed_job["schedule_id"], failing["schedule_id"])
+        self.assertEqual(failed_job["failure_count"], 1)
+        self.assertTrue(
+            any(
+                incident["source_type"] == "schedule"
+                for incident in self.client.get("/incidents").json()
+            )
+        )
+        self.assertEqual(
+            self.client.get("/events", params={"event_type": "schedule.execution.failed"}).json()[0]["source_id"],
+            failing["schedule_id"],
+        )
+        unauthorized_tick = self.client.post(
+            "/scheduler/tick",
+            json={"actor_id": "ceo_agent_v1", "now": "2030-02-01T00:03:00+00:00"},
+        )
+        self.assertEqual(unauthorized_tick.status_code, 400)
+
     def test_dashboard_summary_has_operational_sections(self):
         dashboard = self.client.get("/dashboard/summary")
 
@@ -1097,6 +1244,11 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("strategic_goal_count", payload)
         self.assertIn("active_strategic_goal_count", payload)
         self.assertIn("average_goal_progress", payload)
+        self.assertIn("domain_event_count", payload)
+        self.assertIn("scheduled_job_count", payload)
+        self.assertIn("active_scheduled_job_count", payload)
+        self.assertIn("scheduled_execution_count", payload)
+        self.assertIn("failed_scheduled_job_count", payload)
         self.assertIn("recent_agent_messages", payload)
         self.assertIn("recent_agent_meetings", payload)
         self.assertIn("recent_task_handoffs", payload)
@@ -1105,6 +1257,9 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("recent_task_reviews", payload)
         self.assertIn("recent_improvement_proposals", payload)
         self.assertIn("recent_strategic_goals", payload)
+        self.assertIn("recent_domain_events", payload)
+        self.assertIn("recent_scheduled_jobs", payload)
+        self.assertIn("recent_scheduled_executions", payload)
         self.assertEqual(payload["agent_status_counts"]["enabled"], payload["agent_count"])
 
 

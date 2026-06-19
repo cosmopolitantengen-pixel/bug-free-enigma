@@ -28,6 +28,9 @@ from app.api.schemas import (
     MissingSkillRequest,
     RegisterRequest,
     RiskAssessRequest,
+    ScheduleActorRequest,
+    ScheduleCreateRequest,
+    SchedulerTickRequest,
     SkillSearchRequest,
     SkillCreateRequest,
     StrategicGoalCreateRequest,
@@ -58,6 +61,77 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     @router.get("/system/integrity")
     def system_integrity() -> dict:
         return service.system_integrity()
+
+    @router.get("/events")
+    def list_domain_events(
+        event_type: str | None = None,
+        source_type: str | None = None,
+        task_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        try:
+            return service.list_domain_events(event_type, source_type, task_id, limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/schedules")
+    def list_scheduled_jobs(status: str | None = None, action: str | None = None) -> list[dict]:
+        return service.list_scheduled_jobs(status, action)
+
+    @router.post("/schedules")
+    def create_scheduled_job(payload: ScheduleCreateRequest) -> dict:
+        try:
+            return service.create_scheduled_job(
+                payload.name,
+                payload.action,
+                payload.payload,
+                payload.created_by,
+                payload.next_run_at,
+                payload.interval_seconds,
+                payload.max_runs,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="schedule actor or target task not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/schedules/{schedule_id}/pause")
+    def pause_scheduled_job(schedule_id: str, payload: ScheduleActorRequest) -> dict:
+        try:
+            return service.pause_scheduled_job(schedule_id, payload.actor_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="schedule not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/schedules/{schedule_id}/resume")
+    def resume_scheduled_job(schedule_id: str, payload: ScheduleActorRequest) -> dict:
+        try:
+            return service.resume_scheduled_job(schedule_id, payload.actor_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="schedule not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/schedules/{schedule_id}/cancel")
+    def cancel_scheduled_job(schedule_id: str, payload: ScheduleActorRequest) -> dict:
+        try:
+            return service.cancel_scheduled_job(schedule_id, payload.actor_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="schedule not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/scheduler/executions")
+    def list_scheduled_executions(schedule_id: str | None = None) -> list[dict]:
+        return service.list_scheduled_executions(schedule_id)
+
+    @router.post("/scheduler/tick")
+    def tick_scheduler(payload: SchedulerTickRequest) -> dict:
+        try:
+            return service.tick_scheduler(payload.actor_id, payload.now, payload.limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/auth/register")
     def register(payload: RegisterRequest) -> dict:

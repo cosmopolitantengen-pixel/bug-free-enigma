@@ -28,9 +28,9 @@ class PersistenceTests(unittest.TestCase):
             store = SQLiteStateStore(db_path)
             reloaded = SQLiteStateStore(db_path)
 
-            self.assertEqual(store.schema_version(), 3)
-            self.assertEqual(reloaded.schema_version(), 3)
-            self.assertEqual(len(reloaded.list_schema_migrations()), 3)
+            self.assertEqual(store.schema_version(), 4)
+            self.assertEqual(reloaded.schema_version(), 4)
+            self.assertEqual(len(reloaded.list_schema_migrations()), 4)
             self.assertEqual(reloaded.list_schema_migrations()[0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(reloaded.list_schema_migrations()[0]["version"], 1)
             self.assertEqual(reloaded.list_schema_migrations()[1]["migration_id"], "0002_audit_append_only_guards")
@@ -40,6 +40,11 @@ class PersistenceTests(unittest.TestCase):
                 "0003_backup_restore_execution_ledger",
             )
             self.assertEqual(reloaded.list_schema_migrations()[2]["version"], 3)
+            self.assertEqual(
+                reloaded.list_schema_migrations()[3]["migration_id"],
+                "0004_scheduler_event_bus",
+            )
+            self.assertEqual(reloaded.list_schema_migrations()[3]["version"], 4)
 
             with closing(sqlite3.connect(db_path)) as connection:
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -56,13 +61,18 @@ class PersistenceTests(unittest.TestCase):
                     ).fetchall()
                 }
 
-            self.assertEqual(user_version, 3)
+            self.assertEqual(user_version, 4)
             self.assertIn("schema_migrations", table_names)
             self.assertIn("audit_logs", table_names)
             self.assertIn("workflow_runs", table_names)
             self.assertIn("backup_restore_executions", table_names)
+            self.assertIn("domain_events", table_names)
+            self.assertIn("scheduled_jobs", table_names)
+            self.assertIn("scheduled_executions", table_names)
             self.assertIn("audit_logs_no_update", trigger_names)
             self.assertIn("audit_logs_no_delete", trigger_names)
+            self.assertIn("domain_events_no_update", trigger_names)
+            self.assertIn("domain_events_no_delete", trigger_names)
 
     def test_sqlite_audit_logs_are_append_only_at_database_layer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -89,6 +99,51 @@ class PersistenceTests(unittest.TestCase):
                 row_count = connection.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0]
 
             self.assertGreaterEqual(row_count, 7)
+
+    def test_scheduler_events_jobs_and_executions_persist_with_append_only_events(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "scheduler.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            schedule = first.post(
+                "/schedules",
+                json={
+                    "name": "Persistent schedule",
+                    "action": "create_task",
+                    "payload": {
+                        "title": "Persistent scheduled task",
+                        "description": "Created through a durable scheduler.",
+                    },
+                    "next_run_at": "2031-01-01T00:00:00+00:00",
+                },
+            ).json()
+            tick = first.post(
+                "/scheduler/tick",
+                json={"now": "2031-01-01T00:00:00+00:00"},
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            jobs = second.get("/schedules").json()
+            executions = second.get("/scheduler/executions").json()
+            events = second.get("/events").json()
+            tasks = second.get("/tasks").json()
+
+            self.assertEqual(tick.status_code, 200)
+            self.assertEqual(jobs[0]["schedule_id"], schedule["schedule_id"])
+            self.assertEqual(jobs[0]["status"], "completed")
+            self.assertEqual(len(executions), 1)
+            self.assertEqual(executions[0]["status"], "completed")
+            self.assertEqual(len(events), 2)
+            self.assertEqual(len(tasks), 1)
+
+            event_id = events[0]["event_id"]
+            with closing(sqlite3.connect(db_path)) as connection:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(
+                        "UPDATE domain_events SET payload_json = ? WHERE event_id = ?",
+                        ("{}", event_id),
+                    )
+                with self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute("DELETE FROM domain_events WHERE event_id = ?", (event_id,))
 
     def test_service_reloads_tasks_audit_memory_and_knowledge_from_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -220,6 +275,15 @@ class PersistenceTests(unittest.TestCase):
                 "/backups",
                 json={"actor_id": "human_root", "reason": "Restore target."},
             ).json()
+            later_schedule = client.post(
+                "/schedules",
+                json={
+                    "name": "Post-backup schedule",
+                    "action": "create_task",
+                    "payload": {"title": "Later", "description": "Remove schedule on restore."},
+                    "next_run_at": "2032-01-01T00:00:00+00:00",
+                },
+            ).json()
             later_task = client.post(
                 "/tasks",
                 json={"title": "Later task", "description": "Remove this task during restore."},
@@ -255,6 +319,10 @@ class PersistenceTests(unittest.TestCase):
                 task["task_id"]
                 for task in restored.json()["safety_backup"]["snapshot"]["tasks"]
             ])
+            self.assertIn(later_schedule["schedule_id"], [
+                job["schedule_id"]
+                for job in restored.json()["safety_backup"]["snapshot"]["scheduled_jobs"]
+            ])
 
             reloaded = TestClient(create_app(sqlite_path=db_path))
             tasks = reloaded.get("/tasks").json()
@@ -265,6 +333,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual([task["task_id"] for task in tasks], [original_task["task_id"]])
             self.assertEqual(reloaded.get("/memory").json(), [])
             self.assertEqual(reloaded.get("/knowledge").json(), [])
+            self.assertEqual(reloaded.get("/schedules").json(), [])
             self.assertEqual(len(backups), 2)
             self.assertIn(approval_id, [approval["approval_id"] for approval in approvals])
             self.assertGreater(len(audit_logs), audit_count_before_restore)

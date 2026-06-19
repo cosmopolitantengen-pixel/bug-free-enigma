@@ -64,6 +64,9 @@ function renderDashboard(summary) {
   setText("tool-run-count", summary.tool_run_count || 0);
   setText("workflow-run-count", summary.workflow_run_count || 0);
   setText("workflow-step-count", summary.workflow_step_count || 0);
+  setText("scheduled-job-count", summary.scheduled_job_count || 0);
+  setText("active-scheduled-job-count", summary.active_scheduled_job_count || 0);
+  setText("domain-event-count", summary.domain_event_count || 0);
   setText("model-usage-count", summary.model_usage_count || 0);
   setText("model-token-count", summary.model_token_count || 0);
   setText("cost-log-count", summary.cost_log_count || 0);
@@ -159,7 +162,7 @@ function renderSystemIntegrity(integrity) {
 }
 
 async function refresh() {
-  const [summary, databaseSchema, integrity, goals, agents, skills, tools, toolRuns, workflowRuns, modelUsage, budget, costLogs, incidents, backups, agentMessages, agentMeetings, taskHandoffs, agentBroadcasts, agentConflicts, skillProposals, agentProposals, improvementProposals, githubAbsorptions, structuredLogs, memory, knowledge, evaluations, taskReviews] = await Promise.all([
+  const [summary, databaseSchema, integrity, goals, agents, skills, tools, toolRuns, workflowRuns, modelUsage, budget, costLogs, incidents, backups, schedules, scheduledExecutions, domainEvents, agentMessages, agentMeetings, taskHandoffs, agentBroadcasts, agentConflicts, skillProposals, agentProposals, improvementProposals, githubAbsorptions, structuredLogs, memory, knowledge, evaluations, taskReviews] = await Promise.all([
     api("/dashboard/summary"),
     api("/database/schema"),
     api("/system/integrity"),
@@ -174,6 +177,9 @@ async function refresh() {
     api("/cost-logs"),
     api("/incidents"),
     api("/backups"),
+    api("/schedules"),
+    api("/scheduler/executions"),
+    api("/events?limit=20"),
     api("/agent-messages"),
     api("/agent-meetings"),
     api("/task-handoffs"),
@@ -309,6 +315,39 @@ async function refresh() {
       </div>
     `;
   });
+  renderList("schedules-list", schedules.slice(-8), (job) => `
+    <div class="item">
+      <strong>${escapeHtml(job.name)} / ${escapeHtml(job.status)}</strong>
+      <span>${escapeHtml(job.action)} / next: ${escapeHtml(job.next_run_at)}</span>
+      <span>runs: ${escapeHtml(job.run_count)} / failures: ${escapeHtml(job.failure_count)}${job.interval_seconds ? ` / every ${escapeHtml(job.interval_seconds)}s` : " / one-time"}</span>
+      ${job.last_error ? `<span class="danger">${escapeHtml(job.last_error)}</span>` : ""}
+      ${
+        ["active", "paused"].includes(job.status)
+          ? `<div class="actions">
+              ${job.status === "active" ? `<button type="button" data-schedule-action="pause" data-schedule-id="${escapeHtml(job.schedule_id)}">Pause</button>` : `<button type="button" data-schedule-action="resume" data-schedule-id="${escapeHtml(job.schedule_id)}">Resume</button>`}
+              <button type="button" class="secondary" data-schedule-action="cancel" data-schedule-id="${escapeHtml(job.schedule_id)}">Cancel</button>
+            </div>`
+          : ""
+      }
+    </div>
+  `);
+  renderList("scheduled-executions-list", scheduledExecutions.slice(-8), (execution) => `
+    <div class="item">
+      <strong>${escapeHtml(execution.action)} / ${escapeHtml(execution.status)}</strong>
+      <span>${escapeHtml(execution.schedule_id)} / ${escapeHtml(execution.completed_at)}</span>
+      <span>${escapeHtml(execution.output_ref || execution.error || "no output")}</span>
+    </div>
+  `);
+  renderList("domain-events-list", domainEvents.slice(-12), (event) => `
+    <div class="row">
+      <div>
+        <strong>${escapeHtml(event.event_type)}</strong>
+        <span>${escapeHtml(event.source_type)} / ${escapeHtml(event.source_id)}</span>
+      </div>
+      <span>${escapeHtml(event.actor_id)}</span>
+      <span>${escapeHtml(event.created_at)}</span>
+    </div>
+  `);
   renderList("agent-messages-list", agentMessages.slice(-6), (message) => `
     <div class="item">
       <strong>${escapeHtml(message.message_type)} / ${escapeHtml(message.priority)}</strong>
@@ -703,6 +742,61 @@ async function executeBackupRestore(backupId, approvalId) {
   await refresh();
 }
 
+async function createScheduledJob(event) {
+  event.preventDefault();
+  $("scheduler-result").textContent = "Creating schedule...";
+  try {
+    const action = $("schedule-action").value;
+    const nextRun = new Date($("schedule-next-run").value);
+    if (Number.isNaN(nextRun.getTime())) {
+      throw new Error("Choose a valid next run time.");
+    }
+    const payload = action === "run_task"
+      ? { task_id: $("schedule-task-id").value.trim() }
+      : {
+          title: $("schedule-task-title").value,
+          description: $("schedule-task-description").value,
+        };
+    const intervalValue = $("schedule-interval").value;
+    const maxRunsValue = $("schedule-max-runs").value;
+    const result = await api("/schedules", {
+      method: "POST",
+      body: JSON.stringify({
+        name: $("schedule-name").value,
+        action,
+        payload,
+        created_by: "human_root",
+        next_run_at: nextRun.toISOString(),
+        interval_seconds: intervalValue ? Number(intervalValue) : null,
+        max_runs: maxRunsValue ? Number(maxRunsValue) : null,
+      }),
+    });
+    $("scheduler-result").innerHTML = `<span class="ok">Created:</span> ${escapeHtml(result.schedule_id)} / ${escapeHtml(result.status)}`;
+    await refresh();
+  } catch (error) {
+    $("scheduler-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;
+  }
+}
+
+async function tickScheduler() {
+  $("scheduler-result").textContent = "Running due schedules...";
+  const result = await api("/scheduler/tick", {
+    method: "POST",
+    body: JSON.stringify({ actor_id: "human_root", limit: 50 }),
+  });
+  $("scheduler-result").innerHTML = `<span class="ok">Tick complete:</span> ${escapeHtml(result.executed_count)} executed`;
+  await refresh();
+}
+
+async function updateScheduledJob(scheduleId, action) {
+  const result = await api(`/schedules/${scheduleId}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({ actor_id: "human_root" }),
+  });
+  $("scheduler-result").innerHTML = `<span class="ok">${escapeHtml(action)}:</span> ${escapeHtml(result.schedule_id)} / ${escapeHtml(result.status)}`;
+  await refresh();
+}
+
 async function sendAgentMessage(event) {
   event.preventDefault();
   $("agent-communication-result").textContent = "Sending message...";
@@ -999,6 +1093,14 @@ $("tool-run-form").addEventListener("submit", requestToolRun);
 $("model-form").addEventListener("submit", generateModelResponse);
 $("budget-policy-form").addEventListener("submit", updateBudgetPolicy);
 $("backup-form").addEventListener("submit", createBackup);
+$("schedule-form").addEventListener("submit", createScheduledJob);
+$("scheduler-tick").addEventListener("click", async () => {
+  try {
+    await tickScheduler();
+  } catch (error) {
+    $("scheduler-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;
+  }
+});
 $("agent-broadcast-form").addEventListener("submit", broadcastAgentEvent);
 $("agent-conflict-form").addEventListener("submit", openAgentConflict);
 $("agent-conflict-resolve-form").addEventListener("submit", resolveAgentConflict);
@@ -1088,6 +1190,20 @@ $("backups-list").addEventListener("click", async (event) => {
     button.disabled = false;
   }
 });
+$("schedules-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-schedule-action]");
+  if (!button) {
+    return;
+  }
+  button.disabled = true;
+  try {
+    await updateScheduledJob(button.dataset.scheduleId, button.dataset.scheduleAction);
+  } catch (error) {
+    $("scheduler-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
+});
 $("tool-runs-list").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-tool-run-action]");
   if (!button) {
@@ -1116,6 +1232,12 @@ $("workflow-runs-list").addEventListener("click", async (event) => {
     button.disabled = false;
   }
 });
+const defaultScheduleTime = new Date(Date.now() + 5 * 60 * 1000);
+defaultScheduleTime.setSeconds(0, 0);
+const timezoneOffset = defaultScheduleTime.getTimezoneOffset() * 60 * 1000;
+$("schedule-next-run").value = new Date(defaultScheduleTime.getTime() - timezoneOffset)
+  .toISOString()
+  .slice(0, 16);
 wireNavigation();
 refresh().catch((error) => {
   $("task-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;

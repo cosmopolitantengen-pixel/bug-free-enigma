@@ -76,6 +76,7 @@ Current status:
 - Backups include deterministic snapshot checksums and an auditable verification endpoint/dashboard action.
 - Backup restore requests require checksum verification; approved SQLite restores recheck integrity, create a pre-restore checkpoint, replace business state transactionally, and preserve control-plane history.
 - System integrity checks expose persistence, schema, audit guard, backup, incident, approval, and budget status through API and dashboard.
+- Durable one-time and recurring internal schedules can create or run tasks through an explicit Human Root tick, with lifecycle controls, execution history, incidents, audit events, and append-only domain events.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence

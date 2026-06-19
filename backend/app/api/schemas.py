@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
-from app.core.enums import ApprovalStatus, GoalStatus, PermissionLevel, RiskLevel
+from app.core.enums import ApprovalStatus, GoalStatus, PermissionLevel, RiskLevel, ScheduleAction
 
 
 class RegisterRequest(BaseModel):
@@ -141,6 +143,26 @@ class BackupRestoreExecuteRequest(BaseModel):
     approval_id: str
     actor_id: str = "human_root"
     reason: str
+
+
+class ScheduleCreateRequest(BaseModel):
+    name: str
+    action: ScheduleAction
+    payload: dict
+    created_by: str = "human_root"
+    next_run_at: datetime
+    interval_seconds: int | None = Field(default=None, ge=60)
+    max_runs: int | None = Field(default=None, gt=0)
+
+
+class ScheduleActorRequest(BaseModel):
+    actor_id: str = "human_root"
+
+
+class SchedulerTickRequest(BaseModel):
+    actor_id: str = "human_root"
+    now: datetime | None = None
+    limit: int = Field(default=50, ge=1, le=100)
 
 
 class AgentMessageCreateRequest(BaseModel):

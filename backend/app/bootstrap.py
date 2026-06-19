@@ -18,12 +18,15 @@ from app.core.models import (
     BackupRecord,
     BudgetPolicy,
     CostLog,
+    DomainEvent,
     EvaluationRecord,
     StrategicGoal,
     Incident,
     KnowledgeDoc,
     MemoryRecord,
     ModelUsageRecord,
+    ScheduledExecution,
+    ScheduledJob,
     Tool,
     TaskHandoff,
     TaskReview,
@@ -31,6 +34,7 @@ from app.core.models import (
     WorkflowStep,
 )
 from app.evaluations.store import EvaluationStore
+from app.events.store import EventBus
 from app.factory.proposals import CapabilityGapDetector, ProposalSandbox
 from app.goals.store import GoalStore
 from app.incidents.store import IncidentStore
@@ -40,6 +44,7 @@ from app.models.gateway import ModelGateway
 from app.permissions.engine import PermissionEngine
 from app.reviews.store import ReviewStore
 from app.safety.risk import RiskEngine
+from app.scheduler.store import SchedulerStore
 from app.skills.registry import SkillRegistry, default_skills
 from app.tools.registry import ToolRegistry, default_tools
 from app.workflows.document_generation import DocumentGenerationWorkflow
@@ -68,6 +73,8 @@ class CompanyOS:
     communication: CommunicationStore
     reviews: ReviewStore
     goals: GoalStore
+    events: EventBus
+    scheduler: SchedulerStore
     document_workflow: DocumentGenerationWorkflow
 
 
@@ -92,6 +99,9 @@ def build_company_os(
     strategic_goals: list[StrategicGoal] | None = None,
     workflow_runs: list[WorkflowRun] | None = None,
     workflow_steps: list[WorkflowStep] | None = None,
+    domain_events: list[DomainEvent] | None = None,
+    scheduled_jobs: list[ScheduledJob] | None = None,
+    scheduled_executions: list[ScheduledExecution] | None = None,
 ) -> CompanyOS:
     agents = AgentRegistry()
     for agent in default_agents():
@@ -131,6 +141,8 @@ def build_company_os(
     )
     reviews = ReviewStore(task_reviews)
     goals = GoalStore(strategic_goals)
+    events = EventBus(domain_events)
+    scheduler = SchedulerStore(scheduled_jobs, scheduled_executions)
     document_workflow = DocumentGenerationWorkflow(
         agents=agents,
         skills=skills,
@@ -167,5 +179,7 @@ def build_company_os(
         communication=communication,
         reviews=reviews,
         goals=goals,
+        events=events,
+        scheduler=scheduler,
         document_workflow=document_workflow,
     )

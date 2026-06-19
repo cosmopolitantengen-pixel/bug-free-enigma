@@ -109,3 +109,21 @@ class IncidentStatus(str, Enum):
     OPEN = "open"
     ACKNOWLEDGED = "acknowledged"
     RESOLVED = "resolved"
+
+
+class ScheduleAction(str, Enum):
+    CREATE_TASK = "create_task"
+    RUN_TASK = "run_task"
+
+
+class ScheduleStatus(str, Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ScheduleExecutionStatus(str, Enum):
+    COMPLETED = "completed"
+    FAILED = "failed"
