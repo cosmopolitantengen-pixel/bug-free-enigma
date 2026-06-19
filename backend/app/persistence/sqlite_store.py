@@ -50,13 +50,16 @@ from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementPr
 from app.services.serializers import to_plain
 
 
-SQLITE_SCHEMA_VERSION = 2
+SQLITE_SCHEMA_VERSION = 3
 BASELINE_MIGRATION_VERSION = 1
 BASELINE_MIGRATION_ID = "0001_initial_local_state"
 BASELINE_MIGRATION_DESCRIPTION = "Create initial local AI Company OS state tables."
 AUDIT_GUARD_MIGRATION_VERSION = 2
 AUDIT_GUARD_MIGRATION_ID = "0002_audit_append_only_guards"
 AUDIT_GUARD_MIGRATION_DESCRIPTION = "Prevent updates and deletes on SQLite audit logs."
+BACKUP_RESTORE_LEDGER_MIGRATION_VERSION = 3
+BACKUP_RESTORE_LEDGER_MIGRATION_ID = "0003_backup_restore_execution_ledger"
+BACKUP_RESTORE_LEDGER_MIGRATION_DESCRIPTION = "Record one-time backup restore approval consumption."
 
 
 class SQLiteStateStore:
@@ -653,6 +656,158 @@ class SQLiteStateStore:
         for goal in strategic_goals:
             self.save_strategic_goal(goal)
 
+    def restore_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        approval_id: str,
+        backup_id: str,
+        actor_id: str,
+        safety_backup_id: str,
+    ) -> dict[str, int]:
+        """Replace restorable business state while preserving control-plane history."""
+        collection_specs = {
+            "tasks": ("tasks", (("task_id", "task_id"),)),
+            "memory": ("memories", (("record_id", "record_id"),)),
+            "knowledge": ("knowledge_docs", (("doc_id", "doc_id"),)),
+            "evaluations": (
+                "evaluations",
+                (("record_id", "record_id"), ("created_at", "created_at")),
+            ),
+            "strategic_goals": (
+                "strategic_goals",
+                (("goal_id", "goal_id"), ("created_at", "created_at")),
+            ),
+            "tools": ("tools", (("tool_id", "tool_id"),)),
+            "tool_runs": (
+                "tool_runs",
+                (("run_id", "run_id"), ("created_at", "created_at")),
+            ),
+            "workflow_runs": (
+                "workflow_runs",
+                (("run_id", "run_id"), ("started_at", "started_at")),
+            ),
+            "workflow_steps": (
+                "workflow_steps",
+                (
+                    ("step_id", "step_id"),
+                    ("run_id", "run_id"),
+                    ("sequence", "sequence"),
+                ),
+            ),
+            "model_usage": (
+                "model_usage",
+                (("record_id", "record_id"), ("created_at", "created_at")),
+            ),
+            "cost_logs": (
+                "cost_logs",
+                (("record_id", "record_id"), ("created_at", "created_at")),
+            ),
+            "skill_proposals": ("skill_proposals", (("proposal_id", "proposal_id"),)),
+            "agent_proposals": ("agent_proposals", (("proposal_id", "proposal_id"),)),
+            "improvement_proposals": (
+                "improvement_proposals",
+                (("proposal_id", "proposal_id"),),
+            ),
+            "github_absorptions": (
+                "github_absorptions",
+                (("proposal_id", "proposal_id"),),
+            ),
+            "agent_messages": (
+                "agent_messages",
+                (("message_id", "message_id"), ("created_at", "created_at")),
+            ),
+            "agent_meetings": (
+                "agent_meetings",
+                (("meeting_id", "meeting_id"), ("created_at", "created_at")),
+            ),
+            "task_handoffs": (
+                "task_handoffs",
+                (("handoff_id", "handoff_id"), ("created_at", "created_at")),
+            ),
+            "agent_broadcasts": (
+                "agent_broadcasts",
+                (("broadcast_id", "broadcast_id"), ("created_at", "created_at")),
+            ),
+            "agent_conflicts": (
+                "agent_conflicts",
+                (("conflict_id", "conflict_id"), ("created_at", "created_at")),
+            ),
+            "task_reviews": (
+                "task_reviews",
+                (("review_id", "review_id"), ("created_at", "created_at")),
+            ),
+        }
+
+        prepared: dict[str, tuple[str, tuple[tuple[str, str], ...], list[dict[str, Any]]]] = {}
+        for snapshot_key, (table, columns) in collection_specs.items():
+            records = snapshot.get(snapshot_key)
+            if not isinstance(records, list):
+                raise ValueError(f"backup snapshot field {snapshot_key} must be a list")
+            for record in records:
+                if not isinstance(record, dict):
+                    raise ValueError(f"backup snapshot field {snapshot_key} contains a non-object record")
+                for _, payload_key in columns:
+                    if payload_key not in record:
+                        raise ValueError(
+                            f"backup snapshot field {snapshot_key} record is missing {payload_key}"
+                        )
+            prepared[snapshot_key] = (table, columns, records)
+
+        budget_policy = snapshot.get("budget_policy")
+        if not isinstance(budget_policy, dict) or "policy_id" not in budget_policy:
+            raise ValueError("backup snapshot field budget_policy must contain a policy_id")
+
+        with closing(self._connect()) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "INSERT INTO backup_restore_executions "
+                    "(approval_id, backup_id, actor_id, safety_backup_id, executed_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        approval_id,
+                        backup_id,
+                        actor_id,
+                        safety_backup_id,
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+                for table, _, _ in prepared.values():
+                    connection.execute(f"DELETE FROM {table}")
+                connection.execute("DELETE FROM budget_policies")
+
+                for table, columns, records in prepared.values():
+                    column_names = [column for column, _ in columns] + ["payload_json"]
+                    placeholders = ", ".join("?" for _ in column_names)
+                    rows = [
+                        tuple(record[payload_key] for _, payload_key in columns) + (_json(record),)
+                        for record in records
+                    ]
+                    if rows:
+                        connection.executemany(
+                            f"INSERT INTO {table} ({', '.join(column_names)}) VALUES ({placeholders})",
+                            rows,
+                        )
+
+                connection.execute(
+                    "INSERT INTO budget_policies (policy_id, active_key, payload_json) VALUES (?, ?, ?)",
+                    (budget_policy["policy_id"], "active", _json(budget_policy)),
+                )
+                connection.commit()
+            except sqlite3.IntegrityError as exc:
+                connection.rollback()
+                if "backup_restore_executions.approval_id" in str(exc):
+                    raise ValueError("backup restore approval has already been used") from exc
+                raise
+            except Exception:
+                connection.rollback()
+                raise
+
+        counts = {snapshot_key: len(records) for snapshot_key, (_, _, records) in prepared.items()}
+        counts["budget_policy"] = 1
+        return counts
+
     def _select_payloads(self, table: str, order_by: str) -> list[dict[str, Any]]:
         with closing(self._connect()) as connection:
             cursor = connection.execute(f"SELECT payload_json FROM {table} ORDER BY {order_by}")
@@ -694,6 +849,8 @@ class SQLiteStateStore:
     def _apply_migrations(self, connection: sqlite3.Connection) -> None:
         if self._current_schema_version(connection) < AUDIT_GUARD_MIGRATION_VERSION:
             self._apply_audit_append_only_guards(connection)
+        if self._current_schema_version(connection) < BACKUP_RESTORE_LEDGER_MIGRATION_VERSION:
+            self._apply_backup_restore_execution_ledger(connection)
 
     def _apply_audit_append_only_guards(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
@@ -722,6 +879,30 @@ class SQLiteStateStore:
             ),
         )
         connection.execute(f"PRAGMA user_version = {AUDIT_GUARD_MIGRATION_VERSION}")
+
+    def _apply_backup_restore_execution_ledger(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS backup_restore_executions (
+                approval_id TEXT PRIMARY KEY,
+                backup_id TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                safety_backup_id TEXT NOT NULL,
+                executed_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (migration_id, version, description, applied_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                BACKUP_RESTORE_LEDGER_MIGRATION_ID,
+                BACKUP_RESTORE_LEDGER_MIGRATION_VERSION,
+                BACKUP_RESTORE_LEDGER_MIGRATION_DESCRIPTION,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.execute(f"PRAGMA user_version = {BACKUP_RESTORE_LEDGER_MIGRATION_VERSION}")
 
     def _current_schema_version(self, connection: sqlite3.Connection) -> int:
         cursor = connection.execute("PRAGMA user_version")

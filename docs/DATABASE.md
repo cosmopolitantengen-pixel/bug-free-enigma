@@ -91,7 +91,7 @@ It currently stores:
 
 User records store PBKDF2 password hashes, not plaintext passwords.
 
-SQLite initialization records the baseline migration `0001_initial_local_state`, applies `0002_audit_append_only_guards`, and sets `PRAGMA user_version` to `2`. The second migration creates SQLite triggers that reject `UPDATE` and `DELETE` statements on `audit_logs`, so audit append-only behavior is enforced below the application service. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
+SQLite initialization records the baseline migration `0001_initial_local_state`, applies `0002_audit_append_only_guards` and `0003_backup_restore_execution_ledger`, and sets `PRAGMA user_version` to `3`. The second migration creates SQLite triggers that reject `UPDATE` and `DELETE` statements on `audit_logs`. The third adds a unique restore-approval consumption ledger committed in the same transaction as restored business state. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
 
 Skill and Agent proposal payloads include approval state plus sandbox status, notes, and sandbox timestamp. The first implementation stores proposal state as JSON so the future migration layer can promote fields into relational columns when needed.
 
@@ -101,7 +101,7 @@ GitHub absorption payloads store repository URL, README excerpt, license and mai
 
 Strategic goal payloads store the owner Agent, target metric, target/current values, status, and links to tasks, reviews, and improvement proposals.
 
-Backup payloads store state snapshots and manual rollback plans. Automatic restore is not enabled in the first local adapter.
+Backup payloads store state snapshots, checksums, and controlled rollback plans. Approved restores replace restorable business tables in one transaction while preserving users, approvals, append-only audit logs, incidents, backups, and migration history.
 
 Agent communication payloads store Agent-to-Agent messages, coordination meeting records, task handoff records, internal broadcasts, and conflict arbitration records. They are included in dashboard summaries and backup snapshots.
 

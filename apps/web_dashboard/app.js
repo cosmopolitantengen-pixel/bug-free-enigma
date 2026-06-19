@@ -284,18 +284,31 @@ async function refresh() {
       }
     </div>
   `);
-  renderList("backups-list", backups.slice(-6), (backup) => `
-    <div class="item">
-      <strong>${escapeHtml(backup.backup_id)}</strong>
-      <span>${escapeHtml(backup.actor_id)} / ${escapeHtml(backup.reason)}</span>
-      <span>checksum: ${escapeHtml(backup.backup_checksum || "missing").slice(0, 24)}</span>
-      <span>${escapeHtml(backup.rollback_plan)}</span>
-      <div class="actions">
-        <button type="button" data-backup-action="verify" data-backup-id="${escapeHtml(backup.backup_id)}">Verify</button>
-        <button type="button" class="secondary" data-backup-action="restore" data-backup-id="${escapeHtml(backup.backup_id)}">Request Restore</button>
+  renderList("backups-list", backups.slice(-6), (backup) => {
+    const approvedRestore = [...(summary.recent_approvals || [])].reverse().find(
+      (approval) =>
+        approval.status === "approved" &&
+        approval.request?.action === "restore_backup" &&
+        approval.request?.target === backup.backup_id,
+    );
+    return `
+      <div class="item">
+        <strong>${escapeHtml(backup.backup_id)}</strong>
+        <span>${escapeHtml(backup.actor_id)} / ${escapeHtml(backup.reason)}</span>
+        <span>checksum: ${escapeHtml(backup.backup_checksum || "missing").slice(0, 24)}</span>
+        <span>${escapeHtml(backup.rollback_plan)}</span>
+        <div class="actions">
+          <button type="button" data-backup-action="verify" data-backup-id="${escapeHtml(backup.backup_id)}">Verify</button>
+          <button type="button" class="secondary" data-backup-action="restore" data-backup-id="${escapeHtml(backup.backup_id)}">Request Restore</button>
+          ${
+            approvedRestore
+              ? `<button type="button" data-backup-action="execute" data-backup-id="${escapeHtml(backup.backup_id)}" data-approval-id="${escapeHtml(approvedRestore.approval_id)}">Apply Approved Restore</button>`
+              : ""
+          }
+        </div>
       </div>
-    </div>
-  `);
+    `;
+  });
   renderList("agent-messages-list", agentMessages.slice(-6), (message) => `
     <div class="item">
       <strong>${escapeHtml(message.message_type)} / ${escapeHtml(message.priority)}</strong>
@@ -666,6 +679,27 @@ async function requestBackupRestore(backupId) {
   const klass = result.result === "blocked" ? "danger" : "warn";
   const approvalId = result.approval?.approval_id || "no approval";
   $("backup-result").innerHTML = `<span class="${klass}">${escapeHtml(result.result)}</span> / ${escapeHtml(approvalId)}`;
+  await refresh();
+}
+
+async function executeBackupRestore(backupId, approvalId) {
+  const confirmed = window.confirm(
+    `Apply approved backup ${backupId}? A pre-restore safety checkpoint will be created first.`,
+  );
+  if (!confirmed) {
+    return;
+  }
+  const result = await api(`/backups/${backupId}/restore`, {
+    method: "POST",
+    body: JSON.stringify({
+      approval_id: approvalId,
+      actor_id: "human_root",
+      reason: "Apply approved restore from dashboard.",
+    }),
+  });
+  const klass = result.result === "restored" ? "ok" : "danger";
+  const safetyBackupId = result.safety_backup?.backup_id || "no safety backup";
+  $("backup-result").innerHTML = `<span class="${klass}">${escapeHtml(result.result)}</span> / safety checkpoint: ${escapeHtml(safetyBackupId)}`;
   await refresh();
 }
 
@@ -1041,7 +1075,9 @@ $("backups-list").addEventListener("click", async (event) => {
   }
   button.disabled = true;
   try {
-    if (button.dataset.backupAction === "restore") {
+    if (button.dataset.backupAction === "execute") {
+      await executeBackupRestore(button.dataset.backupId, button.dataset.approvalId);
+    } else if (button.dataset.backupAction === "restore") {
       await requestBackupRestore(button.dataset.backupId);
     } else {
       await verifyBackup(button.dataset.backupId);

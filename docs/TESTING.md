@@ -75,7 +75,7 @@ The suite currently covers:
 - Budget Guard cost recording, over-budget blocking, dashboard summary, API exposure, and SQLite reload
 - Budget Policy update auditing, non-root blocking, dashboard mount points, and SQLite reload
 - Incident creation from blocked actions, API acknowledge/resolve flow, dashboard summary counts, dashboard mount points, audit events, and SQLite reload
-- Backup creation, state snapshot contents, checksum verification, restore approval requests, tamper detection, dashboard mount points, audit events, and SQLite reload
+- Backup creation, state snapshot contents, checksum verification, restore approval requests, approved transactional restore, pre-restore safety checkpoints, approval replay prevention, execution-time tamper detection, dashboard controls, audit events, and SQLite reload
 - Agent communication API routes, dashboard mount points, audit events, and SQLite reload
 - Task handoff API routes, linked messages, dashboard mount points, audit events, and SQLite reload
 - Agent broadcast API routes, filters, dashboard mount points, audit events, and SQLite reload

@@ -10,7 +10,7 @@ The first version focuses on the operating foundation:
 - Model calls go through a gateway that records usage and audit events.
 - Budget guardrails check model calls before usage and cost are recorded.
 - Blocked and high-risk operational failures create incidents for human follow-up.
-- Human Root can create state backups before important changes.
+- Human Root can create verified state backups and apply approval-gated SQLite restores with automatic pre-restore checkpoints.
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
 - Memory and Knowledge Base receive completed work so the system can improve over time.

@@ -52,9 +52,13 @@ class ApiRouteTests(unittest.TestCase):
 
             self.assertEqual(sqlite_schema.status_code, 200)
             self.assertEqual(sqlite_schema.json()["backend"], "sqlite")
-            self.assertEqual(sqlite_schema.json()["schema_version"], 2)
+            self.assertEqual(sqlite_schema.json()["schema_version"], 3)
             self.assertEqual(sqlite_schema.json()["migrations"][0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(sqlite_schema.json()["migrations"][1]["migration_id"], "0002_audit_append_only_guards")
+            self.assertEqual(
+                sqlite_schema.json()["migrations"][2]["migration_id"],
+                "0003_backup_restore_execution_ledger",
+            )
 
     def test_system_integrity_reports_sqlite_guards_and_backup_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

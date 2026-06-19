@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Backups capture the current AI Company OS state before important changes. They provide a stored reference point and manual rollback plan, but they do not automatically mutate live state.
+Backups capture the current AI Company OS state before important changes. Verified snapshots can be restored to SQLite only after a matching high-risk approval from Human Root.
 
 ## Current Snapshot Contents
 
@@ -16,7 +16,8 @@ Backups capture the current AI Company OS state before important changes. They p
 - model usage and cost logs
 - active budget policy
 - incidents
-- Skill and Agent proposals
+- Skill, Agent, improvement, and GitHub absorption proposals
+- strategic goals, Agent communication, handoffs, conflicts, and task reviews
 
 ## API
 
@@ -25,6 +26,7 @@ GET /backups
 POST /backups
 POST /backups/{backup_id}/verify
 POST /backups/{backup_id}/restore-request
+POST /backups/{backup_id}/restore
 ```
 
 `POST /backups` requires a reason and records the actor. It writes a `backup_created` audit event. Created backups include a deterministic SHA-256 checksum over the canonical snapshot payload.
@@ -33,6 +35,10 @@ POST /backups/{backup_id}/restore-request
 
 `POST /backups/{backup_id}/restore-request` verifies backup integrity first. Verified backups create a high-risk `restore_backup` approval request for Human Root review. Mismatched or legacy checksum-missing backups are blocked, audited, and surfaced as incidents.
 
+`POST /backups/{backup_id}/restore` consumes a matching approved restore request. It verifies the checksum again, requires both execution and approval by `human_root`, rejects approval replay, creates an automatic pre-restore checkpoint, and applies the snapshot in one SQLite transaction.
+
 ## Restore Policy
 
-Automatic restore is intentionally disabled in the first implementation. The current restore flow stops at an approval-gated restore request; applying a backup snapshot to live state remains a future high-impact mutation that must preserve audit history and require Human Root approval.
+Restore replaces restorable business state such as tasks, memory, knowledge, evaluations, goals, tools, workflow traces, usage records, proposals, and communication records. It deliberately preserves users, approvals, append-only audit logs, incidents, backups, and the schema migration ledger. Failed integrity checks do not mutate live state and create an audit event plus incident.
+
+Restore execution is supported only with SQLite persistence. In-memory mode can create and inspect snapshots but cannot apply them durably.

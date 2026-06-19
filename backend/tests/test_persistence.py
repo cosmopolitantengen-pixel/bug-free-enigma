@@ -28,13 +28,18 @@ class PersistenceTests(unittest.TestCase):
             store = SQLiteStateStore(db_path)
             reloaded = SQLiteStateStore(db_path)
 
-            self.assertEqual(store.schema_version(), 2)
-            self.assertEqual(reloaded.schema_version(), 2)
-            self.assertEqual(len(reloaded.list_schema_migrations()), 2)
+            self.assertEqual(store.schema_version(), 3)
+            self.assertEqual(reloaded.schema_version(), 3)
+            self.assertEqual(len(reloaded.list_schema_migrations()), 3)
             self.assertEqual(reloaded.list_schema_migrations()[0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(reloaded.list_schema_migrations()[0]["version"], 1)
             self.assertEqual(reloaded.list_schema_migrations()[1]["migration_id"], "0002_audit_append_only_guards")
             self.assertEqual(reloaded.list_schema_migrations()[1]["version"], 2)
+            self.assertEqual(
+                reloaded.list_schema_migrations()[2]["migration_id"],
+                "0003_backup_restore_execution_ledger",
+            )
+            self.assertEqual(reloaded.list_schema_migrations()[2]["version"], 3)
 
             with closing(sqlite3.connect(db_path)) as connection:
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -51,10 +56,11 @@ class PersistenceTests(unittest.TestCase):
                     ).fetchall()
                 }
 
-            self.assertEqual(user_version, 2)
+            self.assertEqual(user_version, 3)
             self.assertIn("schema_migrations", table_names)
             self.assertIn("audit_logs", table_names)
             self.assertIn("workflow_runs", table_names)
+            self.assertIn("backup_restore_executions", table_names)
             self.assertIn("audit_logs_no_update", trigger_names)
             self.assertIn("audit_logs_no_delete", trigger_names)
 
@@ -201,6 +207,140 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(incidents.json()), 1)
             self.assertEqual(audit_logs.json()[-1]["event_type"], "backup_restore_request_blocked")
             self.assertEqual(audit_logs.json()[-1]["result"], "checksum_mismatch")
+
+    def test_approved_backup_restore_replaces_business_state_and_preserves_control_history(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "restore.db")
+            client = TestClient(create_app(sqlite_path=db_path))
+            original_task = client.post(
+                "/tasks",
+                json={"title": "Snapshot task", "description": "Keep this task after restore."},
+            ).json()
+            backup = client.post(
+                "/backups",
+                json={"actor_id": "human_root", "reason": "Restore target."},
+            ).json()
+            later_task = client.post(
+                "/tasks",
+                json={"title": "Later task", "description": "Remove this task during restore."},
+            ).json()
+            client.post(f"/tasks/{later_task['task_id']}/run")
+            audit_count_before_restore = len(client.get("/audit-logs").json())
+
+            requested = client.post(
+                f"/backups/{backup['backup_id']}/restore-request",
+                json={"actor_id": "human_root", "reason": "Return to the verified checkpoint."},
+            ).json()
+            approval_id = requested["approval"]["approval_id"]
+            approved = client.post(
+                f"/approvals/{approval_id}/approve",
+                json={"decided_by": "human_root", "note": "Approved for controlled restore."},
+            )
+            restored = client.post(
+                f"/backups/{backup['backup_id']}/restore",
+                json={
+                    "approval_id": approval_id,
+                    "actor_id": "human_root",
+                    "reason": "Apply the approved checkpoint.",
+                },
+            )
+
+            self.assertEqual(approved.status_code, 200)
+            self.assertEqual(restored.status_code, 200)
+            self.assertEqual(restored.json()["result"], "restored")
+            self.assertEqual(restored.json()["restored_counts"]["tasks"], 1)
+            self.assertEqual(restored.json()["restored_counts"]["memory"], 0)
+            self.assertEqual(restored.json()["verification"]["status"], "verified")
+            self.assertIn(later_task["task_id"], [
+                task["task_id"]
+                for task in restored.json()["safety_backup"]["snapshot"]["tasks"]
+            ])
+
+            reloaded = TestClient(create_app(sqlite_path=db_path))
+            tasks = reloaded.get("/tasks").json()
+            approvals = reloaded.get("/approvals").json()
+            audit_logs = reloaded.get("/audit-logs").json()
+            backups = reloaded.get("/backups").json()
+
+            self.assertEqual([task["task_id"] for task in tasks], [original_task["task_id"]])
+            self.assertEqual(reloaded.get("/memory").json(), [])
+            self.assertEqual(reloaded.get("/knowledge").json(), [])
+            self.assertEqual(len(backups), 2)
+            self.assertIn(approval_id, [approval["approval_id"] for approval in approvals])
+            self.assertGreater(len(audit_logs), audit_count_before_restore)
+            self.assertEqual(audit_logs[-1]["event_type"], "backup_restored")
+            self.assertEqual(audit_logs[-1]["input_ref"], approval_id)
+
+            with closing(sqlite3.connect(db_path)) as connection:
+                restore_ledger = connection.execute(
+                    "SELECT approval_id, backup_id, safety_backup_id "
+                    "FROM backup_restore_executions"
+                ).fetchall()
+            self.assertEqual(len(restore_ledger), 1)
+            self.assertEqual(restore_ledger[0][0], approval_id)
+            self.assertEqual(restore_ledger[0][1], backup["backup_id"])
+            self.assertEqual(
+                restore_ledger[0][2],
+                restored.json()["safety_backup"]["backup_id"],
+            )
+
+            replay = reloaded.post(
+                f"/backups/{backup['backup_id']}/restore",
+                json={
+                    "approval_id": approval_id,
+                    "actor_id": "human_root",
+                    "reason": "Do not allow approval replay.",
+                },
+            )
+            self.assertEqual(replay.status_code, 400)
+            self.assertIn("already been used", replay.json()["detail"])
+
+    def test_backup_restore_rechecks_integrity_after_approval(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "restore_recheck.db")
+            client = TestClient(create_app(sqlite_path=db_path))
+            client.post("/tasks", json={"title": "Protected", "description": "Remain live."})
+            backup = client.post(
+                "/backups",
+                json={"actor_id": "human_root", "reason": "Integrity target."},
+            ).json()
+            requested = client.post(
+                f"/backups/{backup['backup_id']}/restore-request",
+                json={"actor_id": "human_root", "reason": "Request before tampering."},
+            ).json()
+            approval_id = requested["approval"]["approval_id"]
+            client.post(
+                f"/approvals/{approval_id}/approve",
+                json={"decided_by": "human_root", "note": "Approved before recheck."},
+            )
+
+            tampered_payload = dict(backup)
+            tampered_payload["snapshot"] = dict(tampered_payload["snapshot"])
+            tampered_payload["snapshot"]["tasks"] = []
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute(
+                    "UPDATE backups SET payload_json = ? WHERE backup_id = ?",
+                    (json.dumps(tampered_payload, ensure_ascii=False, sort_keys=True), backup["backup_id"]),
+                )
+                connection.commit()
+
+            reloaded = TestClient(create_app(sqlite_path=db_path))
+            blocked = reloaded.post(
+                f"/backups/{backup['backup_id']}/restore",
+                json={
+                    "approval_id": approval_id,
+                    "actor_id": "human_root",
+                    "reason": "Execution must recheck integrity.",
+                },
+            )
+
+            self.assertEqual(blocked.status_code, 200)
+            self.assertEqual(blocked.json()["result"], "blocked")
+            self.assertEqual(blocked.json()["verification"]["status"], "checksum_mismatch")
+            self.assertIsNone(blocked.json()["safety_backup"])
+            self.assertEqual(len(reloaded.get("/tasks").json()), 1)
+            self.assertEqual(reloaded.get("/audit-logs").json()[-1]["event_type"], "backup_restore_execution_blocked")
+            self.assertEqual(len(reloaded.get("/incidents").json()), 1)
 
     def test_agent_communication_persists_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:

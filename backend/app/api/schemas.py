@@ -137,6 +137,12 @@ class BackupRestoreRequest(BaseModel):
     reason: str
 
 
+class BackupRestoreExecuteRequest(BaseModel):
+    approval_id: str
+    actor_id: str = "human_root"
+    reason: str
+
+
 class AgentMessageCreateRequest(BaseModel):
     from_agent: str
     to_agent: str

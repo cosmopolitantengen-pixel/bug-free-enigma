@@ -84,6 +84,7 @@ GET /backups
 POST /backups
 POST /backups/{id}/verify
 POST /backups/{id}/restore-request
+POST /backups/{id}/restore
 
 GET /agent-messages
 POST /agent-messages
@@ -195,6 +196,7 @@ Current implemented routes include:
 - `POST /backups`
 - `POST /backups/{backup_id}/verify`
 - `POST /backups/{backup_id}/restore-request`
+- `POST /backups/{backup_id}/restore`
 - `GET /agent-messages`
 - `POST /agent-messages`
 - `GET /agent-meetings`
@@ -283,7 +285,7 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 
 `GET /incidents` returns blocked or operationally risky events that need follow-up. Blocked approval requests, blocked Tool Runs, blocked Workflow tasks, and over-budget model calls create incidents. `POST /incidents/{incident_id}/acknowledge` records who acknowledged the issue. `POST /incidents/{incident_id}/resolve` closes the incident with an optional resolution note. Incident updates are audited.
 
-`POST /backups` creates a state snapshot with a manual rollback plan and deterministic snapshot checksum, then writes a `backup_created` audit event. `GET /backups` lists stored backups. `POST /backups/{backup_id}/verify` recomputes the snapshot checksum, reports verified/mismatched/missing-checksum status, and writes a `backup_verified` audit event. `POST /backups/{backup_id}/restore-request` creates a high-risk restore approval only when checksum verification passes; failed integrity checks are blocked, audited, and incidented. Automatic restore is intentionally not enabled in the first implementation.
+`POST /backups` creates a state snapshot with a controlled rollback plan and deterministic snapshot checksum, then writes a `backup_created` audit event. `GET /backups` lists stored backups. `POST /backups/{backup_id}/verify` recomputes the snapshot checksum, reports verified/mismatched/missing-checksum status, and writes a `backup_verified` audit event. `POST /backups/{backup_id}/restore-request` creates a high-risk restore approval only when checksum verification passes; failed integrity checks are blocked, audited, and incidented. `POST /backups/{backup_id}/restore` applies a verified snapshot to SQLite after a matching Human Root approval, creates a pre-restore safety checkpoint, rejects approval replay, and preserves users, approvals, append-only audit history, incidents, backups, and migrations.
 
 `POST /agent-messages` stores an Agent-to-Agent message after validating both Agents exist and writes an `agent_message_sent` audit event. `GET /agent-messages` lists messages and can filter by `agent_id` or `task_id`.
 

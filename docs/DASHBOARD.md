@@ -49,6 +49,7 @@ POST /incidents/{incident_id}/resolve
 POST /backups
 POST /backups/{backup_id}/verify
 POST /backups/{backup_id}/restore-request
+POST /backups/{backup_id}/restore
 POST /agent-messages
 POST /agent-meetings
 POST /tasks/{task_id}/handoff
@@ -93,7 +94,7 @@ POST /agents/proposals/{proposal_id}/register
 - View budget usage and recent cost logs.
 - Update the active model budget policy from Settings as Human Root.
 - View, acknowledge, and resolve operational incidents.
-- Create, view, verify checksum integrity, and request Human Root restore approval for state backups before important changes.
+- Create, view, verify checksum integrity, request Human Root restore approval, and apply an approved SQLite restore with an automatic safety checkpoint.
 - Send Agent messages and record Agent coordination meetings.
 - Record auditable task handoffs with linked Agent messages.
 - Broadcast internal events to multiple Agents and view recent broadcasts.

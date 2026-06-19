@@ -59,7 +59,7 @@ Current status:
 - Human Root can update the active Budget Policy through API and dashboard settings.
 - Incident Management records blocked approvals, blocked tool runs, blocked workflow tasks, and blocked model calls.
 - Incidents can be acknowledged and resolved from the API and static dashboard.
-- Human Root can create persisted state backups with manual rollback plans.
+- Human Root can create persisted state backups with checksum verification and controlled rollback plans.
 - Agent messages and meetings are persisted, audited, included in backups, and visible in the dashboard.
 - Task handoffs validate Agent permission/risk, create linked handoff messages, persist to SQLite, and appear in the dashboard.
 - Agent broadcasts validate Agent permission/risk, persist to SQLite, and appear in the dashboard.
@@ -74,7 +74,7 @@ Current status:
 - SQLite now records a baseline schema migration ledger and exposes database schema status through API and dashboard.
 - SQLite audit logs are guarded by append-only triggers that reject direct update and delete attempts.
 - Backups include deterministic snapshot checksums and an auditable verification endpoint/dashboard action.
-- Backup restore requests require checksum verification and route verified restores through high-risk approval without mutating live state.
+- Backup restore requests require checksum verification; approved SQLite restores recheck integrity, create a pre-restore checkpoint, replace business state transactionally, and preserve control-plane history.
 - System integrity checks expose persistence, schema, audit guard, backup, incident, approval, and budget status through API and dashboard.
 - Unit and API tests cover the current closed loop.
 

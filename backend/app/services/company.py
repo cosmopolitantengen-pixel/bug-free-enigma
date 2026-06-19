@@ -12,7 +12,7 @@ from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, TaskStatu
 from app.core.models import ActionRequest, AuditEvent, KnowledgeDoc, MemoryRecord, Task, utc_now
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.observability import build_structured_logs
-from app.persistence.sqlite_store import SQLiteStateStore
+from app.persistence.sqlite_store import SQLITE_SCHEMA_VERSION, SQLiteStateStore
 from app.services.serializers import to_plain
 from app.tools.adapters import ToolAdapterContext, ToolAdapterError, execute_tool_adapter
 
@@ -898,7 +898,7 @@ class CompanyApplicationService:
                 reason=reason.strip(),
                 actor_id=actor_id,
                 snapshot=snapshot,
-                rollback_plan="Manual restore from stored snapshot after Human Root approval. Automatic restore is not enabled in V1.",
+                rollback_plan="Restore through checksum verification, Human Root approval, and an automatic pre-restore checkpoint.",
                 backup_checksum=self._backup_checksum(snapshot),
             )
         )
@@ -994,6 +994,110 @@ class CompanyApplicationService:
             "permission_decision": approval["permission_decision"],
             "permission_reason": approval["permission_reason"],
             "incident": approval["incident"],
+        }
+
+    def execute_backup_restore(
+        self,
+        backup_id: str,
+        approval_id: str,
+        actor_id: str,
+        reason: str,
+    ) -> dict:
+        if self.persistence is None:
+            raise ValueError("backup restore execution requires SQLite persistence")
+        if actor_id != "human_root":
+            raise ValueError("only human_root can execute a backup restore")
+        if not reason.strip():
+            raise ValueError("restore execution reason is required")
+
+        backup = self.company_os.backups.get(backup_id)
+        verification = self._backup_integrity_result(backup)
+        if not verification["verified"]:
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type="backup_restore_execution_blocked",
+                    actor_id=actor_id,
+                    action="restore_backup",
+                    task_id=None,
+                    risk_level=RiskLevel.HIGH,
+                    approval_status=ApprovalStatus.BLOCKED,
+                    result=verification["status"],
+                    input_ref=approval_id,
+                    output_ref=backup.backup_id,
+                    error=f"Backup integrity status: {verification['status']}",
+                )
+            )
+            incident = self._report_incident(
+                title="Backup restore execution blocked",
+                description=f"Backup {backup.backup_id} failed integrity verification during restore execution.",
+                source_type="backup",
+                source_id=backup.backup_id,
+                risk_level=RiskLevel.HIGH,
+                actor_id=actor_id,
+                recommendation="Do not restore this backup; inspect storage integrity and use a verified checkpoint.",
+            )
+            self.sync()
+            return {
+                "backup": to_plain(backup),
+                "verification": verification,
+                "approval": None,
+                "safety_backup": None,
+                "restored_counts": None,
+                "result": "blocked",
+                "incident": to_plain(incident),
+            }
+
+        approval = self.company_os.approvals.get(approval_id)
+        if approval.request.action != "restore_backup" or approval.request.target != backup_id:
+            raise ValueError("approval does not authorize this backup restore")
+        if approval.status != ApprovalStatus.APPROVED:
+            raise ValueError("backup restore approval is not approved")
+        if approval.decided_by != "human_root":
+            raise ValueError("backup restore must be approved by human_root")
+        if any(
+            event.event_type == "backup_restored" and event.input_ref == approval_id
+            for event in self.company_os.audit.list()
+        ):
+            raise ValueError("backup restore approval has already been used")
+
+        backup_payload = to_plain(backup)
+        approval_payload = to_plain(approval)
+        safety_backup = self.create_backup(
+            actor_id,
+            f"Automatic pre-restore checkpoint before applying {backup_id}: {reason.strip()}",
+        )
+        restored_counts = self.persistence.restore_snapshot(
+            backup.snapshot,
+            approval_id=approval_id,
+            backup_id=backup_id,
+            actor_id=actor_id,
+            safety_backup_id=safety_backup["backup_id"],
+        )
+
+        # Reload the committed snapshot while retaining users, approvals, audit, incidents, and backups.
+        self.__post_init__()
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="backup_restored",
+                actor_id=actor_id,
+                action="restore_backup",
+                task_id=None,
+                risk_level=RiskLevel.HIGH,
+                approval_status=ApprovalStatus.APPROVED,
+                result="restored",
+                input_ref=approval_id,
+                output_ref=backup_id,
+            )
+        )
+        self.sync()
+        return {
+            "backup": backup_payload,
+            "verification": verification,
+            "approval": approval_payload,
+            "safety_backup": safety_backup,
+            "restored_counts": restored_counts,
+            "result": "restored",
+            "incident": None,
         }
 
     def acknowledge_incident(self, incident_id: str, actor_id: str, note: str | None = None) -> dict:
@@ -2337,7 +2441,7 @@ class CompanyApplicationService:
                 "message": "Schema version check is skipped for in-memory state.",
             }
         version = self.persistence.schema_version()
-        expected = 2
+        expected = SQLITE_SCHEMA_VERSION
         return {
             "name": "schema_version",
             "status": "ok" if version == expected else "critical",
