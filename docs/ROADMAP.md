@@ -1,0 +1,142 @@
+# ROADMAP
+
+## Vision
+
+Build AI Company OS as a controllable, extensible AI company operating system. The system should coordinate Agents, Skills, Workflows, Tools, Memory, Knowledge Base, Permission, Approval, Risk, Audit, and Evaluation under Human Root control.
+
+## Phase 0: Foundation
+
+- Split product requirements into executable module docs.
+- Build a deterministic backend core that does not depend on live model calls.
+- Prove safety invariants with tests.
+- Keep all high-risk and forbidden behavior blocked or routed through approval.
+
+## Phase 1: Minimal Closed Loop
+
+The first runnable loop is:
+
+1. User creates a strategic goal or task.
+2. CEO Agent plans the task.
+3. Project Manager Agent assigns execution.
+4. Document Agent calls a registered document Skill.
+5. Risk Agent checks the planned action.
+6. Quality Agent checks the output.
+7. Approval Center handles medium/high risk actions.
+8. Audit Log records every key action.
+9. Memory and Knowledge Base store the result.
+10. Tool requests run through permission, risk, approval, and audit controls.
+11. Workflow Run and Workflow Step traces record the execution path.
+12. Model calls go through a gateway with usage and audit records.
+13. Budget guardrails check model calls and record cost logs.
+14. Blocked operational events create incidents for human follow-up.
+15. Agents can leave auditable messages, coordination meeting records, task handoffs, internal event broadcasts, and conflict arbitration records.
+16. Task reviews turn retrospective notes into review memory, knowledge docs, and audit events.
+17. Review-driven improvement proposals route lessons through approval, sandbox checks, and registered knowledge.
+18. Strategic goals track operating progress and link tasks, reviews, and improvements to the higher-level objective.
+19. Dashboard can read task, goal, agent, skill, tool, workflow, model, budget, incident, communication, review, improvement, approval, risk, and audit state.
+
+Current status:
+
+- Core domain models exist.
+- Default Agent and Skill registries exist.
+- Permission, risk, approval, audit, memory, and knowledge services exist.
+- Document generation Workflow runs to completion.
+- FastAPI route layer exposes the first required endpoints.
+- Local auth uses persisted users with PBKDF2 password hashes.
+- Static dashboard shell exists and consumes the backend dashboard API.
+- Approval request flow exists for Permission + Risk + Approval + Audit.
+- Approval decisions are audited and can be made from the dashboard shell.
+- Missing Skill and Agent flows create persisted proposals linked to approval.
+- Proposals must pass deterministic sandbox checks before approved proposals can be registered as formal Skills or Agents.
+- Evaluation records are written for the document workflow, quality agent, and document skill.
+- Tool registry and controlled Tool Run request flow exist.
+- Tool Runs are persisted and visible in the dashboard.
+- Approval-gated Tool Runs can be explicitly completed after Human Root approval and write separate completion audit events.
+- Workflow Runs and Workflow Steps are persisted and visible in the dashboard.
+- Approval-gated document Workflow runs can resume after Human Root approval and continue to completion.
+- Model Gateway records deterministic local model usage and audit events.
+- Budget Guard blocks over-budget model calls and persists cost logs.
+- Human Root can update the active Budget Policy through API and dashboard settings.
+- Incident Management records blocked approvals, blocked tool runs, blocked workflow tasks, and blocked model calls.
+- Incidents can be acknowledged and resolved from the API and static dashboard.
+- Human Root can create persisted state backups with manual rollback plans.
+- Agent messages and meetings are persisted, audited, included in backups, and visible in the dashboard.
+- Task handoffs validate Agent permission/risk, create linked handoff messages, persist to SQLite, and appear in the dashboard.
+- Agent broadcasts validate Agent permission/risk, persist to SQLite, and appear in the dashboard.
+- Agent conflicts can be opened, filtered, resolved, audited, persisted, and shown in the dashboard.
+- Task reviews persist to SQLite, write review memory and knowledge docs, audit the retrospective, and appear in the dashboard.
+- Review-driven improvement proposals persist to SQLite, require approval and sandbox checks, register as knowledge, and appear in the dashboard.
+- Strategic goals persist to SQLite, track progress, link tasks/reviews/improvements, audit changes, and appear in the dashboard.
+- Low-risk internal Tool Runs now execute deterministic adapters for task state, knowledge docs, audit reads, aggregate database state, and safe workspace file reads instead of returning only simulated text.
+- Workspace file reads include deterministic external-content inspection so prompt-injection-like text is flagged as untrusted source data.
+- GitHub absorption analysis accepts user-supplied repo metadata, applies external-content/license/security checks, requires approval and sandbox, and registers safe analyses as Knowledge only.
+- Structured JSON operational logs are exposed as a read-only view over audit, workflow, tool, model, cost, and incident records.
+- SQLite now records a baseline schema migration ledger and exposes database schema status through API and dashboard.
+- SQLite audit logs are guarded by append-only triggers that reject direct update and delete attempts.
+- Backups include deterministic snapshot checksums and an auditable verification endpoint/dashboard action.
+- Backup restore requests require checksum verification and route verified restores through high-risk approval without mutating live state.
+- System integrity checks expose persistence, schema, audit guard, backup, incident, approval, and budget status through API and dashboard.
+- Unit and API tests cover the current closed loop.
+
+## Phase 2: API and Persistence
+
+- Add FastAPI routes for the required API surface.
+- Add database models and migrations.
+- Start with SQLite for local development, then support PostgreSQL.
+- Add append-only audit storage.
+- Add structured JSON logs.
+
+## Phase 3: Dashboard
+
+- Build a Next.js TypeScript dashboard.
+- Pages: Dashboard, Tasks, Agents, Skills, Workflows, Approvals, Risks, Audit Logs, Memory, Knowledge Base, Settings.
+- The first dashboard is operational, not decorative.
+
+Current interim implementation:
+
+- Static dashboard shell in `apps/web_dashboard/`
+- Backend CORS enabled for local dashboard calls
+- Dashboard summary API includes operational counts and recent records
+- Dashboard Settings can update the active model budget policy
+- Dashboard includes an incident panel for open follow-up work
+- Dashboard proposal cards can run sandbox checks before registration
+- Dashboard includes a backup panel for manual checkpoints
+- Dashboard includes Agent communication forms and recent message/meeting lists
+- Dashboard includes task handoff controls and recent handoff history
+- Dashboard includes Agent broadcast controls and recent broadcast history
+- Dashboard includes conflict opening/resolution controls and recent conflict history
+- Dashboard includes a task review form and recent review history
+- Dashboard includes review-driven improvement proposal controls
+- Dashboard includes strategic goal creation, progress updates, and record linking
+
+## Phase 4: Controlled Evolution
+
+- Implement Skill Missing Handler.
+- Implement Agent Missing Handler.
+- Implement Skill Factory and Agent Factory as proposal generators.
+- Require sandbox checks, risk checks, and approval before enabling new formal Agents or Skills.
+
+Current interim implementation:
+
+- Missing Skill and Agent requests create proposal records.
+- Proposal sandbox checks verify basic permission/risk boundaries before registration.
+- Registration is blocked until both approval and sandbox checks pass.
+- Review-driven improvement proposals follow the same approval and sandbox pattern, then register as knowledge records instead of mutating runtime behavior directly.
+
+## Phase 5: Tool and Model Expansion
+
+- Current first Tool layer: task manager, knowledge base, audit read, external API, and code execution tool definitions.
+- Safe internal adapters exist for task manager, knowledge base, audit read, database read, and workspace-only filesystem read tools.
+- Dangerous tool adapters are disabled by default and only simulated in the first implementation.
+- Replace deterministic Model Gateway with real provider adapters only after budget, privacy, and approval gates are covered.
+- Add file, document, GitHub, and database tools.
+- Add browser and computer-control adapters only behind strict permission and approval gates.
+- Expand GitHub absorber from metadata-only analysis toward connector-backed ingestion after license, security, sandbox, and human approval checks remain covered.
+
+## Non-Goals for V1
+
+- No automatic money movement.
+- No deleting audit logs.
+- No disabling risk control.
+- No platform abuse, phishing, credential theft, captcha bypass, attack tooling, malicious scraping, or spam automation.
+- No complex billing or CRM before the operating foundation is stable.

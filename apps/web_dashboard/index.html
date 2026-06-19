@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Company OS Dashboard</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <span class="brand-mark">OS</span>
+          <div>
+            <strong>AI Company OS</strong>
+            <small>Human Root Console</small>
+          </div>
+        </div>
+        <nav>
+          <a href="#dashboard" class="active">Dashboard</a>
+          <a href="#goals">Goals</a>
+          <a href="#tasks">Tasks</a>
+          <a href="#workflows">Workflows</a>
+          <a href="#agents">Agents</a>
+          <a href="#skills">Skills</a>
+          <a href="#tools">Tools</a>
+          <a href="#models">Models</a>
+          <a href="#communication">Communication</a>
+          <a href="#incidents">Incidents</a>
+          <a href="#backups">Backups</a>
+          <a href="#approvals">Approvals</a>
+          <a href="#risks">Risks</a>
+          <a href="#audit">Audit Logs</a>
+          <a href="#structured-logs">Structured Logs</a>
+          <a href="#database">Database</a>
+          <a href="#reviews">Reviews</a>
+          <a href="#memory">Memory</a>
+          <a href="#knowledge">Knowledge</a>
+          <a href="#settings">Settings</a>
+        </nav>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <h1>Dashboard</h1>
+            <p>Control tasks, approvals, risk, audit, memory, and knowledge from one operational view.</p>
+          </div>
+          <form id="api-form" class="api-form">
+            <label for="api-base">API Base</label>
+            <input id="api-base" name="api-base" value="http://127.0.0.1:8000" />
+            <button type="submit">Refresh</button>
+          </form>
+        </header>
+
+        <section class="status-row" aria-label="System metrics">
+          <div class="metric">
+            <span>System</span>
+            <strong id="system-health">--</strong>
+          </div>
+          <div class="metric">
+            <span>Integrity</span>
+            <strong id="integrity-status">--</strong>
+          </div>
+          <div class="metric">
+            <span>Tasks</span>
+            <strong id="task-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Strategic Goals</span>
+            <strong id="strategic-goal-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Goal Progress</span>
+            <strong id="goal-progress">--</strong>
+          </div>
+          <div class="metric">
+            <span>Pending Approvals</span>
+            <strong id="approval-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Recent Risks</span>
+            <strong id="risk-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Audit Logs</span>
+            <strong id="audit-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Structured Logs</span>
+            <strong id="structured-log-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>DB Schema</span>
+            <strong id="db-schema-version">--</strong>
+          </div>
+          <div class="metric">
+            <span>Tools</span>
+            <strong id="tool-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Workflow Runs</span>
+            <strong id="workflow-run-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Model Tokens</span>
+            <strong id="model-token-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Budget Used</span>
+            <strong id="budget-used-cost">0</strong>
+          </div>
+          <div class="metric">
+            <span>Open Incidents</span>
+            <strong id="open-incident-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Messages</span>
+            <strong id="agent-message-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Handoffs</span>
+            <strong id="task-handoff-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Broadcasts</span>
+            <strong id="agent-broadcast-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Open Conflicts</span>
+            <strong id="open-agent-conflict-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Backups</span>
+            <strong id="backup-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Avg Score</span>
+            <strong id="evaluation-score">--</strong>
+          </div>
+          <div class="metric">
+            <span>Reviews</span>
+            <strong id="task-review-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Improvements</span>
+            <strong id="improvement-proposal-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>GitHub Absorptions</span>
+            <strong id="github-absorption-count">0</strong>
+          </div>
+        </section>
+
+        <section class="workspace">
+          <section id="tasks" class="panel task-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Create Task</h2>
+                <p>Run the first document workflow through planning, risk, quality, audit, memory, and knowledge.</p>
+              </div>
+            </div>
+            <form id="task-form" class="task-form">
+              <label>
+                Title
+                <input id="task-title" value="Internal operating note" />
+              </label>
+              <label>
+                Description
+                <textarea id="task-description">Create a safe internal operating note for AI Company OS.</textarea>
+              </label>
+              <button type="submit">Create and Run</button>
+            </form>
+            <div id="task-result" class="result" role="status"></div>
+          </section>
+
+          <section id="goals" class="panel goals-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Strategic Goals</h2>
+                <p>Create operating goals and link tasks, reviews, and improvements back to them.</p>
+              </div>
+              <span id="active-strategic-goal-count" class="pill">0</span>
+            </div>
+            <form id="goal-form" class="task-form">
+              <label>
+                Title
+                <input id="goal-title" value="Ship a controllable AI Company OS core" />
+              </label>
+              <label>
+                Owner Agent
+                <input id="goal-owner" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Target Metric
+                <input id="goal-target-metric" value="closed_loop_modules" />
+              </label>
+              <label>
+                Target Value
+                <input id="goal-target-value" type="number" min="1" step="1" value="12" />
+              </label>
+              <label>
+                Description
+                <textarea id="goal-description">Build controllable modules for task execution, safety, learning, and operations.</textarea>
+              </label>
+              <button type="submit">Create Goal</button>
+            </form>
+            <form id="goal-progress-form" class="task-form">
+              <label>
+                Goal ID
+                <input id="goal-progress-id" placeholder="goal_..." />
+              </label>
+              <label>
+                Current Value
+                <input id="goal-current-value" type="number" min="0" step="1" value="1" />
+              </label>
+              <label>
+                Status
+                <select id="goal-status">
+                  <option value="">Auto</option>
+                  <option value="active">active</option>
+                  <option value="at_risk">at_risk</option>
+                  <option value="completed">completed</option>
+                  <option value="paused">paused</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+              </label>
+              <label>
+                Note
+                <textarea id="goal-progress-note">Updated after completing a module.</textarea>
+              </label>
+              <button type="submit">Update Progress</button>
+            </form>
+            <form id="goal-link-form" class="task-form">
+              <label>
+                Goal ID
+                <input id="goal-link-id" placeholder="goal_..." />
+              </label>
+              <label>
+                Link Type
+                <select id="goal-link-type">
+                  <option value="task">task</option>
+                  <option value="review">review</option>
+                  <option value="improvement">improvement</option>
+                </select>
+              </label>
+              <label>
+                Record ID
+                <input id="goal-link-record-id" placeholder="task_... / task_review_... / improvement_proposal_..." />
+              </label>
+              <button type="submit">Link Record</button>
+            </form>
+            <div id="goal-result" class="result" role="status"></div>
+            <div id="goals-list" class="list"></div>
+          </section>
+
+          <section id="approval-request" class="panel approval-request-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Request Approval</h2>
+                <p>Route a medium or high-risk action through Permission, Risk, Approval, and Audit.</p>
+              </div>
+            </div>
+            <form id="approval-request-form" class="task-form">
+              <label>
+                Action
+                <select id="approval-action">
+                  <option value="prepare_external_message">prepare_external_message</option>
+                  <option value="publish_external_content">publish_external_content</option>
+                  <option value="execute_code">execute_code</option>
+                  <option value="disable_risk_system">disable_risk_system</option>
+                </select>
+              </label>
+              <label>
+                Actor
+                <input id="approval-actor" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Permission Level
+                <select id="approval-permission">
+                  <option value="L3_EXTERNAL_PREPARE">L3_EXTERNAL_PREPARE</option>
+                  <option value="L4_HIGH_RISK">L4_HIGH_RISK</option>
+                  <option value="L5_ROOT">L5_ROOT</option>
+                </select>
+              </label>
+              <label>
+                Reason
+                <textarea id="approval-reason">Prepare an external update for Human Root review.</textarea>
+              </label>
+              <button type="submit">Submit for Review</button>
+            </form>
+            <div id="approval-request-result" class="result" role="status"></div>
+          </section>
+
+          <section id="tool-run" class="panel tool-run-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Request Tool Run</h2>
+                <p>Exercise controlled tool access through Agent permission, risk, approval, audit, and persistence.</p>
+              </div>
+            </div>
+            <form id="tool-run-form" class="task-form">
+              <label>
+                Tool
+                <select id="tool-run-tool">
+                  <option value="task_manager_tool">task_manager_tool</option>
+                  <option value="knowledge_base_tool">knowledge_base_tool</option>
+                  <option value="audit_read_tool">audit_read_tool</option>
+                  <option value="external_api_tool">external_api_tool</option>
+                  <option value="code_execution_tool">code_execution_tool</option>
+                </select>
+              </label>
+              <label>
+                Actor
+                <input id="tool-run-actor" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Reason
+                <textarea id="tool-run-reason">Inspect task state for an internal workflow step.</textarea>
+              </label>
+              <button type="submit">Request Tool</button>
+            </form>
+            <div id="tool-run-result" class="result" role="status"></div>
+          </section>
+
+          <section id="model-generate" class="panel model-panel">
+            <div class="panel-header">
+              <div>
+                <h2>Model Gateway</h2>
+                <p>Run deterministic model calls through one gateway with usage and audit records.</p>
+              </div>
+            </div>
+            <form id="model-form" class="task-form">
+              <label>
+                Actor
+                <input id="model-actor" value="document_agent_v1" />
+              </label>
+              <label>
+                Purpose
+                <input id="model-purpose" value="manual_generation" />
+              </label>
+              <label>
+                Prompt
+                <textarea id="model-prompt">Summarize the AI Company OS operating model.</textarea>
+              </label>
+              <button type="submit">Generate</button>
+            </form>
+            <div id="model-result" class="result" role="status"></div>
+          </section>
+
+          <section id="dashboard" class="panel">
+            <div class="panel-header">
+              <h2>Operating Snapshot</h2>
+            </div>
+            <div class="split">
+              <div>
+                <h3>Task States</h3>
+                <ul id="task-states" class="compact-list"></ul>
+              </div>
+              <div>
+                <h3>Skill Risk</h3>
+                <ul id="skill-risks" class="compact-list"></ul>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="grid">
+          <section class="panel" id="workflows">
+            <div class="panel-header">
+              <h2>Workflow Runs</h2>
+              <span id="workflow-step-count" class="pill">0</span>
+            </div>
+            <div id="workflow-runs-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="workflow-steps">
+            <div class="panel-header">
+              <h2>Recent Workflow Steps</h2>
+            </div>
+            <div id="workflow-steps-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="agents">
+            <div class="panel-header">
+              <h2>Agents</h2>
+              <span id="agent-count" class="pill">0</span>
+            </div>
+            <div id="agents-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="skills">
+            <div class="panel-header">
+              <h2>Skills</h2>
+              <span id="skill-count" class="pill">0</span>
+            </div>
+            <div id="skills-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="tools">
+            <div class="panel-header">
+              <h2>Tools</h2>
+              <span id="tool-run-count" class="pill">0</span>
+            </div>
+            <div id="tools-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="approvals">
+            <div class="panel-header">
+              <h2>Approvals</h2>
+            </div>
+            <div id="approvals-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="risks">
+            <div class="panel-header">
+              <h2>Risks</h2>
+            </div>
+            <div id="risks-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="proposals">
+            <div class="panel-header">
+              <h2>Capability Proposals</h2>
+            </div>
+            <div id="proposals-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="github-absorber">
+            <div class="panel-header">
+              <div>
+                <h2>GitHub Absorber</h2>
+                <p>Analyze user-supplied repository metadata before any controlled absorption.</p>
+              </div>
+            </div>
+            <form id="github-absorption-form" class="task-form">
+              <label>
+                Repo URL
+                <input id="github-repo-url" value="https://github.com/example/safe-docs" />
+              </label>
+              <label>
+                Requested By
+                <input id="github-requested-by" value="ceo_agent_v1" />
+              </label>
+              <label>
+                License
+                <input id="github-license" value="MIT" />
+              </label>
+              <label>
+                Maintenance
+                <input id="github-maintenance" value="active" />
+              </label>
+              <label>
+                README
+                <textarea id="github-readme"># Safe Docs
+
+A documentation and API workflow helper with tests.</textarea>
+              </label>
+              <button type="submit">Analyze Repository</button>
+            </form>
+            <div id="github-absorption-result" class="result" role="status"></div>
+            <div id="github-absorptions-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="tool-runs">
+            <div class="panel-header">
+              <h2>Tool Runs</h2>
+            </div>
+            <div id="tool-runs-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="models">
+            <div class="panel-header">
+              <h2>Model Usage</h2>
+              <span id="model-usage-count" class="pill">0</span>
+            </div>
+            <div id="model-usage-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="budget">
+            <div class="panel-header">
+              <h2>Budget & Cost</h2>
+              <span id="cost-log-count" class="pill">0</span>
+            </div>
+            <div id="budget-summary" class="list"></div>
+            <div id="cost-logs-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="incidents">
+            <div class="panel-header">
+              <h2>Incidents</h2>
+              <span id="incident-count" class="pill">0</span>
+            </div>
+            <div id="incidents-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="communication">
+            <div class="panel-header">
+              <div>
+                <h2>Communication</h2>
+                <p>Send Agent messages and record coordination meetings.</p>
+              </div>
+              <span id="agent-meeting-count" class="pill">0</span>
+            </div>
+            <form id="agent-broadcast-form" class="task-form">
+              <label>
+                From
+                <input id="agent-broadcast-from" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Audience
+                <input id="agent-broadcast-audience" value="project_manager_agent_v1,document_agent_v1,risk_agent_v1,quality_agent_v1" />
+              </label>
+              <label>
+                Event Type
+                <input id="agent-broadcast-type" value="workflow_update" />
+              </label>
+              <label>
+                Title
+                <input id="agent-broadcast-title" value="Workflow update" />
+              </label>
+              <label>
+                Content
+                <textarea id="agent-broadcast-content">Document workflow is ready for coordinated execution.</textarea>
+              </label>
+              <button type="submit">Broadcast Event</button>
+            </form>
+            <form id="agent-conflict-form" class="task-form">
+              <label>
+                Raised By
+                <input id="agent-conflict-raised-by" value="risk_agent_v1" />
+              </label>
+              <label>
+                Opposing Agents
+                <input id="agent-conflict-opposing" value="document_agent_v1,quality_agent_v1" />
+              </label>
+              <label>
+                Priority Area
+                <select id="agent-conflict-priority">
+                  <option value="safety">safety</option>
+                  <option value="compliance">compliance</option>
+                  <option value="privacy">privacy</option>
+                  <option value="user_confirmation">user_confirmation</option>
+                  <option value="quality">quality</option>
+                  <option value="cost">cost</option>
+                  <option value="efficiency">efficiency</option>
+                </select>
+              </label>
+              <label>
+                Issue
+                <textarea id="agent-conflict-issue">Risk Agent disagrees with proceeding before a safety review.</textarea>
+              </label>
+              <label>
+                Raised Position
+                <textarea id="agent-conflict-raised-position">Pause and complete risk review first.</textarea>
+              </label>
+              <label>
+                Opposing Position
+                <textarea id="agent-conflict-opposing-position">Proceed with draft, then review before completion.</textarea>
+              </label>
+              <button type="submit">Open Conflict</button>
+            </form>
+            <form id="agent-conflict-resolve-form" class="task-form">
+              <label>
+                Conflict ID
+                <input id="agent-conflict-resolve-id" placeholder="agent_conflict_..." />
+              </label>
+              <label>
+                Resolved By
+                <input id="agent-conflict-resolved-by" value="human_root" />
+              </label>
+              <label>
+                Selected Position Agent
+                <input id="agent-conflict-selected-agent" value="risk_agent_v1" />
+              </label>
+              <label>
+                Resolution
+                <textarea id="agent-conflict-resolution">Safety takes priority; complete review before proceeding.</textarea>
+              </label>
+              <button type="submit">Resolve Conflict</button>
+            </form>
+            <form id="task-handoff-form" class="task-form">
+              <label>
+                Task ID
+                <input id="task-handoff-task" placeholder="task_..." />
+              </label>
+              <label>
+                From
+                <input id="task-handoff-from" value="project_manager_agent_v1" />
+              </label>
+              <label>
+                To
+                <input id="task-handoff-to" value="document_agent_v1" />
+              </label>
+              <label>
+                Reason
+                <textarea id="task-handoff-reason">Assign document drafting to the document agent.</textarea>
+              </label>
+              <label>
+                Instructions
+                <textarea id="task-handoff-instructions">Draft the internal operating note and request quality review after completion.</textarea>
+              </label>
+              <button type="submit">Handoff Task</button>
+            </form>
+            <form id="agent-message-form" class="task-form">
+              <label>
+                From
+                <input id="agent-message-from" value="ceo_agent_v1" />
+              </label>
+              <label>
+                To
+                <input id="agent-message-to" value="document_agent_v1" />
+              </label>
+              <label>
+                Type
+                <input id="agent-message-type" value="handoff" />
+              </label>
+              <label>
+                Priority
+                <select id="agent-message-priority">
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="low">low</option>
+                </select>
+              </label>
+              <label>
+                Requires Response
+                <select id="agent-message-response">
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </label>
+              <label>
+                Content
+                <textarea id="agent-message-content">Please prepare the next internal document workflow step.</textarea>
+              </label>
+              <button type="submit">Send Message</button>
+            </form>
+            <form id="agent-meeting-form" class="task-form">
+              <label>
+                Title
+                <input id="agent-meeting-title" value="Workflow handoff sync" />
+              </label>
+              <label>
+                Organizer
+                <input id="agent-meeting-organizer" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Participants
+                <input id="agent-meeting-participants" value="ceo_agent_v1,document_agent_v1,quality_agent_v1" />
+              </label>
+              <label>
+                Agenda
+                <textarea id="agent-meeting-agenda">Align on task ownership, risks, and next deliverable.</textarea>
+              </label>
+              <label>
+                Minutes
+                <textarea id="agent-meeting-minutes">Next step assigned to document_agent_v1; QA will review output.</textarea>
+              </label>
+              <button type="submit">Record Meeting</button>
+            </form>
+            <div id="agent-communication-result" class="result" role="status"></div>
+            <div id="agent-conflicts-list" class="list"></div>
+            <div id="agent-broadcasts-list" class="list"></div>
+            <div id="task-handoffs-list" class="list"></div>
+            <div id="agent-messages-list" class="list"></div>
+            <div id="agent-meetings-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="backups">
+            <div class="panel-header">
+              <div>
+                <h2>Backups</h2>
+                <p>Capture a state snapshot before important changes.</p>
+              </div>
+            </div>
+            <form id="backup-form" class="task-form">
+              <label>
+                Reason
+                <input id="backup-reason" value="Manual Human Root checkpoint" />
+              </label>
+              <button type="submit">Create Backup</button>
+            </form>
+            <div id="backup-result" class="result" role="status"></div>
+            <div id="backups-list" class="list"></div>
+          </section>
+        </section>
+
+        <section class="grid lower">
+          <section class="panel wide" id="audit">
+            <div class="panel-header">
+              <h2>Recent Audit Logs</h2>
+            </div>
+            <div id="audit-list" class="table-list"></div>
+          </section>
+
+          <section class="panel wide" id="structured-logs">
+            <div class="panel-header">
+              <h2>Structured JSON Logs</h2>
+            </div>
+            <div id="structured-logs-list" class="table-list"></div>
+          </section>
+
+          <section class="panel" id="database">
+            <div class="panel-header">
+              <h2>Database Schema</h2>
+            </div>
+            <div id="database-migrations-list" class="list"></div>
+          </section>
+
+          <section class="panel wide" id="integrity">
+            <div class="panel-header">
+              <h2>System Integrity</h2>
+              <span id="integrity-issue-count" class="pill">0</span>
+            </div>
+            <div id="integrity-checks-list" class="table-list"></div>
+          </section>
+
+          <section class="panel" id="memory">
+            <div class="panel-header">
+              <h2>Memory</h2>
+              <span id="memory-count" class="pill">0</span>
+            </div>
+            <div id="memory-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="knowledge">
+            <div class="panel-header">
+              <h2>Knowledge Base</h2>
+              <span id="knowledge-count" class="pill">0</span>
+            </div>
+            <div id="knowledge-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="reviews">
+            <div class="panel-header">
+              <div>
+                <h2>Task Reviews</h2>
+                <p>Record retrospective lessons and follow-up actions after task work.</p>
+              </div>
+              <span id="review-score" class="pill">--</span>
+            </div>
+            <form id="task-review-form" class="task-form">
+              <label>
+                Task ID
+                <input id="task-review-task" placeholder="task_..." />
+              </label>
+              <label>
+                Reviewer
+                <input id="task-review-reviewer" value="quality_agent_v1" />
+              </label>
+              <label>
+                Outcome
+                <input id="task-review-outcome" value="reviewed" />
+              </label>
+              <label>
+                Quality Score
+                <input id="task-review-score" type="number" min="0" max="1" step="0.01" value="0.9" />
+              </label>
+              <label>
+                Summary
+                <textarea id="task-review-summary">Workflow completed with useful output and a clear audit trail.</textarea>
+              </label>
+              <label>
+                What Went Well
+                <textarea id="task-review-well">Planning, risk check, and quality check were visible.</textarea>
+              </label>
+              <label>
+                What Went Wrong
+                <textarea id="task-review-wrong">No follow-up owner was assigned automatically.</textarea>
+              </label>
+              <label>
+                Lessons
+                <textarea id="task-review-lessons">Keep task instructions specific; assign review owners early.</textarea>
+              </label>
+              <label>
+                Follow-up Actions
+                <textarea id="task-review-followups">Add owner assignment; improve review checklist.</textarea>
+              </label>
+              <button type="submit">Record Review</button>
+            </form>
+            <form id="improvement-proposal-form" class="task-form">
+              <label>
+                Review ID
+                <input id="improvement-review-id" placeholder="task_review_..." />
+              </label>
+              <label>
+                Proposed By
+                <input id="improvement-proposed-by" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Target Type
+                <select id="improvement-target-type">
+                  <option value="workflow">workflow</option>
+                  <option value="skill">skill</option>
+                  <option value="agent">agent</option>
+                  <option value="policy">policy</option>
+                  <option value="dashboard">dashboard</option>
+                  <option value="memory">memory</option>
+                  <option value="knowledge">knowledge</option>
+                </select>
+              </label>
+              <label>
+                Risk Level
+                <select id="improvement-risk-level">
+                  <option value="medium">medium</option>
+                  <option value="low">low</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+              <label>
+                Title
+                <input id="improvement-title" value="Improve review owner assignment" />
+              </label>
+              <label>
+                Description
+                <textarea id="improvement-description">Add an explicit review owner field to task review follow-up.</textarea>
+              </label>
+              <label>
+                Rationale
+                <textarea id="improvement-rationale">Review follow-up ownership was implicit and should be made visible.</textarea>
+              </label>
+              <button type="submit">Propose Improvement</button>
+            </form>
+            <div id="task-review-result" class="result" role="status"></div>
+            <div id="improvement-proposal-result" class="result" role="status"></div>
+            <div id="task-reviews-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="evaluations">
+            <div class="panel-header">
+              <h2>Evaluations</h2>
+              <span id="evaluation-count" class="pill">0</span>
+            </div>
+            <div id="evaluations-list" class="list"></div>
+          </section>
+        </section>
+
+        <section id="settings" class="panel settings-panel">
+          <div class="panel-header">
+            <div>
+              <h2>Settings</h2>
+              <p>Root-managed operating limits for model usage.</p>
+            </div>
+          </div>
+          <form id="budget-policy-form" class="task-form">
+            <label>
+              Policy Name
+              <input id="budget-policy-name" value="Default Model Budget" />
+            </label>
+            <label>
+              Max Tokens Per Call
+              <input id="budget-max-tokens-per-call" type="number" min="1" value="2000" />
+            </label>
+            <label>
+              Max Total Tokens
+              <input id="budget-max-total-tokens" type="number" min="1" value="100000" />
+            </label>
+            <label>
+              Max Estimated Cost
+              <input id="budget-max-estimated-cost" type="number" min="0" step="0.000001" value="10" />
+            </label>
+            <label>
+              Cost Per Token
+              <input id="budget-cost-per-token" type="number" min="0" step="0.000001" value="0.000001" />
+            </label>
+            <label>
+              Currency
+              <input id="budget-currency" value="USD" />
+            </label>
+            <label>
+              Enabled
+              <select id="budget-enabled">
+                <option value="true">Enabled</option>
+                <option value="false">Disabled</option>
+              </select>
+            </label>
+            <button type="submit">Update Budget Policy</button>
+          </form>
+          <div id="budget-policy-result" class="result" role="status"></div>
+          <p>Dangerous adapters stay disabled by default. Human Root approval is required for high-risk actions.</p>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
