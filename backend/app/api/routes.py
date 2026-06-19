@@ -308,6 +308,8 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             return service.request_backup_restore(backup_id, payload.actor_id, payload.reason)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="backup not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/backups/{backup_id}/restore")
     def execute_backup_restore(backup_id: str, payload: BackupRestoreExecuteRequest) -> dict:
@@ -320,8 +322,6 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="backup or approval not found") from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
