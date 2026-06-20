@@ -46,7 +46,7 @@ A Workflow coordinates Agents, Skills, Tools, approvals, quality checks, audit l
 
 The Workflow Registry now contains all 10 V1 definitions. Every definition declares an ID, version, execution mode, entrypoint, ordered steps, responsible Agent, action, permission level, and optional Skill. Registration rejects non-contiguous steps, missing Agents or Skills, Agent permissions that do not exactly include the requested level, and unauthorized Agent/Skill pairs.
 
-`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `quality_check_v1`, and `retrospective_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
+`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `quality_check_v1`, and `retrospective_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
 
 The document generation workflow writes one `WorkflowRun` and seven ordered `WorkflowStep` records:
 
@@ -74,6 +74,8 @@ Each step rechecks Agent enabled state, Skill enabled state, exact permission, a
 
 The task planning runner produces three task-linked Skill Runs and uses the planning Skill output as the execution-plan body. Skill Runs and their Evaluations persist independently from Workflow traces, so operators can inspect both process state and capability execution state.
 
+The Agent collaboration runner accepts structured `input` with a target Agent, participant Agents, agenda, handoff reason, and instructions. It validates every Agent before creating the Workflow task, then executes coordination planning, handoff planning, and audit Skills. A successful run records a meeting with generated minutes plus a linked handoff message and TaskHandoff. If a later control step blocks, already-created communication records remain visible in the blocked response and persisted state; the Workflow never labels that partial execution as complete.
+
 The quality check runner executes three ordered Skills:
 
 1. `quality_check_skill_v1` evaluates supplied content.
@@ -86,7 +88,6 @@ The retrospective runner accepts an optional structured `input` object with `sou
 
 The other catalog definitions point to their operational entrypoints:
 
-- Agent collaboration: meetings and task handoffs
 - Skill/Agent missing handling: controlled Factory proposal APIs
 - Approval: Approval Center request and decision APIs
 - GitHub analysis: absorption analysis, sandbox, approval, and knowledge registration APIs

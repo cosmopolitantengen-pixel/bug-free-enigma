@@ -85,7 +85,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="agent_collaboration_v1",
             name="Agent Collaboration",
             description="Coordinate planning, handoff, and auditable team communication.",
-            entrypoint="POST /agent-meetings and POST /tasks/{task_id}/handoff",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "coordinate_work", "workflow_agent_v1", "coordinate_work", PermissionLevel.L1_DRAFT, "task_planning_skill_v1"),
                 step(2, "prepare_handoff", "project_manager_agent_v1", "prepare_handoff", PermissionLevel.L2_INTERNAL_WRITE, "task_planning_skill_v1"),

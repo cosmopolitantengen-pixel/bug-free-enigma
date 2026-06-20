@@ -15,7 +15,7 @@ The first version focuses on the operating foundation:
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
 - The V1 catalog boots with 17 scoped Agent roles and 18 registered Skills; approved catalog additions persist across restarts.
-- The V1 Workflow catalog defines all 10 required processes; document generation, task planning, quality checking, and retrospectives have native controlled runners.
+- The V1 Workflow catalog defines all 10 required processes; document generation, task planning, Agent collaboration, quality checking, and retrospectives have native controlled runners.
 - Native Workflow steps dispatch through the durable Skill Runtime, so Skill authorization, failure, approval, audit, and evaluation state remain inspectable alongside Workflow traces.
 - Memory and Knowledge Base receive completed work so the system can improve over time.
 - Durable schedules can create or run internal tasks and publish append-only domain events.

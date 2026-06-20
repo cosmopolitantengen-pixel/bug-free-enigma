@@ -49,6 +49,7 @@ from app.safety.risk import RiskEngine
 from app.scheduler.store import SchedulerStore
 from app.skills.registry import SkillRegistry, default_skills
 from app.tools.registry import ToolRegistry, default_tools
+from app.workflows.agent_collaboration import AgentCollaborationWorkflow
 from app.workflows.document_generation import DocumentGenerationWorkflow
 from app.workflows.quality_check import QualityCheckWorkflow
 from app.workflows.retrospective import RetrospectiveWorkflow
@@ -84,6 +85,7 @@ class CompanyOS:
     workflows: WorkflowRegistry
     document_workflow: DocumentGenerationWorkflow
     task_planning_workflow: TaskPlanningWorkflow
+    agent_collaboration_workflow: AgentCollaborationWorkflow
     quality_check_workflow: QualityCheckWorkflow
     retrospective_workflow: RetrospectiveWorkflow
 
@@ -192,6 +194,17 @@ def build_company_os(
         incidents=incident_store,
         traces=traces,
     )
+    agent_collaboration_workflow = AgentCollaborationWorkflow(
+        workflows=workflows,
+        agents=agents,
+        permissions=permissions,
+        risks=risks,
+        communication=communication,
+        audit=audit,
+        evaluations=evaluation_store,
+        incidents=incident_store,
+        traces=traces,
+    )
     quality_check_workflow = QualityCheckWorkflow(
         workflows=workflows,
         audit=audit,
@@ -234,6 +247,7 @@ def build_company_os(
         workflows=workflows,
         document_workflow=document_workflow,
         task_planning_workflow=task_planning_workflow,
+        agent_collaboration_workflow=agent_collaboration_workflow,
         quality_check_workflow=quality_check_workflow,
         retrospective_workflow=retrospective_workflow,
     )

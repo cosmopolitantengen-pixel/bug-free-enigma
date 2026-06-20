@@ -454,9 +454,17 @@ class CompanyApplicationService:
         definition = self.company_os.workflows.get(workflow_id)
         if not definition.enabled:
             raise ValueError("workflow is disabled")
-        if workflow_id not in {"document_generation_v1", "task_planning_v1", "quality_check_v1", "retrospective_v1"}:
+        if workflow_id not in {
+            "document_generation_v1",
+            "task_planning_v1",
+            "agent_collaboration_v1",
+            "quality_check_v1",
+            "retrospective_v1",
+        }:
             raise ValueError(f"workflow uses dedicated entrypoint: {definition.entrypoint}")
         workflow_input = input or {}
+        if workflow_id == "agent_collaboration_v1":
+            self.company_os.agent_collaboration_workflow.validate_input(workflow_input, description)
         if workflow_id == "retrospective_v1":
             self.company_os.retrospective_workflow.validate_input(workflow_input, description)
             source_task_id = workflow_input.get("source_task_id")
@@ -476,6 +484,23 @@ class CompanyApplicationService:
                 "approval_required": planning_result.approval_required,
                 "blocked": planning_result.blocked,
                 "incident": None,
+            }
+        if workflow_id == "agent_collaboration_v1":
+            collaboration_result = self.company_os.agent_collaboration_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(collaboration_result.task),
+                "output": collaboration_result.output,
+                "meeting": to_plain(collaboration_result.meeting) if collaboration_result.meeting else None,
+                "handoff": to_plain(collaboration_result.handoff) if collaboration_result.handoff else None,
+                "message": to_plain(collaboration_result.message) if collaboration_result.message else None,
+                "approval_required": False,
+                "blocked": collaboration_result.blocked,
+                "incident": to_plain(collaboration_result.incident) if collaboration_result.incident else None,
             }
         if workflow_id == "quality_check_v1":
             quality_result = self.company_os.quality_check_workflow.run(self.tasks[task["task_id"]])
@@ -2857,6 +2882,7 @@ class CompanyApplicationService:
     def _bind_workflow_skill_runtime(self) -> None:
         self.company_os.document_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.task_planning_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.agent_collaboration_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
 

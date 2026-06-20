@@ -264,6 +264,43 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(skill_runs), 3)
             self.assertTrue(all(run["task_id"] == tasks[0]["task_id"] for run in skill_runs))
 
+    def test_agent_collaboration_workflow_state_persists_through_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "agent_collaboration_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            collaborated = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "agent_collaboration_v1",
+                    "title": "Persistent collaboration",
+                    "description": "Persist coordinated planning, meeting, handoff, and audit evidence.",
+                    "input": {
+                        "target_agent_id": "product_agent_v1",
+                        "handoff_reason": "Product Agent owns the next specification step.",
+                    },
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            tasks = second.get("/tasks").json()
+            runs = second.get("/workflow-runs").json()
+            skill_runs = second.get("/skills/runs").json()
+            meetings = second.get("/agent-meetings").json()
+            handoffs = second.get("/task-handoffs").json()
+            messages = second.get("/agent-messages").json()
+            evaluations = second.get("/evaluations").json()
+
+            self.assertEqual(collaborated.status_code, 200)
+            self.assertEqual(tasks[0]["status"], "completed")
+            self.assertEqual(runs[0]["workflow_id"], "agent_collaboration_v1")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(len(skill_runs), 3)
+            self.assertEqual(len(meetings), 1)
+            self.assertEqual(len(handoffs), 1)
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(handoffs[0]["message_id"], messages[0]["message_id"])
+            self.assertIn("agent_collaboration_v1", [record["subject_id"] for record in evaluations])
+
     def test_quality_check_workflow_state_persists_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "quality_workflow.db")

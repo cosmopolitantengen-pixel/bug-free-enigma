@@ -318,6 +318,34 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual([run["status"] for run in service.list_skill_runs()], ["completed", "blocked"])
         self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
 
+    def test_agent_collaboration_blocks_when_audit_skill_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        skill = company_os.skills.get("audit_logging_skill_v1")
+        company_os.skills.restore(replace(skill, enabled=False))
+        service = CompanyApplicationService(company_os=company_os)
+
+        result = service.run_registered_workflow(
+            "agent_collaboration_v1",
+            "Blocked collaboration",
+            "Coordinate safely, then block before claiming the audit step completed.",
+            input={"target_agent_id": "document_agent_v1"},
+        )
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertIsNotNone(result["meeting"])
+        self.assertIsNotNone(result["handoff"])
+        self.assertIsNotNone(result["message"])
+        self.assertEqual(len(service.list_agent_meetings()), 1)
+        self.assertEqual(len(service.list_task_handoffs()), 1)
+        self.assertEqual([run["status"] for run in service.list_skill_runs()], ["completed", "completed", "blocked"])
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_workflow_steps()[-1]["status"], "blocked")
+        self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
+
     def test_document_workflow_resumes_after_approval(self):
         from app.services.company import CompanyApplicationService
 

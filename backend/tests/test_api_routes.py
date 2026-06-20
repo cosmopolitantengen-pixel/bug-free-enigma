@@ -74,6 +74,73 @@ class ApiRouteTests(unittest.TestCase):
         self.assertTrue(all(run["status"] == "completed" for run in skill_runs))
         self.assertEqual(audit[-1]["event_type"], "task_plan_completed")
 
+    def test_agent_collaboration_workflow_records_meeting_handoff_and_skills(self):
+        collaborated = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "agent_collaboration_v1",
+                "title": "Coordinate product specification",
+                "description": "Align the operating plan and transfer the next internal execution step.",
+                "input": {
+                    "target_agent_id": "product_agent_v1",
+                    "participant_agents": [
+                        "workflow_agent_v1",
+                        "project_manager_agent_v1",
+                        "product_agent_v1",
+                    ],
+                    "agenda": "Agree scope, controls, owner, and expected product specification.",
+                    "handoff_reason": "Product Agent owns the specification draft.",
+                    "instructions": "Draft the internal specification within the approved scope.",
+                },
+            },
+        )
+        payload = collaborated.json()
+        workflow_task_id = payload["task"]["task_id"]
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = [run for run in self.client.get("/skills/runs").json() if run["task_id"] == workflow_task_id]
+        messages = self.client.get(f"/agent-messages?task_id={workflow_task_id}").json()
+        meetings = self.client.get(f"/agent-meetings?task_id={workflow_task_id}").json()
+        handoffs = self.client.get(f"/task-handoffs?task_id={workflow_task_id}").json()
+        audit = self.client.get("/audit-logs").json()
+
+        self.assertEqual(collaborated.status_code, 200)
+        self.assertFalse(payload["blocked"])
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertEqual(payload["meeting"]["meeting_type"], "workflow")
+        self.assertEqual(payload["handoff"]["to_agent"], "product_agent_v1")
+        self.assertEqual(payload["handoff"]["message_id"], payload["message"]["message_id"])
+        self.assertEqual(runs[-1]["workflow_id"], "agent_collaboration_v1")
+        self.assertEqual(runs[-1]["status"], "completed")
+        self.assertEqual(len(steps), 3)
+        self.assertEqual([step["status"] for step in steps], ["completed"] * 3)
+        self.assertEqual(
+            [run["skill_id"] for run in skill_runs],
+            ["task_planning_skill_v1", "task_planning_skill_v1", "audit_logging_skill_v1"],
+        )
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(meetings), 1)
+        self.assertEqual(len(handoffs), 1)
+        workflow_step_audit = [event for event in audit if event["event_type"] == "workflow_step_recorded"]
+        self.assertEqual(len(workflow_step_audit), 3)
+        self.assertEqual(workflow_step_audit[0]["output_ref"], payload["meeting"]["meeting_id"])
+        self.assertEqual(workflow_step_audit[1]["output_ref"], payload["handoff"]["handoff_id"])
+
+    def test_agent_collaboration_rejects_unknown_target_before_creating_task(self):
+        rejected = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "agent_collaboration_v1",
+                "title": "Invalid collaboration",
+                "description": "Do not create an orphan workflow task.",
+                "input": {"target_agent_id": "unknown_agent_v1"},
+            },
+        )
+
+        self.assertEqual(rejected.status_code, 404)
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/workflow-runs").json(), [])
+
     def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
         checked = self.client.post(
             "/workflows/run",

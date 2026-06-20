@@ -225,6 +225,7 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn("/workflow-runs", script)
         self.assertIn("/workflows", script)
         self.assertIn("workflow_id", script)
+        self.assertIn('value="agent_collaboration_v1"', index)
         self.assertIn("recent_workflow_steps", script)
         self.assertIn("/model-usage", script)
         self.assertIn("/models/generate", script)
