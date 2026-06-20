@@ -129,7 +129,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="quality_check_v1",
             name="Quality Check",
             description="Review output quality and safety before completion.",
-            entrypoint="Document workflow quality stage",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "check_quality", "quality_agent_v1", "quality_check", PermissionLevel.L1_DRAFT, "quality_check_skill_v1"),
                 step(2, "check_output_risk", "risk_agent_v1", "risk_check", PermissionLevel.L1_DRAFT, "risk_check_skill_v1"),

@@ -74,6 +74,49 @@ class ApiRouteTests(unittest.TestCase):
         self.assertTrue(all(run["status"] == "completed" for run in skill_runs))
         self.assertEqual(audit[-1]["event_type"], "task_plan_completed")
 
+    def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
+        checked = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "quality_check_v1",
+                "title": "Review internal output",
+                "description": "This internal output is detailed enough to pass deterministic quality review.",
+            },
+        )
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(checked.status_code, 200)
+        self.assertTrue(checked.json()["passed"])
+        self.assertFalse(checked.json()["blocked"])
+        self.assertEqual(checked.json()["task"]["status"], "completed")
+        self.assertEqual(runs[-1]["workflow_id"], "quality_check_v1")
+        self.assertEqual(runs[-1]["status"], "completed")
+        self.assertEqual([step["step_name"] for step in steps], ["check_quality", "check_output_risk", "audit_quality"])
+        self.assertEqual(len(skill_runs), 3)
+        self.assertEqual(
+            [run["skill_id"] for run in skill_runs],
+            ["quality_check_skill_v1", "risk_check_skill_v1", "audit_logging_skill_v1"],
+        )
+
+    def test_quality_check_workflow_records_business_failure_without_control_block(self):
+        checked = self.client.post(
+            "/workflows/run",
+            json={"workflow_id": "quality_check_v1", "title": "Short output", "description": "Too short"},
+        )
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+
+        self.assertEqual(checked.status_code, 200)
+        self.assertFalse(checked.json()["passed"])
+        self.assertFalse(checked.json()["blocked"])
+        self.assertEqual(checked.json()["task"]["status"], "failed")
+        self.assertEqual(runs[-1]["status"], "failed")
+        self.assertEqual(len(steps), 3)
+        self.assertEqual(steps[0]["status"], "failed")
+        self.assertTrue(all(step["status"] == "completed" for step in steps[1:]))
+
     def test_dedicated_workflow_rejects_generic_run_without_creating_task(self):
         task_count = len(self.client.get("/tasks").json())
         response = self.client.post(

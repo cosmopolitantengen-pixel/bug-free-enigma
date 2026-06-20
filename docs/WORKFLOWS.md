@@ -46,7 +46,7 @@ A Workflow coordinates Agents, Skills, Tools, approvals, quality checks, audit l
 
 The Workflow Registry now contains all 10 V1 definitions. Every definition declares an ID, version, execution mode, entrypoint, ordered steps, responsible Agent, action, permission level, and optional Skill. Registration rejects non-contiguous steps, missing Agents or Skills, Agent permissions that do not exactly include the requested level, and unauthorized Agent/Skill pairs.
 
-`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1` and `task_planning_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
+`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, and `quality_check_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
 
 The document generation workflow writes one `WorkflowRun` and seven ordered `WorkflowStep` records:
 
@@ -74,12 +74,19 @@ Each step rechecks Agent enabled state, Skill enabled state, exact permission, a
 
 The task planning runner produces three task-linked Skill Runs and uses the planning Skill output as the execution-plan body. Skill Runs and their Evaluations persist independently from Workflow traces, so operators can inspect both process state and capability execution state.
 
+The quality check runner executes three ordered Skills:
+
+1. `quality_check_skill_v1` evaluates supplied content.
+2. `risk_check_skill_v1` checks the review action.
+3. `audit_logging_skill_v1` prepares the structured quality event.
+
+All three calls create task-linked Skill Runs. Content that fails quality is a business failure: the task and Workflow become `failed`, but risk and audit steps still run. A disabled, unauthorized, blocked, or malformed Skill is a control failure: the task and Workflow become `blocked`, the failing step is recorded, and an Incident is created.
+
 The other catalog definitions point to their operational entrypoints:
 
 - Agent collaboration: meetings and task handoffs
 - Skill/Agent missing handling: controlled Factory proposal APIs
 - Approval: Approval Center request and decision APIs
-- Quality check: document Workflow quality stage
 - Retrospective: task review API
 - GitHub analysis: absorption analysis, sandbox, approval, and knowledge registration APIs
 - Tool call: controlled Tool Run request and completion APIs

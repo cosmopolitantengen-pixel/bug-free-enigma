@@ -50,6 +50,7 @@ from app.scheduler.store import SchedulerStore
 from app.skills.registry import SkillRegistry, default_skills
 from app.tools.registry import ToolRegistry, default_tools
 from app.workflows.document_generation import DocumentGenerationWorkflow
+from app.workflows.quality_check import QualityCheckWorkflow
 from app.workflows.registry import WorkflowRegistry, default_workflows
 from app.workflows.task_planning import TaskPlanningWorkflow
 from app.workflows.traces import WorkflowTraceStore
@@ -82,6 +83,7 @@ class CompanyOS:
     workflows: WorkflowRegistry
     document_workflow: DocumentGenerationWorkflow
     task_planning_workflow: TaskPlanningWorkflow
+    quality_check_workflow: QualityCheckWorkflow
 
 
 def build_company_os(
@@ -188,6 +190,13 @@ def build_company_os(
         incidents=incident_store,
         traces=traces,
     )
+    quality_check_workflow = QualityCheckWorkflow(
+        workflows=workflows,
+        audit=audit,
+        evaluations=evaluation_store,
+        incidents=incident_store,
+        traces=traces,
+    )
     return CompanyOS(
         agents=agents,
         skills=skills,
@@ -214,6 +223,7 @@ def build_company_os(
         workflows=workflows,
         document_workflow=document_workflow,
         task_planning_workflow=task_planning_workflow,
+        quality_check_workflow=quality_check_workflow,
     )
 
 

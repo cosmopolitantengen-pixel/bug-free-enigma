@@ -269,6 +269,30 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertIn("skill is disabled", skill_runs[-1]["error"])
         self.assertEqual(service.list_workflow_runs()[-1]["status"], "failed")
 
+    def test_quality_workflow_blocks_when_quality_skill_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        skill = company_os.skills.get("quality_check_skill_v1")
+        company_os.skills.restore(replace(skill, enabled=False))
+        service = CompanyApplicationService(company_os=company_os)
+
+        result = service.run_registered_workflow(
+            "quality_check_v1",
+            "Blocked quality workflow",
+            "This content would pass, but its required Skill is disabled.",
+        )
+
+        self.assertTrue(result["blocked"])
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["incident"]["source_type"], "workflow")
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertEqual(service.list_skill_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_workflow_steps()[0]["status"], "blocked")
+        self.assertGreaterEqual(len(service.list_incidents()), 2)
+
     def test_document_workflow_resumes_after_approval(self):
         from app.services.company import CompanyApplicationService
 

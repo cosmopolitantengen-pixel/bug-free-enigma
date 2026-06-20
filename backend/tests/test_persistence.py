@@ -264,6 +264,34 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(skill_runs), 3)
             self.assertTrue(all(run["task_id"] == tasks[0]["task_id"] for run in skill_runs))
 
+    def test_quality_check_workflow_state_persists_through_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "quality_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            checked = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "quality_check_v1",
+                    "title": "Persistent quality review",
+                    "description": "Persist this successful quality, risk, and audit execution.",
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            tasks = second.get("/tasks").json()
+            runs = second.get("/workflow-runs").json()
+            steps = second.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
+            skill_runs = second.get("/skills/runs").json()
+            evaluations = second.get("/evaluations").json()
+
+            self.assertEqual(checked.status_code, 200)
+            self.assertEqual(tasks[0]["status"], "completed")
+            self.assertEqual(runs[0]["workflow_id"], "quality_check_v1")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(len(steps), 3)
+            self.assertEqual(len(skill_runs), 3)
+            self.assertIn("quality_check_v1", [record["subject_id"] for record in evaluations])
+
     def test_incidents_persist_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "incidents.db")

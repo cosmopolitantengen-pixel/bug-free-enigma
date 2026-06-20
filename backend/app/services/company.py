@@ -453,7 +453,7 @@ class CompanyApplicationService:
         definition = self.company_os.workflows.get(workflow_id)
         if not definition.enabled:
             raise ValueError("workflow is disabled")
-        if workflow_id not in {"document_generation_v1", "task_planning_v1"}:
+        if workflow_id not in {"document_generation_v1", "task_planning_v1", "quality_check_v1"}:
             raise ValueError(f"workflow uses dedicated entrypoint: {definition.entrypoint}")
         task = self.create_task(title, description, user_id)
         if workflow_id == "document_generation_v1":
@@ -469,6 +469,18 @@ class CompanyApplicationService:
                 "approval_required": planning_result.approval_required,
                 "blocked": planning_result.blocked,
                 "incident": None,
+            }
+        if workflow_id == "quality_check_v1":
+            quality_result = self.company_os.quality_check_workflow.run(self.tasks[task["task_id"]])
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(quality_result.task),
+                "output": quality_result.output,
+                "approval_required": quality_result.approval_required,
+                "blocked": quality_result.blocked,
+                "passed": quality_result.passed,
+                "incident": to_plain(quality_result.incident) if quality_result.incident else None,
             }
         raise ValueError("unsupported workflow execution mode")
 
@@ -2822,6 +2834,7 @@ class CompanyApplicationService:
     def _bind_workflow_skill_runtime(self) -> None:
         self.company_os.document_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.task_planning_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
 
     def _execute_workflow_skill(
         self,
