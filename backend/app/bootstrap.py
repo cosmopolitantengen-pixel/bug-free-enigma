@@ -13,6 +13,7 @@ from app.core.models import (
     AgentConflict,
     AgentMeeting,
     AgentMessage,
+    Agent,
     ApprovalRequest,
     AuditEvent,
     BackupRecord,
@@ -27,6 +28,7 @@ from app.core.models import (
     ModelUsageRecord,
     ScheduledExecution,
     ScheduledJob,
+    Skill,
     Tool,
     TaskHandoff,
     TaskReview,
@@ -84,6 +86,8 @@ def build_company_os(
     memory_records: list[MemoryRecord] | None = None,
     knowledge_docs: list[KnowledgeDoc] | None = None,
     evaluations: list[EvaluationRecord] | None = None,
+    registered_agents: list[Agent] | None = None,
+    registered_skills: list[Skill] | None = None,
     tools: list[Tool] | None = None,
     model_usage: list[ModelUsageRecord] | None = None,
     budget_policy: BudgetPolicy | None = None,
@@ -106,10 +110,14 @@ def build_company_os(
     agents = AgentRegistry()
     for agent in default_agents():
         agents.register(agent)
+    for agent in registered_agents or []:
+        agents.restore(agent)
 
     skills = SkillRegistry()
     for skill in default_skills():
         skills.register(skill)
+    for skill in registered_skills or []:
+        skills.restore(skill)
 
     tool_registry = ToolRegistry()
     for tool in default_tools():
@@ -117,6 +125,8 @@ def build_company_os(
     for tool in tools or []:
         if tool.tool_id not in {existing.tool_id for existing in tool_registry.list()}:
             tool_registry.register(tool)
+
+    _validate_catalog_references(agents, skills, tool_registry)
 
     permissions = PermissionEngine()
     risks = RiskEngine()
@@ -183,3 +193,36 @@ def build_company_os(
         scheduler=scheduler,
         document_workflow=document_workflow,
     )
+
+
+def _validate_catalog_references(
+    agents: AgentRegistry,
+    skills: SkillRegistry,
+    tools: ToolRegistry,
+) -> None:
+    agent_ids = {agent.agent_id for agent in agents.list()}
+    skill_ids = {skill.skill_id for skill in skills.list()}
+    tool_ids = {tool.tool_id for tool in tools.list()}
+    for agent in agents.list():
+        unknown_skills = agent.allowed_skills - skill_ids
+        unknown_tools = agent.allowed_tools - tool_ids
+        if unknown_skills:
+            raise ValueError(f"agent {agent.agent_id} references unknown skills: {sorted(unknown_skills)}")
+        if unknown_tools:
+            raise ValueError(f"agent {agent.agent_id} references unknown tools: {sorted(unknown_tools)}")
+        if agent.reports_to != "human_root" and agent.reports_to not in agent_ids:
+            raise ValueError(f"agent {agent.agent_id} reports to unknown agent: {agent.reports_to}")
+        for skill_id in agent.allowed_skills:
+            if agent.agent_id not in skills.get(skill_id).allowed_agents:
+                raise ValueError(
+                    f"agent {agent.agent_id} and skill {skill_id} have asymmetric authorization"
+                )
+    for skill in skills.list():
+        unknown_agents = skill.allowed_agents - agent_ids
+        if unknown_agents:
+            raise ValueError(f"skill {skill.skill_id} references unknown agents: {sorted(unknown_agents)}")
+        for agent_id in skill.allowed_agents:
+            if skill.skill_id not in agents.get(agent_id).allowed_skills:
+                raise ValueError(
+                    f"skill {skill.skill_id} and agent {agent_id} have asymmetric authorization"
+                )

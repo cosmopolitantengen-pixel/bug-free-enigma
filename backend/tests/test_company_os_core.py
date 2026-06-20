@@ -19,10 +19,25 @@ class CompanyOSCoreTests(unittest.TestCase):
     def test_default_bootstrap_registers_foundation(self):
         company_os = build_company_os()
 
-        self.assertGreaterEqual(len(company_os.agents.list()), 5)
-        self.assertGreaterEqual(len(company_os.skills.list()), 5)
+        self.assertEqual(len(company_os.agents.list()), 17)
+        self.assertEqual(len(company_os.skills.list()), 18)
         self.assertGreaterEqual(len(company_os.tools.list()), 5)
         self.assertEqual(company_os.agents.get("ceo_agent_v1").reports_to, "human_root")
+
+        agent_ids = {agent.agent_id for agent in company_os.agents.list()}
+        skill_ids = {skill.skill_id for skill in company_os.skills.list()}
+        tool_ids = {tool.tool_id for tool in company_os.tools.list()}
+        for agent in company_os.agents.list():
+            self.assertTrue(agent.allowed_skills <= skill_ids)
+            self.assertTrue(agent.allowed_tools <= tool_ids)
+            self.assertTrue(agent.reports_to == "human_root" or agent.reports_to in agent_ids)
+            self.assertNotIn(PermissionLevel.L5_ROOT, agent.permissions)
+            for skill_id in agent.allowed_skills:
+                self.assertIn(agent.agent_id, company_os.skills.get(skill_id).allowed_agents)
+        for skill in company_os.skills.list():
+            self.assertTrue(skill.allowed_agents <= agent_ids)
+            for agent_id in skill.allowed_agents:
+                self.assertIn(skill.skill_id, company_os.agents.get(agent_id).allowed_skills)
 
     def test_agents_cannot_register_root_permissions(self):
         registry = AgentRegistry()

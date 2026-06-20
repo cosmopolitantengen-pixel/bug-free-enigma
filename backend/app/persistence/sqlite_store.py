@@ -24,6 +24,7 @@ from app.core.enums import (
 )
 from app.core.models import (
     ActionRequest,
+    Agent,
     AgentBroadcast,
     AgentConflict,
     AgentMeeting,
@@ -42,6 +43,7 @@ from app.core.models import (
     RiskAssessment,
     ScheduledExecution,
     ScheduledJob,
+    Skill,
     StrategicGoal,
     Task,
     TaskHandoff,
@@ -56,7 +58,7 @@ from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementPr
 from app.services.serializers import to_plain
 
 
-SQLITE_SCHEMA_VERSION = 4
+SQLITE_SCHEMA_VERSION = 5
 BASELINE_MIGRATION_VERSION = 1
 BASELINE_MIGRATION_ID = "0001_initial_local_state"
 BASELINE_MIGRATION_DESCRIPTION = "Create initial local AI Company OS state tables."
@@ -69,6 +71,9 @@ BACKUP_RESTORE_LEDGER_MIGRATION_DESCRIPTION = "Record one-time backup restore ap
 SCHEDULER_EVENT_MIGRATION_VERSION = 4
 SCHEDULER_EVENT_MIGRATION_ID = "0004_scheduler_event_bus"
 SCHEDULER_EVENT_MIGRATION_DESCRIPTION = "Add durable schedules, executions, and append-only domain events."
+CATALOG_PERSISTENCE_MIGRATION_VERSION = 5
+CATALOG_PERSISTENCE_MIGRATION_ID = "0005_agent_skill_catalogs"
+CATALOG_PERSISTENCE_MIGRATION_DESCRIPTION = "Persist registered Agent and Skill catalogs."
 
 
 class SQLiteStateStore:
@@ -303,6 +308,14 @@ class SQLiteStateStore:
         rows = self._select_payloads("evaluations", "created_at")
         return [_evaluation_from_plain(row) for row in rows]
 
+    def load_agents(self) -> list[Agent]:
+        rows = self._select_payloads("agents", "agent_id")
+        return [_agent_from_plain(row) for row in rows]
+
+    def load_skills(self) -> list[Skill]:
+        rows = self._select_payloads("skills", "skill_id")
+        return [_skill_from_plain(row) for row in rows]
+
     def load_tools(self) -> list[Tool]:
         rows = self._select_payloads("tools", "tool_id")
         return [_tool_from_plain(row) for row in rows]
@@ -438,6 +451,12 @@ class SQLiteStateStore:
 
     def save_tool(self, tool: Tool) -> None:
         self._upsert("tools", "tool_id", tool.tool_id, to_plain(tool))
+
+    def save_agent(self, agent: Agent) -> None:
+        self._upsert("agents", "agent_id", agent.agent_id, to_plain(agent))
+
+    def save_skill(self, skill: Skill) -> None:
+        self._upsert("skills", "skill_id", skill.skill_id, to_plain(skill))
 
     def save_tool_run(self, run: ToolRun) -> None:
         payload = _json(to_plain(run))
@@ -637,6 +656,8 @@ class SQLiteStateStore:
         memory_records: list[MemoryRecord],
         knowledge_docs: list[KnowledgeDoc],
         evaluations: list[EvaluationRecord],
+        agents: list[Agent],
+        skills: list[Skill],
         tools: list[Tool],
         tool_runs: list[ToolRun],
         workflow_runs: list[WorkflowRun],
@@ -675,6 +696,10 @@ class SQLiteStateStore:
             self.save_knowledge(doc)
         for record in evaluations:
             self.save_evaluation(record)
+        for agent in agents:
+            self.save_agent(agent)
+        for skill in skills:
+            self.save_skill(skill)
         for tool in tools:
             self.save_tool(tool)
         for run in tool_runs:
@@ -743,6 +768,8 @@ class SQLiteStateStore:
                 "strategic_goals",
                 (("goal_id", "goal_id"), ("created_at", "created_at")),
             ),
+            "agents": ("agents", (("agent_id", "agent_id"),)),
+            "skills": ("skills", (("skill_id", "skill_id"),)),
             "tools": ("tools", (("tool_id", "tool_id"),)),
             "tool_runs": (
                 "tool_runs",
@@ -809,8 +836,12 @@ class SQLiteStateStore:
         }
 
         prepared: dict[str, tuple[str, tuple[tuple[str, str], ...], list[dict[str, Any]]]] = {}
+        optional_legacy_collections = {"agents", "skills", "scheduled_jobs"}
         for snapshot_key, (table, columns) in collection_specs.items():
-            records = snapshot.get(snapshot_key, [] if snapshot_key == "scheduled_jobs" else None)
+            records = snapshot.get(
+                snapshot_key,
+                [] if snapshot_key in optional_legacy_collections else None,
+            )
             if not isinstance(records, list):
                 raise ValueError(f"backup snapshot field {snapshot_key} must be a list")
             for record in records:
@@ -922,6 +953,8 @@ class SQLiteStateStore:
             self._apply_backup_restore_execution_ledger(connection)
         if self._current_schema_version(connection) < SCHEDULER_EVENT_MIGRATION_VERSION:
             self._apply_scheduler_event_bus(connection)
+        if self._current_schema_version(connection) < CATALOG_PERSISTENCE_MIGRATION_VERSION:
+            self._apply_catalog_persistence(connection)
 
     def _apply_audit_append_only_guards(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
@@ -1021,6 +1054,32 @@ class SQLiteStateStore:
             ),
         )
         connection.execute(f"PRAGMA user_version = {SCHEDULER_EVENT_MIGRATION_VERSION}")
+
+    def _apply_catalog_persistence(self, connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS agents (
+                agent_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS skills (
+                skill_id TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (migration_id, version, description, applied_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                CATALOG_PERSISTENCE_MIGRATION_ID,
+                CATALOG_PERSISTENCE_MIGRATION_VERSION,
+                CATALOG_PERSISTENCE_MIGRATION_DESCRIPTION,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.execute(f"PRAGMA user_version = {CATALOG_PERSISTENCE_MIGRATION_VERSION}")
 
     def _current_schema_version(self, connection: sqlite3.Connection) -> int:
         cursor = connection.execute("PRAGMA user_version")
@@ -1152,6 +1211,39 @@ def _evaluation_from_plain(payload: dict[str, Any]) -> EvaluationRecord:
         risk_level=RiskLevel(payload.get("risk_level", RiskLevel.LOW.value)),
         record_id=payload["record_id"],
         created_at=_dt(payload["created_at"]) or datetime.min,
+    )
+
+
+def _agent_from_plain(payload: dict[str, Any]) -> Agent:
+    return Agent(
+        agent_id=payload["agent_id"],
+        name=payload["name"],
+        department=payload["department"],
+        role=payload["role"],
+        permissions={PermissionLevel(value) for value in payload.get("permissions", [])},
+        forbidden=set(payload.get("forbidden", [])),
+        allowed_skills=set(payload.get("allowed_skills", [])),
+        allowed_tools=set(payload.get("allowed_tools", [])),
+        reports_to=payload["reports_to"],
+        risk_level=RiskLevel(payload["risk_level"]),
+        version=payload.get("version", "1.0.0"),
+        enabled=payload.get("enabled", True),
+    )
+
+
+def _skill_from_plain(payload: dict[str, Any]) -> Skill:
+    return Skill(
+        skill_id=payload["skill_id"],
+        name=payload["name"],
+        type=payload["type"],
+        description=payload["description"],
+        input_schema=dict(payload.get("input_schema", {})),
+        output_schema=dict(payload.get("output_schema", {})),
+        allowed_agents=set(payload.get("allowed_agents", [])),
+        risk_level=RiskLevel(payload["risk_level"]),
+        requires_approval=payload["requires_approval"],
+        version=payload.get("version", "1.0.0"),
+        enabled=payload.get("enabled", True),
     )
 
 

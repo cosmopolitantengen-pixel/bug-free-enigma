@@ -11,6 +11,7 @@ Backups capture the current AI Company OS state before important changes. Verifi
 - audit logs
 - memory and knowledge records
 - evaluations
+- formal Agent and Skill catalogs
 - tools and tool runs
 - workflow runs and steps
 - model usage and cost logs
@@ -40,6 +41,6 @@ POST /backups/{backup_id}/restore
 
 ## Restore Policy
 
-Restore replaces restorable business state such as tasks, memory, knowledge, evaluations, goals, tools, workflow traces, usage records, proposals, communication records, and scheduled jobs. It deliberately preserves users, approvals, append-only audit logs, domain events, schedule execution history, incidents, backups, and the schema migration ledger. Failed integrity checks do not mutate live state and create an audit event plus incident.
+Restore replaces restorable business state such as Agent and Skill catalogs, tasks, memory, knowledge, evaluations, goals, tools, workflow traces, usage records, proposals, communication records, and scheduled jobs. It deliberately preserves users, approvals, append-only audit logs, domain events, schedule execution history, incidents, backups, and the schema migration ledger. Failed integrity checks do not mutate live state and create an audit event plus incident.
 
 Restore execution is supported only with SQLite persistence. In-memory mode can create and inspect snapshots but cannot apply them durably.

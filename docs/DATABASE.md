@@ -64,6 +64,8 @@ backend/app/persistence/sqlite_store.py
 It currently stores:
 
 - users
+- agents
+- skills
 - tasks
 - approvals
 - audit_logs
@@ -98,7 +100,7 @@ It currently stores:
 
 User records store PBKDF2 password hashes, not plaintext passwords.
 
-SQLite initialization records the baseline migration `0001_initial_local_state`, applies `0002_audit_append_only_guards`, `0003_backup_restore_execution_ledger`, and `0004_scheduler_event_bus`, and sets `PRAGMA user_version` to `4`. The second migration protects `audit_logs`; the third adds a unique restore-approval consumption ledger; the fourth adds durable jobs, execution history, domain events, and append-only event triggers. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
+SQLite initialization records the baseline migration `0001_initial_local_state`, applies `0002_audit_append_only_guards`, `0003_backup_restore_execution_ledger`, `0004_scheduler_event_bus`, and `0005_agent_skill_catalogs`, and sets `PRAGMA user_version` to `5`. The second migration protects `audit_logs`; the third adds a unique restore-approval consumption ledger; the fourth adds durable jobs, execution history, domain events, and append-only event triggers; the fifth adds durable formal Agent and Skill catalogs. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
 
 Skill and Agent proposal payloads include approval state plus sandbox status, notes, and sandbox timestamp. The first implementation stores proposal state as JSON so the future migration layer can promote fields into relational columns when needed.
 
@@ -109,6 +111,8 @@ GitHub absorption payloads store repository URL, README excerpt, license and mai
 Strategic goal payloads store the owner Agent, target metric, target/current values, status, and links to tasks, reviews, and improvement proposals.
 
 Backup payloads store state snapshots, checksums, and controlled rollback plans. Approved restores replace restorable business tables in one transaction while preserving users, approvals, append-only audit logs, incidents, backups, and migration history.
+
+Agent and Skill catalog payloads preserve permissions, forbidden actions, cross-catalog references, schemas, risk, approval, version, and enabled state. Runtime registration validates references before the catalog entry is accepted or persisted.
 
 Agent communication payloads store Agent-to-Agent messages, coordination meeting records, task handoff records, internal broadcasts, and conflict arbitration records. They are included in dashboard summaries and backup snapshots.
 

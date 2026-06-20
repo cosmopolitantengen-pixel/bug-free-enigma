@@ -32,8 +32,8 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(integrity.status_code, 200)
         self.assertEqual(integrity.json()["status"], "warning")
         self.assertIn("persistence_backend", [check["name"] for check in integrity.json()["checks"]])
-        self.assertGreaterEqual(len(agents.json()), 5)
-        self.assertGreaterEqual(len(skills.json()), 5)
+        self.assertEqual(len(agents.json()), 17)
+        self.assertEqual(len(skills.json()), 18)
         self.assertGreaterEqual(len(tools.json()), 5)
         self.assertEqual(workflows.json()[0]["workflow_id"], "document_generation_v1")
 
@@ -52,7 +52,7 @@ class ApiRouteTests(unittest.TestCase):
 
             self.assertEqual(sqlite_schema.status_code, 200)
             self.assertEqual(sqlite_schema.json()["backend"], "sqlite")
-            self.assertEqual(sqlite_schema.json()["schema_version"], 4)
+            self.assertEqual(sqlite_schema.json()["schema_version"], 5)
             self.assertEqual(sqlite_schema.json()["migrations"][0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(sqlite_schema.json()["migrations"][1]["migration_id"], "0002_audit_append_only_guards")
             self.assertEqual(
@@ -63,6 +63,39 @@ class ApiRouteTests(unittest.TestCase):
                 sqlite_schema.json()["migrations"][3]["migration_id"],
                 "0004_scheduler_event_bus",
             )
+            self.assertEqual(
+                sqlite_schema.json()["migrations"][4]["migration_id"],
+                "0005_agent_skill_catalogs",
+            )
+
+    def test_catalog_registration_rejects_unknown_references(self):
+        bad_agent = self.client.post(
+            "/agents",
+            json={
+                "agent_id": "broken_agent_v1",
+                "name": "Broken Agent",
+                "department": "Test",
+                "role": "Must not register.",
+                "permissions": ["L0_READ"],
+                "allowed_skills": ["missing_skill_v1"],
+                "reports_to": "human_root",
+            },
+        )
+        bad_skill = self.client.post(
+            "/skills",
+            json={
+                "skill_id": "broken_skill_v1",
+                "name": "Broken Skill",
+                "type": "test",
+                "description": "Must not register.",
+                "allowed_agents": ["missing_agent_v1"],
+            },
+        )
+
+        self.assertEqual(bad_agent.status_code, 400)
+        self.assertIn("unknown skills", bad_agent.json()["detail"])
+        self.assertEqual(bad_skill.status_code, 400)
+        self.assertIn("unknown agents", bad_skill.json()["detail"])
 
     def test_system_integrity_reports_sqlite_guards_and_backup_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -481,6 +514,7 @@ class ApiRouteTests(unittest.TestCase):
         sandboxed = self.client.post(f"/skills/proposals/{proposal['proposal_id']}/sandbox")
         registered = self.client.post(f"/skills/proposals/{proposal['proposal_id']}/register")
         skills = self.client.get("/skills")
+        requester = self.client.get("/agents/document_agent_v1")
         audit = self.client.get("/audit-logs")
 
         self.assertEqual(blocked_register.status_code, 400)
@@ -492,6 +526,8 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(registered.json()["proposal"]["sandbox_status"], "passed")
         self.assertEqual(registered.json()["skill"]["skill_id"], "course_outline_skill_v1")
         self.assertIn("course_outline_skill_v1", [skill["skill_id"] for skill in skills.json()])
+        self.assertIn("course_outline_skill_v1", requester.json()["allowed_skills"])
+        self.assertIn("document_agent_v1", registered.json()["skill"]["allowed_agents"])
         self.assertIn("skill_proposal_sandboxed", [event["event_type"] for event in audit.json()])
 
     def test_agent_proposal_requires_approval_before_registration(self):

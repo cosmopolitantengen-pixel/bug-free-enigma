@@ -64,3 +64,7 @@ Human Root remains the final authority.
 ## Current Implementation
 
 `POST /agents/missing` creates a stored Agent proposal and links it to an approval request. The proposal must pass `POST /agents/proposals/{proposal_id}/sandbox` and receive Human Root approval before it can be registered through `POST /agents/proposals/{proposal_id}/register`.
+
+All 17 V1 roles are registered at bootstrap with scoped permissions, forbidden actions, Skills, Tools, reporting lines, and risk levels. Catalog validation rejects unknown Skill, Tool, or manager references, rejects asymmetric Agent/Skill authorization, and continues to prohibit `L5_ROOT` for every Agent.
+
+Formal Agent registrations are audited, stored in SQLite, included in backup snapshots, and restored transactionally. Default catalog entries remain code-defined; approved or Human Root-created additions survive process restarts.

@@ -9,6 +9,8 @@
 - Task state machine
 - Agent registration
 - Skill registration
+- V1 Agent/Skill catalog completeness and reference integrity
+- Formal Agent/Skill catalog SQLite reload and backup restore
 - Skill missing handling
 - Agent missing handling
 - Proposal sandbox checks before Skill and Agent registration
@@ -66,6 +68,7 @@ The suite currently covers:
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
 - Skill and Agent proposal persistence plus approval-gated registration
+- Complete 17-Agent/18-Skill V1 bootstrap catalogs, invalid reference rejection, audited formal registration, SQLite reload, and backup rollback
 - Skill and Agent proposal sandbox gating, audit events, dashboard controls, and SQLite reload
 - Evaluation record creation, API exposure, dashboard summary, and SQLite reload
 - Tool registry bootstrap, low-risk internal adapter output, approval-gated Tool Run completion, knowledge/audit/database/filesystem adapters, failed adapter input, filesystem path boundary checks, disallowed/disabled Tool Run blocking, API exposure, dashboard mount points, and SQLite reload
@@ -86,6 +89,6 @@ The suite currently covers:
 - GitHub absorption API routes, approval gating, sandbox gating, dashboard mount points, knowledge registration, audit events, unsafe repository rejection, and SQLite reload
 - Strategic goal API routes, progress auto-completion, dashboard mount points, audit events, and SQLite reload
 - Structured JSON log API routes, category/level filters, dashboard summary fields, and dashboard mount points
-- SQLite baseline migration ledger, audit append-only trigger migration, `user_version`, `/database/schema`, and dashboard mount points
+- SQLite migration ledger through `0005_agent_skill_catalogs`, audit append-only trigger migration, `user_version`, `/database/schema`, and dashboard mount points
 - System integrity checks for memory mode warnings, SQLite audit guards, backup checksums, and dashboard exposure
 - Durable scheduler and event-bus API routes, one-time/recurring timing, controls, failure incidents, append-only event triggers, dashboard controls, and SQLite reload

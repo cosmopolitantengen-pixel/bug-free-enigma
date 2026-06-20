@@ -237,6 +237,8 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 
 `GET /database/schema` returns the active persistence backend. In memory mode it reports `backend=memory` with no schema version. In SQLite mode it reports `backend=sqlite`, the current `schema_version`, and the applied migration ledger from `schema_migrations`.
 
+`POST /agents` and `POST /skills` validate every referenced Skill, Tool, Agent, and reporting line before Human Root registration. Accepted entries write audit events and persist in SQLite. Factory-approved registrations use the same durable catalogs.
+
 `GET /system/integrity` returns operational self-checks for persistence backend, schema version, SQLite audit append-only guards, backup checksum state, open incidents, pending approvals, and budget policy status. It reports an overall `ok`, `warning`, or `critical` status plus individual check messages.
 
 `GET /dashboard/summary` returns operational sections for the dashboard:
@@ -296,7 +298,7 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 
 `GET /incidents` returns blocked or operationally risky events that need follow-up. Blocked approval requests, blocked Tool Runs, blocked Workflow tasks, and over-budget model calls create incidents. `POST /incidents/{incident_id}/acknowledge` records who acknowledged the issue. `POST /incidents/{incident_id}/resolve` closes the incident with an optional resolution note. Incident updates are audited.
 
-`POST /backups` creates a state snapshot with a controlled rollback plan and deterministic snapshot checksum, then writes a `backup_created` audit event. `GET /backups` lists stored backups. `POST /backups/{backup_id}/verify` recomputes the snapshot checksum, reports verified/mismatched/missing-checksum status, and writes a `backup_verified` audit event. `POST /backups/{backup_id}/restore-request` creates a high-risk restore approval only when checksum verification passes; failed integrity checks are blocked, audited, and incidented. `POST /backups/{backup_id}/restore` applies a verified snapshot to SQLite after a matching Human Root approval, creates a pre-restore safety checkpoint, rejects approval replay, and preserves users, approvals, append-only audit history, incidents, backups, and migrations.
+`POST /backups` creates a state snapshot, including formal Agent and Skill catalogs, with a controlled rollback plan and deterministic snapshot checksum, then writes a `backup_created` audit event. `GET /backups` lists stored backups. `POST /backups/{backup_id}/verify` recomputes the snapshot checksum, reports verified/mismatched/missing-checksum status, and writes a `backup_verified` audit event. `POST /backups/{backup_id}/restore-request` creates a high-risk restore approval only when checksum verification passes; failed integrity checks are blocked, audited, and incidented. `POST /backups/{backup_id}/restore` applies a verified snapshot to SQLite after a matching Human Root approval, creates a pre-restore safety checkpoint, rejects approval replay, and preserves users, approvals, append-only audit history, incidents, backups, and migrations.
 
 `POST /agent-messages` stores an Agent-to-Agent message after validating both Agents exist and writes an `agent_message_sent` audit event. `GET /agent-messages` lists messages and can filter by `agent_id` or `task_id`.
 

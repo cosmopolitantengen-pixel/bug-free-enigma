@@ -77,6 +77,8 @@ Current status:
 - Backup restore requests require checksum verification; approved SQLite restores recheck integrity, create a pre-restore checkpoint, replace business state transactionally, and preserve control-plane history.
 - System integrity checks expose persistence, schema, audit guard, backup, incident, approval, and budget status through API and dashboard.
 - Durable one-time and recurring internal schedules can create or run tasks through an explicit Human Root tick, with lifecycle controls, execution history, incidents, audit events, and append-only domain events.
+- The complete V1 catalog now boots with 17 scoped Agents and 18 registered Skills, with cross-catalog reference validation.
+- Formal Agent and Skill registrations are audited, persisted in SQLite, included in verified backups, and restored transactionally.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence

@@ -53,3 +53,7 @@ Missing Skills do not fail silently. The system should:
 ## Current Implementation
 
 `POST /skills/missing` creates a stored Skill proposal and links it to an approval request. The proposal must pass `POST /skills/proposals/{proposal_id}/sandbox` and receive Human Root approval before it can be registered through `POST /skills/proposals/{proposal_id}/register`.
+
+All 18 V1 Skills are registered at bootstrap with input/output schemas, allowed Agent sets, risk levels, approval requirements, and enabled state. Catalog validation rejects Skill definitions that reference unknown Agents. Accepted Human Root or Factory registrations update both the Skill's allowed-Agent set and the Agent's allowed-Skill set so the capability is callable under the existing two-sided authorization check.
+
+Formal Skill registrations are audited, stored in SQLite, included in backup snapshots, and restored transactionally. Code generation, GitHub analysis, and temporary Skill creation remain approval-gated capabilities; registering metadata does not execute code or external content.

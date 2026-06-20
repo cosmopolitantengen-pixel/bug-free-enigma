@@ -13,6 +13,7 @@ The first version focuses on the operating foundation:
 - Human Root can create verified state backups and apply approval-gated SQLite restores with automatic pre-restore checkpoints.
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
+- The V1 catalog boots with 17 scoped Agent roles and 18 registered Skills; approved catalog additions persist across restarts.
 - Memory and Knowledge Base receive completed work so the system can improve over time.
 - Durable schedules can create or run internal tasks and publish append-only domain events.
 
@@ -47,7 +48,7 @@ To enable local SQLite persistence for the API, set:
 $env:AI_COMPANY_OS_SQLITE_PATH='E:\1\data\company_os.db'
 ```
 
-The current SQLite adapter persists tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, tool runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
+The current SQLite adapter persists Agent and Skill catalogs, tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, tool runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
 It also persists local users with PBKDF2 password hashes for the development auth flow.
 
 ## Local Dashboard

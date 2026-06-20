@@ -28,9 +28,9 @@ class PersistenceTests(unittest.TestCase):
             store = SQLiteStateStore(db_path)
             reloaded = SQLiteStateStore(db_path)
 
-            self.assertEqual(store.schema_version(), 4)
-            self.assertEqual(reloaded.schema_version(), 4)
-            self.assertEqual(len(reloaded.list_schema_migrations()), 4)
+            self.assertEqual(store.schema_version(), 5)
+            self.assertEqual(reloaded.schema_version(), 5)
+            self.assertEqual(len(reloaded.list_schema_migrations()), 5)
             self.assertEqual(reloaded.list_schema_migrations()[0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(reloaded.list_schema_migrations()[0]["version"], 1)
             self.assertEqual(reloaded.list_schema_migrations()[1]["migration_id"], "0002_audit_append_only_guards")
@@ -45,6 +45,11 @@ class PersistenceTests(unittest.TestCase):
                 "0004_scheduler_event_bus",
             )
             self.assertEqual(reloaded.list_schema_migrations()[3]["version"], 4)
+            self.assertEqual(
+                reloaded.list_schema_migrations()[4]["migration_id"],
+                "0005_agent_skill_catalogs",
+            )
+            self.assertEqual(reloaded.list_schema_migrations()[4]["version"], 5)
 
             with closing(sqlite3.connect(db_path)) as connection:
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -61,7 +66,7 @@ class PersistenceTests(unittest.TestCase):
                     ).fetchall()
                 }
 
-            self.assertEqual(user_version, 4)
+            self.assertEqual(user_version, 5)
             self.assertIn("schema_migrations", table_names)
             self.assertIn("audit_logs", table_names)
             self.assertIn("workflow_runs", table_names)
@@ -69,10 +74,61 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("domain_events", table_names)
             self.assertIn("scheduled_jobs", table_names)
             self.assertIn("scheduled_executions", table_names)
+            self.assertIn("agents", table_names)
+            self.assertIn("skills", table_names)
             self.assertIn("audit_logs_no_update", trigger_names)
             self.assertIn("audit_logs_no_delete", trigger_names)
             self.assertIn("domain_events_no_update", trigger_names)
             self.assertIn("domain_events_no_delete", trigger_names)
+
+    def test_registered_agent_and_skill_catalogs_survive_restart(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "catalogs.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            skill = first.post(
+                "/skills",
+                json={
+                    "skill_id": "training_outline_skill_v1",
+                    "name": "Training Outline Skill",
+                    "type": "knowledge",
+                    "description": "Prepare internal training outlines.",
+                    "input_schema": {"topic": "string"},
+                    "output_schema": {"outline": "array"},
+                    "allowed_agents": ["document_agent_v1"],
+                    "risk_level": "low",
+                    "requires_approval": False,
+                    "enabled": False,
+                },
+            )
+            agent = first.post(
+                "/agents",
+                json={
+                    "agent_id": "training_agent_v1",
+                    "name": "Training Agent",
+                    "department": "Knowledge",
+                    "role": "Prepare internal training material.",
+                    "permissions": ["L0_READ", "L1_DRAFT"],
+                    "allowed_skills": ["training_outline_skill_v1"],
+                    "allowed_tools": ["knowledge_base_tool"],
+                    "reports_to": "ceo_agent_v1",
+                    "risk_level": "low",
+                    "enabled": False,
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            skills = {item["skill_id"]: item for item in second.get("/skills").json()}
+            agents = {item["agent_id"]: item for item in second.get("/agents").json()}
+            audit_types = [item["event_type"] for item in second.get("/audit-logs").json()]
+
+            self.assertEqual(skill.status_code, 200)
+            self.assertEqual(agent.status_code, 200)
+            self.assertFalse(skills["training_outline_skill_v1"]["enabled"])
+            self.assertFalse(agents["training_agent_v1"]["enabled"])
+            self.assertIn("training_agent_v1", skills["training_outline_skill_v1"]["allowed_agents"])
+            self.assertIn("training_outline_skill_v1", agents["training_agent_v1"]["allowed_skills"])
+            self.assertIn("skill_registered", audit_types)
+            self.assertIn("agent_registered", audit_types)
 
     def test_sqlite_audit_logs_are_append_only_at_database_layer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -284,6 +340,33 @@ class PersistenceTests(unittest.TestCase):
                     "next_run_at": "2032-01-01T00:00:00+00:00",
                 },
             ).json()
+            later_skill = client.post(
+                "/skills",
+                json={
+                    "skill_id": "post_backup_skill_v1",
+                    "name": "Post Backup Skill",
+                    "type": "test",
+                    "description": "This catalog entry must be removed by restore.",
+                    "allowed_agents": ["document_agent_v1"],
+                    "risk_level": "low",
+                    "requires_approval": False,
+                    "enabled": False,
+                },
+            ).json()
+            later_agent = client.post(
+                "/agents",
+                json={
+                    "agent_id": "post_backup_agent_v1",
+                    "name": "Post Backup Agent",
+                    "department": "Test",
+                    "role": "This catalog entry must be removed by restore.",
+                    "permissions": ["L0_READ"],
+                    "allowed_skills": [later_skill["skill_id"]],
+                    "reports_to": "ceo_agent_v1",
+                    "risk_level": "low",
+                    "enabled": False,
+                },
+            ).json()
             later_task = client.post(
                 "/tasks",
                 json={"title": "Later task", "description": "Remove this task during restore."},
@@ -314,6 +397,8 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(restored.json()["result"], "restored")
             self.assertEqual(restored.json()["restored_counts"]["tasks"], 1)
             self.assertEqual(restored.json()["restored_counts"]["memory"], 0)
+            self.assertEqual(restored.json()["restored_counts"]["agents"], 17)
+            self.assertEqual(restored.json()["restored_counts"]["skills"], 18)
             self.assertEqual(restored.json()["verification"]["status"], "verified")
             self.assertIn(later_task["task_id"], [
                 task["task_id"]
@@ -322,6 +407,14 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn(later_schedule["schedule_id"], [
                 job["schedule_id"]
                 for job in restored.json()["safety_backup"]["snapshot"]["scheduled_jobs"]
+            ])
+            self.assertIn(later_agent["agent_id"], [
+                agent["agent_id"]
+                for agent in restored.json()["safety_backup"]["snapshot"]["agents"]
+            ])
+            self.assertIn(later_skill["skill_id"], [
+                skill["skill_id"]
+                for skill in restored.json()["safety_backup"]["snapshot"]["skills"]
             ])
 
             reloaded = TestClient(create_app(sqlite_path=db_path))
@@ -334,6 +427,12 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(reloaded.get("/memory").json(), [])
             self.assertEqual(reloaded.get("/knowledge").json(), [])
             self.assertEqual(reloaded.get("/schedules").json(), [])
+            self.assertNotIn(later_agent["agent_id"], [
+                agent["agent_id"] for agent in reloaded.get("/agents").json()
+            ])
+            self.assertNotIn(later_skill["skill_id"], [
+                skill["skill_id"] for skill in reloaded.get("/skills").json()
+            ])
             self.assertEqual(len(backups), 2)
             self.assertIn(approval_id, [approval["approval_id"] for approval in approvals])
             self.assertGreater(len(audit_logs), audit_count_before_restore)

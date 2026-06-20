@@ -51,6 +51,8 @@ class CompanyApplicationService:
         loaded_memory = self.persistence.load_memory()
         loaded_knowledge = self.persistence.load_knowledge()
         loaded_evaluations = self.persistence.load_evaluations()
+        loaded_agents = self.persistence.load_agents()
+        loaded_skills = self.persistence.load_skills()
         loaded_tools = self.persistence.load_tools()
         loaded_tool_runs = self.persistence.load_tool_runs()
         loaded_workflow_runs = self.persistence.load_workflow_runs()
@@ -89,6 +91,8 @@ class CompanyApplicationService:
             memory_records=loaded_memory,
             knowledge_docs=loaded_knowledge,
             evaluations=loaded_evaluations,
+            registered_agents=loaded_agents,
+            registered_skills=loaded_skills,
             tools=loaded_tools,
             model_usage=loaded_model_usage,
             cost_logs=loaded_cost_logs,
@@ -120,6 +124,8 @@ class CompanyApplicationService:
             memory_records=list(self.company_os.memory.list()),
             knowledge_docs=list(self.company_os.knowledge.list()),
             evaluations=list(self.company_os.evaluations.list()),
+            agents=list(self.company_os.agents.list()),
+            skills=list(self.company_os.skills.list()),
             tools=list(self.company_os.tools.list()),
             tool_runs=list(self.tool_runs.values()),
             workflow_runs=list(self.company_os.traces.list_runs()),
@@ -218,6 +224,7 @@ class CompanyApplicationService:
         version: str,
         enabled: bool,
     ) -> dict:
+        self._validate_agent_catalog_entry(agent_id, allowed_skills, allowed_tools, reports_to)
         agent = Agent(
             agent_id=agent_id,
             name=name,
@@ -232,7 +239,22 @@ class CompanyApplicationService:
             version=version,
             enabled=enabled,
         )
-        return to_plain(self.company_os.agents.register(agent))
+        registered = self.company_os.agents.register(agent)
+        for skill_id in registered.allowed_skills:
+            self.company_os.skills.allow_agent(skill_id, registered.agent_id)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="agent_registered",
+                actor_id="human_root",
+                action="register_agent",
+                task_id=None,
+                risk_level=risk_level,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=registered.agent_id,
+            )
+        )
+        self.sync()
+        return to_plain(registered)
 
     def list_skills(self) -> list[dict]:
         return [to_plain(skill) for skill in self.company_os.skills.list()]
@@ -251,6 +273,7 @@ class CompanyApplicationService:
         version: str,
         enabled: bool,
     ) -> dict:
+        self._validate_skill_catalog_entry(skill_id, allowed_agents)
         skill = Skill(
             skill_id=skill_id,
             name=name,
@@ -264,7 +287,22 @@ class CompanyApplicationService:
             version=version,
             enabled=enabled,
         )
-        return to_plain(self.company_os.skills.register(skill))
+        registered = self.company_os.skills.register(skill)
+        for agent_id in registered.allowed_agents:
+            self.company_os.agents.grant_skill(agent_id, registered.skill_id)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="skill_registered",
+                actor_id="human_root",
+                action="register_skill",
+                task_id=None,
+                risk_level=risk_level,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=registered.skill_id,
+            )
+        )
+        self.sync()
+        return to_plain(registered)
 
     def search_skills(self, query: str) -> list[dict]:
         return [to_plain(skill) for skill in self.company_os.skills.search(query)]
@@ -2220,6 +2258,7 @@ class CompanyApplicationService:
         skill_id = f"{self._slug(proposal.name)}_v1"
         if skill_id in {skill.skill_id for skill in self.company_os.skills.list()}:
             raise ValueError(f"skill already exists for proposal: {skill_id}")
+        self._validate_skill_catalog_entry(skill_id, [proposal.requested_by_agent])
         skill = self.company_os.skills.register(
             Skill(
                 skill_id=skill_id,
@@ -2234,6 +2273,7 @@ class CompanyApplicationService:
                 enabled=True,
             )
         )
+        self.company_os.agents.grant_skill(proposal.requested_by_agent, skill.skill_id)
         proposal.status = ProposalStatus.REGISTERED
         self.company_os.audit.append(
             AuditEvent(
@@ -2258,6 +2298,12 @@ class CompanyApplicationService:
         agent_id = f"{self._slug(proposal.name)}_v1"
         if agent_id in {agent.agent_id for agent in self.company_os.agents.list()}:
             raise ValueError(f"agent already exists for proposal: {agent_id}")
+        self._validate_agent_catalog_entry(
+            agent_id,
+            list(proposal.proposed_skills),
+            [],
+            "ceo_agent_v1",
+        )
         common_forbidden = {
             "execute_payment",
             "execute_refund",
@@ -2281,6 +2327,8 @@ class CompanyApplicationService:
                 enabled=True,
             )
         )
+        for skill_id in agent.allowed_skills:
+            self.company_os.skills.allow_agent(skill_id, agent.agent_id)
         proposal.status = ProposalStatus.REGISTERED
         self.company_os.audit.append(
             AuditEvent(
@@ -2753,6 +2801,8 @@ class CompanyApplicationService:
             "memory": to_plain(self.company_os.memory.list()),
             "knowledge": to_plain(self.company_os.knowledge.list()),
             "evaluations": to_plain(self.company_os.evaluations.list()),
+            "agents": to_plain(self.company_os.agents.list()),
+            "skills": to_plain(self.company_os.skills.list()),
             "strategic_goals": to_plain(self.company_os.goals.list()),
             "tools": to_plain(self.company_os.tools.list()),
             "tool_runs": to_plain(list(self.tool_runs.values())),
@@ -2911,6 +2961,35 @@ class CompanyApplicationService:
             "status": status,
             "message": f"{len(failed)} failed and {len(overdue)} overdue scheduled jobs.",
         }
+
+    def _validate_agent_catalog_entry(
+        self,
+        agent_id: str,
+        allowed_skills: list[str],
+        allowed_tools: list[str],
+        reports_to: str,
+    ) -> None:
+        if not agent_id.strip():
+            raise ValueError("agent_id is required")
+        known_skills = {skill.skill_id for skill in self.company_os.skills.list()}
+        known_tools = {tool.tool_id for tool in self.company_os.tools.list()}
+        known_agents = {agent.agent_id for agent in self.company_os.agents.list()}
+        unknown_skills = set(allowed_skills) - known_skills
+        unknown_tools = set(allowed_tools) - known_tools
+        if unknown_skills:
+            raise ValueError(f"agent references unknown skills: {sorted(unknown_skills)}")
+        if unknown_tools:
+            raise ValueError(f"agent references unknown tools: {sorted(unknown_tools)}")
+        if reports_to != "human_root" and reports_to not in known_agents:
+            raise ValueError(f"agent reports to unknown agent: {reports_to}")
+
+    def _validate_skill_catalog_entry(self, skill_id: str, allowed_agents: list[str]) -> None:
+        if not skill_id.strip():
+            raise ValueError("skill_id is required")
+        known_agents = {agent.agent_id for agent in self.company_os.agents.list()}
+        unknown_agents = set(allowed_agents) - known_agents
+        if unknown_agents:
+            raise ValueError(f"skill references unknown agents: {sorted(unknown_agents)}")
 
     def _count_by_value(self, values) -> dict[str, int]:
         counts: dict[str, int] = {}
