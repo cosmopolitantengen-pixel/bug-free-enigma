@@ -301,6 +301,60 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(handoffs[0]["message_id"], messages[0]["message_id"])
             self.assertIn("agent_collaboration_v1", [record["subject_id"] for record in evaluations])
 
+    def test_skill_missing_workflow_proposal_state_persists_through_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "skill_missing_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            resolved = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "skill_missing_v1",
+                    "title": "Persistent Skill gap",
+                    "description": "Persist the controlled resolution path for an actual capability gap.",
+                    "input": {
+                        "capability": "Persistent Quiz Matrix Generation",
+                        "requested_by_agent": "document_agent_v1",
+                        "risk_level": "medium",
+                    },
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            waiting_task = second.get("/tasks").json()[0]
+            waiting_run = second.get("/workflow-runs").json()[0]
+            second.post(
+                f"/approvals/{waiting_task['approval_id']}/approve",
+                json={"note": "Approve after SQLite reload."},
+            )
+            resumed = second.post(f"/tasks/{waiting_task['task_id']}/resume")
+
+            third = TestClient(create_app(sqlite_path=db_path))
+            tasks = third.get("/tasks").json()
+            runs = third.get("/workflow-runs").json()
+            steps = third.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
+            skill_runs = third.get("/skills/runs").json()
+            proposals = third.get("/skills/proposals").json()
+            approvals = third.get("/approvals").json()
+            evaluations = third.get("/evaluations").json()
+
+            self.assertEqual(resolved.status_code, 200)
+            self.assertEqual(resolved.json()["outcome"], "skill_approval")
+            self.assertEqual(waiting_run["status"], "waiting_approval")
+            self.assertEqual(resumed.status_code, 200)
+            self.assertEqual(resumed.json()["outcome"], "proposal")
+            self.assertEqual(tasks[0]["status"], "needs_approval")
+            self.assertEqual(tasks[0]["approval_id"], proposals[0]["approval_id"])
+            self.assertEqual(runs[0]["workflow_id"], "skill_missing_v1")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(
+                [step["status"] for step in steps],
+                ["completed", "completed", "waiting_approval", "completed"],
+            )
+            self.assertEqual(len(skill_runs), 3)
+            self.assertEqual(proposals[0]["status"], "pending_approval")
+            self.assertEqual(len(approvals), 2)
+            self.assertIn("skill_missing_v1", [record["subject_id"] for record in evaluations])
+
     def test_quality_check_workflow_state_persists_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "quality_workflow.db")

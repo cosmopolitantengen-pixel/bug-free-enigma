@@ -458,6 +458,7 @@ class CompanyApplicationService:
             "document_generation_v1",
             "task_planning_v1",
             "agent_collaboration_v1",
+            "skill_missing_v1",
             "quality_check_v1",
             "retrospective_v1",
         }:
@@ -465,6 +466,8 @@ class CompanyApplicationService:
         workflow_input = input or {}
         if workflow_id == "agent_collaboration_v1":
             self.company_os.agent_collaboration_workflow.validate_input(workflow_input, description)
+        if workflow_id == "skill_missing_v1":
+            self.company_os.skill_missing_workflow.validate_input(workflow_input, description)
         if workflow_id == "retrospective_v1":
             self.company_os.retrospective_workflow.validate_input(workflow_input, description)
             source_task_id = workflow_input.get("source_task_id")
@@ -501,6 +504,25 @@ class CompanyApplicationService:
                 "approval_required": False,
                 "blocked": collaboration_result.blocked,
                 "incident": to_plain(collaboration_result.incident) if collaboration_result.incident else None,
+            }
+        if workflow_id == "skill_missing_v1":
+            missing_result = self.company_os.skill_missing_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(missing_result.task),
+                "output": missing_result.output,
+                "outcome": missing_result.outcome,
+                "replacement": missing_result.replacement,
+                "composition": missing_result.composition,
+                "temporary_skill": missing_result.temporary_skill,
+                "proposal": missing_result.proposal,
+                "approval_required": missing_result.approval_required,
+                "blocked": missing_result.blocked,
+                "incident": to_plain(missing_result.incident) if missing_result.incident else None,
             }
         if workflow_id == "quality_check_v1":
             quality_result = self.company_os.quality_check_workflow.run(self.tasks[task["task_id"]])
@@ -1925,6 +1947,22 @@ class CompanyApplicationService:
 
     def resume_task(self, task_id: str) -> dict:
         task = self.tasks[task_id]
+        workflow_run = self.company_os.traces.latest_run_for_task(task_id)
+        if workflow_run and workflow_run.workflow_id == "skill_missing_v1":
+            result = self.company_os.skill_missing_workflow.resume_after_approval(task)
+            self.sync()
+            return {
+                "task": to_plain(result.task),
+                "output": result.output,
+                "outcome": result.outcome,
+                "replacement": result.replacement,
+                "composition": result.composition,
+                "temporary_skill": result.temporary_skill,
+                "proposal": result.proposal,
+                "approval_required": result.approval_required,
+                "blocked": result.blocked,
+                "incident": to_plain(result.incident) if result.incident else None,
+            }
         result = self.company_os.document_workflow.resume_after_approval(task)
         incident = None
         if result.blocked:
@@ -2883,6 +2921,10 @@ class CompanyApplicationService:
         self.company_os.document_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.task_planning_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.agent_collaboration_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.skill_missing_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.skill_missing_workflow.set_skill_requester(self.request_skill_run)
+        self.company_os.skill_missing_workflow.set_skill_continuation(self._continue_workflow_skill)
+        self.company_os.skill_missing_workflow.set_proposal_creator(self.missing_skill)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
 
@@ -2900,6 +2942,30 @@ class CompanyApplicationService:
             detail = run.get("error") or f"Skill run entered {run['status']}"
             raise PermissionError(f"{skill_id}: {detail}")
         return json.loads(run["result"])
+
+    def _continue_workflow_skill(self, task_id: str, skill_id: str) -> dict:
+        candidates = [
+            run
+            for run in self.skill_runs.values()
+            if run.task_id == task_id and run.skill_id == skill_id
+        ]
+        if not candidates:
+            raise ValueError("workflow Skill Run not found")
+        run = candidates[-1]
+        if run.status == SkillRunStatus.WAITING_APPROVAL:
+            return self.complete_skill_run(
+                run.run_id,
+                completed_by="human_root",
+                note="Resume approved Skill Missing Workflow step.",
+            )
+        if run.status == SkillRunStatus.COMPLETED:
+            approval = self.company_os.approvals.get(run.approval_id) if run.approval_id else None
+            return {
+                "skill": to_plain(self.company_os.skills.get(run.skill_id)),
+                "run": to_plain(run),
+                "approval": to_plain(approval) if approval else None,
+            }
+        raise ValueError(f"workflow Skill Run cannot continue from {run.status.value}")
 
     def _authorize_schedule_actor(self, actor_id: str) -> None:
         if actor_id == "human_root":

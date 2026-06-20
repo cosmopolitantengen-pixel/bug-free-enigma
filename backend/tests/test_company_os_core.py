@@ -346,6 +346,35 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(service.list_workflow_steps()[-1]["status"], "blocked")
         self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
 
+    def test_skill_missing_workflow_blocks_when_temporary_skill_runtime_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        skill = company_os.skills.get("temporary_skill_creation_skill_v1")
+        company_os.skills.restore(replace(skill, enabled=False))
+        service = CompanyApplicationService(company_os=company_os)
+
+        result = service.run_registered_workflow(
+            "skill_missing_v1",
+            "Blocked missing Skill handler",
+            "A unique capability must reach the disabled temporary Skill step.",
+            input={
+                "capability": "Unique Scenario Matrix Builder",
+                "requested_by_agent": "document_agent_v1",
+                "risk_level": "medium",
+            },
+        )
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["outcome"], "blocked")
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertIsNone(result["proposal"])
+        self.assertEqual([run["status"] for run in service.list_skill_runs()], ["completed", "completed", "blocked"])
+        self.assertEqual([step["status"] for step in service.list_workflow_steps()], ["completed", "completed", "blocked"])
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
+
     def test_document_workflow_resumes_after_approval(self):
         from app.services.company import CompanyApplicationService
 

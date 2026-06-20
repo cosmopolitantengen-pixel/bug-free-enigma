@@ -108,6 +108,7 @@ class WorkflowRunStatus(str, Enum):
 class WorkflowStepStatus(str, Enum):
     STARTED = "started"
     COMPLETED = "completed"
+    SKIPPED = "skipped"
     WAITING_APPROVAL = "waiting_approval"
     BLOCKED = "blocked"
     FAILED = "failed"

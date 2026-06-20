@@ -97,7 +97,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="skill_missing_v1",
             name="Skill Missing Handling",
             description="Search, compose, sandbox, approve, and register missing capability safely.",
-            entrypoint="POST /skills/missing",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "detect_skill_gap", "capability_gap_detector_agent_v1", "detect_skill_gap", PermissionLevel.L1_DRAFT, "skill_search_skill_v1"),
                 step(2, "search_or_compose", "skill_manager_agent_v1", "compose_skill", PermissionLevel.L2_INTERNAL_WRITE, "skill_composition_skill_v1"),

@@ -54,6 +54,7 @@ from app.workflows.document_generation import DocumentGenerationWorkflow
 from app.workflows.quality_check import QualityCheckWorkflow
 from app.workflows.retrospective import RetrospectiveWorkflow
 from app.workflows.registry import WorkflowRegistry, default_workflows
+from app.workflows.skill_missing import SkillMissingWorkflow
 from app.workflows.task_planning import TaskPlanningWorkflow
 from app.workflows.traces import WorkflowTraceStore
 
@@ -86,6 +87,7 @@ class CompanyOS:
     document_workflow: DocumentGenerationWorkflow
     task_planning_workflow: TaskPlanningWorkflow
     agent_collaboration_workflow: AgentCollaborationWorkflow
+    skill_missing_workflow: SkillMissingWorkflow
     quality_check_workflow: QualityCheckWorkflow
     retrospective_workflow: RetrospectiveWorkflow
 
@@ -205,6 +207,17 @@ def build_company_os(
         incidents=incident_store,
         traces=traces,
     )
+    skill_missing_workflow = SkillMissingWorkflow(
+        workflows=workflows,
+        agents=agents,
+        skills=skills,
+        permissions=permissions,
+        risks=risks,
+        audit=audit,
+        evaluations=evaluation_store,
+        incidents=incident_store,
+        traces=traces,
+    )
     quality_check_workflow = QualityCheckWorkflow(
         workflows=workflows,
         audit=audit,
@@ -248,6 +261,7 @@ def build_company_os(
         document_workflow=document_workflow,
         task_planning_workflow=task_planning_workflow,
         agent_collaboration_workflow=agent_collaboration_workflow,
+        skill_missing_workflow=skill_missing_workflow,
         quality_check_workflow=quality_check_workflow,
         retrospective_workflow=retrospective_workflow,
     )

@@ -141,6 +141,136 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get("/tasks").json(), [])
         self.assertEqual(self.client.get("/workflow-runs").json(), [])
 
+    def test_skill_missing_workflow_reuses_authorized_replacement(self):
+        resolved = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "skill_missing_v1",
+                "title": "Resolve document capability",
+                "description": "Find an existing controlled document capability before creating anything new.",
+                "input": {
+                    "capability": "Document Writing",
+                    "requested_by_agent": "document_agent_v1",
+                    "risk_level": "low",
+                },
+            },
+        )
+        payload = resolved.json()
+        workflow = self.client.get("/workflows/skill_missing_v1").json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(workflow["execution_mode"], "native")
+        self.assertEqual(payload["outcome"], "replacement")
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertEqual(payload["replacement"]["skill_id"], "document_writer_skill_v1")
+        self.assertIsNone(payload["proposal"])
+        self.assertEqual([step["status"] for step in steps], ["completed", "skipped", "skipped"])
+        self.assertEqual(len(skill_runs), 1)
+        self.assertEqual(self.client.get("/skills/proposals").json(), [])
+
+    def test_skill_missing_workflow_uses_authorized_composition(self):
+        resolved = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "skill_missing_v1",
+                "title": "Compose briefing capability",
+                "description": "Combine registered capabilities for the requested internal work.",
+                "input": {
+                    "capability": "Polished internal briefing",
+                    "requested_by_agent": "document_agent_v1",
+                    "allow_replacement": False,
+                    "candidate_skill_ids": ["summary_skill_v1", "rewrite_skill_v1"],
+                },
+            },
+        )
+        payload = resolved.json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(payload["outcome"], "composition")
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertEqual(
+            [step["skill_id"] for step in payload["composition"]["steps"]],
+            ["summary_skill_v1", "rewrite_skill_v1"],
+        )
+        self.assertIsNone(payload["proposal"])
+        self.assertEqual([step["status"] for step in steps], ["completed", "completed", "skipped"])
+        self.assertEqual(len(skill_runs), 2)
+
+    def test_skill_missing_workflow_routes_real_gap_to_controlled_proposal(self):
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "skill_missing_v1",
+                "title": "Resolve quiz matrix gap",
+                "description": "No registered capability can produce the requested quiz matrix.",
+                "input": {
+                    "capability": "Quiz Matrix Generation",
+                    "requested_by_agent": "document_agent_v1",
+                    "risk_level": "medium",
+                    "constraints": ["internal draft only", "no external publication"],
+                },
+            },
+        )
+        waiting_payload = waiting.json()
+        approved = self.client.post(
+            f"/approvals/{waiting_payload['task']['approval_id']}/approve",
+            json={"note": "Approve constrained temporary Skill preparation."},
+        )
+        resolved = self.client.post(f"/tasks/{waiting_payload['task']['task_id']}/resume")
+        payload = resolved.json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+        proposals = self.client.get("/skills/proposals").json()
+
+        self.assertEqual(waiting.status_code, 200)
+        self.assertEqual(waiting_payload["outcome"], "skill_approval")
+        self.assertTrue(waiting_payload["approval_required"])
+        self.assertEqual(waiting_payload["task"]["status"], "needs_approval")
+        self.assertIsNone(waiting_payload["proposal"])
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(payload["outcome"], "proposal")
+        self.assertTrue(payload["approval_required"])
+        self.assertEqual(payload["task"]["status"], "needs_approval")
+        self.assertEqual(payload["task"]["approval_id"], payload["proposal"]["approval_id"])
+        self.assertEqual(payload["proposal"]["status"], "pending_approval")
+        self.assertFalse(payload["temporary_skill"]["enabled"])
+        self.assertEqual(
+            [step["status"] for step in steps],
+            ["completed", "completed", "waiting_approval", "completed"],
+        )
+        self.assertEqual(len(skill_runs), 3)
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(runs[-1]["status"], "completed")
+
+    def test_skill_missing_workflow_rejects_unauthorized_composition_before_task_creation(self):
+        rejected = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "skill_missing_v1",
+                "title": "Reject unauthorized composition",
+                "description": "Document Agent must not borrow Tech Agent capability.",
+                "input": {
+                    "capability": "Internal code generation",
+                    "requested_by_agent": "document_agent_v1",
+                    "allow_replacement": False,
+                    "candidate_skill_ids": ["code_generation_skill_v1"],
+                },
+            },
+        )
+
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("not enabled and authorized", rejected.json()["detail"])
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/workflow-runs").json(), [])
+
     def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
         checked = self.client.post(
             "/workflows/run",
@@ -249,14 +379,14 @@ class ApiRouteTests(unittest.TestCase):
         response = self.client.post(
             "/workflows/run",
             json={
-                "workflow_id": "skill_missing_v1",
+                "workflow_id": "agent_missing_v1",
                 "title": "Wrong entrypoint",
-                "description": "Must use the missing Skill endpoint.",
+                "description": "Must use the missing Agent endpoint.",
             },
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("POST /skills/missing", response.json()["detail"])
+        self.assertIn("POST /agents/missing", response.json()["detail"])
         self.assertEqual(len(self.client.get("/tasks").json()), task_count)
 
     def test_database_schema_reports_memory_and_sqlite_backends(self):
