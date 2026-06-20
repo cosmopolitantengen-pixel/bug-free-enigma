@@ -51,6 +51,7 @@ from app.skills.registry import SkillRegistry, default_skills
 from app.tools.registry import ToolRegistry, default_tools
 from app.workflows.agent_collaboration import AgentCollaborationWorkflow
 from app.workflows.agent_missing import AgentMissingWorkflow
+from app.workflows.approval import ApprovalWorkflow
 from app.workflows.document_generation import DocumentGenerationWorkflow
 from app.workflows.quality_check import QualityCheckWorkflow
 from app.workflows.retrospective import RetrospectiveWorkflow
@@ -90,6 +91,7 @@ class CompanyOS:
     agent_collaboration_workflow: AgentCollaborationWorkflow
     skill_missing_workflow: SkillMissingWorkflow
     agent_missing_workflow: AgentMissingWorkflow
+    approval_workflow: ApprovalWorkflow
     quality_check_workflow: QualityCheckWorkflow
     retrospective_workflow: RetrospectiveWorkflow
 
@@ -230,6 +232,17 @@ def build_company_os(
         incidents=incident_store,
         traces=traces,
     )
+    approval_workflow = ApprovalWorkflow(
+        workflows=workflows,
+        agents=agents,
+        permissions=permissions,
+        risks=risks,
+        approvals=approvals_center,
+        audit=audit,
+        evaluations=evaluation_store,
+        incidents=incident_store,
+        traces=traces,
+    )
     quality_check_workflow = QualityCheckWorkflow(
         workflows=workflows,
         audit=audit,
@@ -275,6 +288,7 @@ def build_company_os(
         agent_collaboration_workflow=agent_collaboration_workflow,
         skill_missing_workflow=skill_missing_workflow,
         agent_missing_workflow=agent_missing_workflow,
+        approval_workflow=approval_workflow,
         quality_check_workflow=quality_check_workflow,
         retrospective_workflow=retrospective_workflow,
     )

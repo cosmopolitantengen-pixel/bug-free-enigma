@@ -353,6 +353,153 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get("/tasks").json(), [])
         self.assertEqual(self.client.get("/workflow-runs").json(), [])
 
+    def test_approval_workflow_allows_low_risk_action_without_human_decision(self):
+        resolved = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "approval_v1",
+                "title": "Assess internal draft",
+                "description": "Check whether an internal draft action needs approval.",
+                "input": {
+                    "action": "draft_internal_note",
+                    "actor_id": "ceo_agent_v1",
+                    "permission_level": "L1_DRAFT",
+                    "reason": "Prepare an internal note.",
+                },
+            },
+        )
+        payload = resolved.json()
+        workflow = self.client.get("/workflows/approval_v1").json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(workflow["execution_mode"], "native")
+        self.assertEqual(payload["outcome"], "allowed")
+        self.assertFalse(payload["approval_required"])
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertIsNone(payload["approval"])
+        self.assertEqual([step["status"] for step in steps], ["completed"] * 3)
+        self.assertEqual(len(skill_runs), 3)
+        self.assertEqual(self.client.get("/approvals").json(), [])
+
+    def test_approval_workflow_resumes_after_human_root_approval(self):
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "approval_v1",
+                "title": "Approve external preparation",
+                "description": "Pause a medium-risk action at Human Root.",
+                "input": {
+                    "action": "prepare_external_content",
+                    "actor_id": "ceo_agent_v1",
+                    "permission_level": "L3_EXTERNAL_PREPARE",
+                    "reason": "Prepare external content for later review.",
+                },
+            },
+        )
+        waiting_payload = waiting.json()
+        approval_id = waiting_payload["approval"]["approval_id"]
+        decided = self.client.post(
+            f"/approvals/{approval_id}/approve",
+            json={"note": "Approved for controlled preparation."},
+        )
+        resumed = self.client.post(f"/tasks/{waiting_payload['task']['task_id']}/resume")
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(waiting.status_code, 200)
+        self.assertEqual(waiting_payload["outcome"], "waiting_approval")
+        self.assertEqual(waiting_payload["task"]["status"], "needs_approval")
+        self.assertEqual(runs[-1]["status"], "completed")
+        self.assertEqual(decided.status_code, 200)
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["outcome"], "approved")
+        self.assertEqual(resumed.json()["task"]["status"], "completed")
+        self.assertIn("approved", resumed.json()["task"]["history"])
+        self.assertEqual(
+            [step["status"] for step in steps],
+            ["completed", "completed", "waiting_approval", "completed"],
+        )
+        self.assertEqual(len(skill_runs), 3)
+
+    def test_approval_workflow_records_rejection_as_enforced_decision(self):
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "approval_v1",
+                "title": "Reject external preparation",
+                "description": "Human Root can reject without causing a control failure.",
+                "input": {
+                    "action": "prepare_external_message",
+                    "actor_id": "ceo_agent_v1",
+                    "permission_level": "L3_EXTERNAL_PREPARE",
+                    "reason": "Prepare a message that Human Root does not want.",
+                },
+            },
+        ).json()
+        self.client.post(
+            f"/approvals/{waiting['approval']['approval_id']}/reject",
+            json={"note": "Do not proceed."},
+        )
+        resumed = self.client.post(f"/tasks/{waiting['task']['task_id']}/resume")
+        run = self.client.get("/workflow-runs").json()[-1]
+
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["outcome"], "rejected")
+        self.assertFalse(resumed.json()["blocked"])
+        self.assertEqual(resumed.json()["task"]["status"], "cancelled")
+        self.assertEqual(run["status"], "completed")
+
+    def test_approval_workflow_enforces_forbidden_policy_and_audits_decision(self):
+        blocked = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "approval_v1",
+                "title": "Block forbidden action",
+                "description": "Forbidden policy cannot be approved through Workflow.",
+                "input": {
+                    "action": "disable_risk_system",
+                    "actor_id": "ceo_agent_v1",
+                    "permission_level": "L5_ROOT",
+                    "reason": "This forbidden request must remain blocked.",
+                },
+            },
+        )
+        payload = blocked.json()
+        run = self.client.get("/workflow-runs").json()[-1]
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(blocked.status_code, 200)
+        self.assertEqual(payload["outcome"], "blocked")
+        self.assertTrue(payload["blocked"])
+        self.assertEqual(payload["task"]["status"], "blocked")
+        self.assertEqual(payload["approval"]["status"], "blocked")
+        self.assertIsNotNone(payload["incident"])
+        self.assertEqual(run["status"], "blocked")
+        self.assertEqual(len(skill_runs), 3)
+
+    def test_approval_workflow_validates_actor_before_task_creation(self):
+        rejected = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "approval_v1",
+                "title": "Unknown actor",
+                "description": "Do not create an orphan task.",
+                "input": {
+                    "action": "draft_internal_note",
+                    "actor_id": "unknown_agent_v1",
+                    "permission_level": "L1_DRAFT",
+                },
+            },
+        )
+
+        self.assertEqual(rejected.status_code, 404)
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/workflow-runs").json(), [])
+
     def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
         checked = self.client.post(
             "/workflows/run",
@@ -461,14 +608,14 @@ class ApiRouteTests(unittest.TestCase):
         response = self.client.post(
             "/workflows/run",
             json={
-                "workflow_id": "approval_v1",
+                "workflow_id": "github_project_analysis_v1",
                 "title": "Wrong entrypoint",
-                "description": "Must use the Approval Center endpoint.",
+                "description": "Must use the GitHub absorber endpoint.",
             },
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("POST /approvals/request", response.json()["detail"])
+        self.assertIn("POST /github/absorptions/analyze", response.json()["detail"])
         self.assertEqual(len(self.client.get("/tasks").json()), task_count)
 
     def test_database_schema_reports_memory_and_sqlite_backends(self):

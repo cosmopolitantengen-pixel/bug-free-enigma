@@ -430,6 +430,41 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(result["task"]["status"], "needs_approval")
         self.assertEqual(len(service.list_skill_runs()), 3)
 
+    def test_approval_workflow_blocks_on_resume_when_audit_skill_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        service = CompanyApplicationService(company_os=company_os)
+        waiting = service.run_registered_workflow(
+            "approval_v1",
+            "Audit-controlled approval",
+            "Resume must stop if the decision cannot pass through Audit Skill.",
+            input={
+                "action": "prepare_external_content",
+                "actor_id": "ceo_agent_v1",
+                "permission_level": "L3_EXTERNAL_PREPARE",
+                "reason": "Prepare controlled external content.",
+            },
+        )
+        service.decide_approval(
+            waiting["approval"]["approval_id"],
+            ApprovalStatus.APPROVED,
+            "human_root",
+            "Approved before audit failure test.",
+        )
+        audit_skill = company_os.skills.get("audit_logging_skill_v1")
+        company_os.skills.restore(replace(audit_skill, enabled=False))
+
+        result = service.resume_task(waiting["task"]["task_id"])
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["outcome"], "control_blocked")
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_skill_runs()[-1]["status"], "blocked")
+        self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
+
     def test_document_workflow_resumes_after_approval(self):
         from app.services.company import CompanyApplicationService
 

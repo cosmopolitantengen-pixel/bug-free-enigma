@@ -460,6 +460,7 @@ class CompanyApplicationService:
             "agent_collaboration_v1",
             "skill_missing_v1",
             "agent_missing_v1",
+            "approval_v1",
             "quality_check_v1",
             "retrospective_v1",
         }:
@@ -471,6 +472,8 @@ class CompanyApplicationService:
             self.company_os.skill_missing_workflow.validate_input(workflow_input, description)
         if workflow_id == "agent_missing_v1":
             self.company_os.agent_missing_workflow.validate_input(workflow_input, description)
+        if workflow_id == "approval_v1":
+            self.company_os.approval_workflow.validate_input(workflow_input, description)
         if workflow_id == "retrospective_v1":
             self.company_os.retrospective_workflow.validate_input(workflow_input, description)
             source_task_id = workflow_input.get("source_task_id")
@@ -546,6 +549,23 @@ class CompanyApplicationService:
                 "approval_required": missing_result.approval_required,
                 "blocked": missing_result.blocked,
                 "incident": to_plain(missing_result.incident) if missing_result.incident else None,
+            }
+        if workflow_id == "approval_v1":
+            approval_result = self.company_os.approval_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(approval_result.task),
+                "output": approval_result.output,
+                "outcome": approval_result.outcome,
+                "approval": approval_result.approval,
+                "risk": approval_result.risk,
+                "approval_required": approval_result.approval_required,
+                "blocked": approval_result.blocked,
+                "incident": approval_result.incident,
             }
         if workflow_id == "quality_check_v1":
             quality_result = self.company_os.quality_check_workflow.run(self.tasks[task["task_id"]])
@@ -1986,6 +2006,19 @@ class CompanyApplicationService:
                 "blocked": result.blocked,
                 "incident": to_plain(result.incident) if result.incident else None,
             }
+        if workflow_run and workflow_run.workflow_id == "approval_v1":
+            result = self.company_os.approval_workflow.resume_after_decision(task)
+            self.sync()
+            return {
+                "task": to_plain(result.task),
+                "output": result.output,
+                "outcome": result.outcome,
+                "approval": result.approval,
+                "risk": result.risk,
+                "approval_required": result.approval_required,
+                "blocked": result.blocked,
+                "incident": result.incident,
+            }
         result = self.company_os.document_workflow.resume_after_approval(task)
         incident = None
         if result.blocked:
@@ -2964,6 +2997,8 @@ class CompanyApplicationService:
         self.company_os.skill_missing_workflow.set_proposal_creator(self.missing_skill)
         self.company_os.agent_missing_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.agent_missing_workflow.set_proposal_creator(self.missing_agent)
+        self.company_os.approval_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.approval_workflow.set_approval_requester(self.request_action_approval)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
 

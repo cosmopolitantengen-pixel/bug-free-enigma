@@ -20,3 +20,5 @@ Human Root > AI Board > AI CEO > Department Agent > Agent > Skill > Tool
 - AI cannot delete or modify audit logs.
 - AI cannot execute forbidden actions.
 - AI cannot decide high-risk actions without Root approval.
+
+The native Approval Workflow evaluates the request through registered Skills and core Permission/Risk controls, pauses at Human Root when required, and resumes only after a final decision. A rejected action is cancelled, while a forbidden action remains blocked and cannot be converted into approval.

@@ -121,7 +121,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="approval_v1",
             name="Approval",
             description="Assess a controlled action and place Human Root at the decision boundary.",
-            entrypoint="POST /approvals/request",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "prepare_request", "ceo_agent_v1", "request_approval", PermissionLevel.L1_DRAFT, "approval_request_skill_v1"),
                 step(2, "assess_request_risk", "risk_agent_v1", "risk_check", PermissionLevel.L1_DRAFT, "risk_check_skill_v1"),
