@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from app.agents.registry import AgentRegistry
 from app.approvals.service import ApprovalCenter
@@ -70,6 +71,10 @@ class TaskPlanningWorkflow:
         self.evaluations = evaluations
         self.incidents = incidents
         self.traces = traces
+        self._skill_executor: Callable[[str, str, dict, str, str], dict] | None = None
+
+    def set_skill_executor(self, executor: Callable[[str, str, dict, str, str], dict]) -> None:
+        self._skill_executor = executor
 
     def run(self, task: Task) -> TaskPlanningResult:
         if task.status != TaskStatus.CREATED:
@@ -79,6 +84,7 @@ class TaskPlanningWorkflow:
             raise ValueError("task planning workflow is disabled")
         run = self.traces.start_run(definition.workflow_id, task.task_id)
 
+        runtime_plan: str | None = None
         for step in definition.steps:
             agent = self.agents.get(step.actor_id)
             if step.skill_id is not None:
@@ -122,6 +128,24 @@ class TaskPlanningWorkflow:
                 self.traces.complete_run(run.run_id, WorkflowRunStatus.WAITING_APPROVAL, "approval required")
                 self._audit(step, task, risk.level, approval.status, "approval required")
                 return TaskPlanningResult(task, None, True, False)
+            if step.skill_id is not None and self._skill_executor is not None:
+                skill_input = (
+                    {"action": step.action}
+                    if step.skill_id == "risk_check_skill_v1"
+                    else {"goal": task.description}
+                )
+                try:
+                    skill_output = self._skill_executor(
+                        step.skill_id,
+                        step.actor_id,
+                        skill_input,
+                        f"{definition.name}: {step.step_name}",
+                        task.task_id,
+                    )
+                except (PermissionError, ValueError) as exc:
+                    return self._block(task, run.run_id, step, str(exc), risk.level)
+                if "plan" in skill_output:
+                    runtime_plan = skill_output["plan"]
             self._record_step(
                 run.run_id,
                 task,
@@ -133,7 +157,7 @@ class TaskPlanningWorkflow:
             )
             self._audit(step, task, risk.level, ApprovalStatus.NOT_REQUIRED, "completed")
 
-        output = self._build_plan(task)
+        output = self._build_plan(task, runtime_plan)
         task.result = output
         task.risk_level = RiskLevel.LOW
         task.transition(TaskStatus.PLANNED)
@@ -250,15 +274,18 @@ class TaskPlanningWorkflow:
             )
         )
 
-    def _build_plan(self, task: Task) -> str:
+    def _build_plan(self, task: Task, runtime_plan: str | None = None) -> str:
+        execution_steps = runtime_plan or (
+            "1. Confirm scope, constraints, and expected output with Human Root.\n"
+            "2. Assign the smallest capable Agent and registered Skills.\n"
+            "3. Route every Tool action through permission, risk, and approval checks.\n"
+            "4. Review quality, retain useful learning, and audit the outcome."
+        )
         return (
             f"# Task Plan: {task.title}\n\n"
             f"## Goal\n\n{task.description}\n\n"
             "## Execution Steps\n\n"
-            "1. Confirm scope, constraints, and expected output with Human Root.\n"
-            "2. Assign the smallest capable Agent and registered Skills.\n"
-            "3. Route every Tool action through permission, risk, and approval checks.\n"
-            "4. Review quality, retain useful learning, and audit the outcome.\n\n"
+            f"{execution_steps}\n\n"
             "## Control Boundary\n\n"
             "External, high-risk, or irreversible actions require explicit Human Root approval."
         )

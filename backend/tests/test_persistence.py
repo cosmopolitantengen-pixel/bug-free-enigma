@@ -223,7 +223,9 @@ class PersistenceTests(unittest.TestCase):
             self.assertGreaterEqual(len(reloaded.list_audit_logs()), 7)
             self.assertEqual(len(reloaded.list_memory()), 1)
             self.assertEqual(len(reloaded.list_knowledge()), 1)
-            self.assertEqual(len(reloaded.list_evaluations()), 3)
+            self.assertEqual(len(reloaded.list_evaluations()), 7)
+            self.assertEqual(len(reloaded.list_skill_runs()), 5)
+            self.assertTrue(all(run["task_id"] == task["task_id"] for run in reloaded.list_skill_runs()))
             self.assertGreaterEqual(len(reloaded.list_tools()), 5)
             self.assertEqual(len(reloaded.list_workflow_runs()), 1)
             self.assertEqual(len(reloaded.list_workflow_steps()), 7)
@@ -250,6 +252,7 @@ class PersistenceTests(unittest.TestCase):
             steps = second.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
             memory = second.get("/memory").json()
             evaluations = second.get("/evaluations").json()
+            skill_runs = second.get("/skills/runs").json()
 
             self.assertEqual(planned.status_code, 200)
             self.assertEqual(tasks[0]["status"], "planned")
@@ -257,7 +260,9 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(runs[0]["status"], "completed")
             self.assertEqual(len(steps), 3)
             self.assertEqual(memory[0]["memory_type"], "plan")
-            self.assertEqual(evaluations[0]["subject_id"], "task_planning_v1")
+            self.assertIn("task_planning_v1", [record["subject_id"] for record in evaluations])
+            self.assertEqual(len(skill_runs), 3)
+            self.assertTrue(all(run["task_id"] == tasks[0]["task_id"] for run in skill_runs))
 
     def test_incidents_persist_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -945,7 +950,8 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(tasks.json()[0]["task_id"], task_id)
             self.assertEqual(tasks.json()[0]["status"], "completed")
             self.assertGreaterEqual(len(audit_logs.json()), 7)
-            self.assertEqual(len(evaluations.json()), 3)
+            self.assertEqual(len(evaluations.json()), 7)
+            self.assertEqual(len(second_client.get("/skills/runs").json()), 5)
             self.assertEqual(len(workflow_runs.json()), 1)
             self.assertEqual(workflow_runs.json()[0]["status"], "completed")
             self.assertEqual(len(model_usage.json()), 1)

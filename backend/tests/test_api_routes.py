@@ -53,6 +53,7 @@ class ApiRouteTests(unittest.TestCase):
         steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
         memory = self.client.get("/memory").json()
         evaluations = self.client.get("/evaluations").json()
+        skill_runs = self.client.get("/skills/runs").json()
         audit = self.client.get("/audit-logs").json()
 
         self.assertEqual(workflow.status_code, 200)
@@ -68,6 +69,9 @@ class ApiRouteTests(unittest.TestCase):
         self.assertTrue(all(step["status"] == "completed" for step in steps))
         self.assertEqual(memory[-1]["memory_type"], "plan")
         self.assertEqual(evaluations[-1]["subject_id"], "task_planning_v1")
+        self.assertEqual(len(skill_runs), 3)
+        self.assertTrue(all(run["task_id"] == planned.json()["task"]["task_id"] for run in skill_runs))
+        self.assertTrue(all(run["status"] == "completed" for run in skill_runs))
         self.assertEqual(audit[-1]["event_type"], "task_plan_completed")
 
     def test_dedicated_workflow_rejects_generic_run_without_creating_task(self):
@@ -191,6 +195,7 @@ class ApiRouteTests(unittest.TestCase):
         memory = self.client.get("/memory")
         knowledge = self.client.get("/knowledge")
         evaluations = self.client.get("/evaluations")
+        skill_runs = self.client.get("/skills/runs")
         workflow_runs = self.client.get("/workflow-runs")
         model_usage = self.client.get("/model-usage")
         cost_logs = self.client.get("/cost-logs")
@@ -205,7 +210,11 @@ class ApiRouteTests(unittest.TestCase):
         self.assertGreaterEqual(len(audit_logs.json()), 7)
         self.assertGreaterEqual(len(memory.json()), 1)
         self.assertGreaterEqual(len(knowledge.json()), 1)
-        self.assertEqual(len(evaluations.json()), 3)
+        self.assertEqual(len(evaluations.json()), 7)
+        self.assertEqual(len([record for record in evaluations.json() if record["subject_type"] == "skill"]), 5)
+        self.assertEqual(len(skill_runs.json()), 5)
+        self.assertTrue(all(skill_run["task_id"] == task_id for skill_run in skill_runs.json()))
+        self.assertTrue(all(skill_run["status"] == "completed" for skill_run in skill_runs.json()))
         self.assertEqual(len(workflow_runs.json()), 1)
         self.assertEqual(workflow_runs.json()[0]["status"], "completed")
         self.assertEqual(len(workflow_steps.json()), 7)
@@ -225,7 +234,9 @@ class ApiRouteTests(unittest.TestCase):
         self.assertGreaterEqual(dashboard.json()["memory_count"], 1)
         self.assertGreaterEqual(dashboard.json()["knowledge_count"], 1)
         self.assertGreaterEqual(dashboard.json()["audit_log_count"], 7)
-        self.assertEqual(dashboard.json()["evaluation_count"], 3)
+        self.assertEqual(dashboard.json()["evaluation_count"], 7)
+        self.assertEqual(dashboard.json()["skill_run_count"], 5)
+        self.assertEqual(dashboard.json()["skill_run_status_counts"]["completed"], 5)
         self.assertEqual(dashboard.json()["average_evaluation_score"], 1.0)
         self.assertGreaterEqual(dashboard.json()["tool_count"], 5)
         self.assertEqual(dashboard.json()["workflow_run_count"], 1)
@@ -240,7 +251,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(len(dashboard.json()["recent_model_usage"]), 1)
         self.assertEqual(len(dashboard.json()["recent_workflow_runs"]), 1)
         self.assertEqual(len(dashboard.json()["recent_workflow_steps"]), 7)
-        self.assertEqual(len(dashboard.json()["recent_evaluations"]), 3)
+        self.assertEqual(len(dashboard.json()["recent_evaluations"]), 7)
         self.assertGreaterEqual(len(dashboard.json()["recent_tasks"]), 1)
 
     def test_structured_logs_can_filter_by_category_and_level(self):

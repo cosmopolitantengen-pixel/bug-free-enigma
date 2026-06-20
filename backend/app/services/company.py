@@ -44,6 +44,7 @@ class CompanyApplicationService:
     skill_runs: dict[str, SkillRun] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self._bind_workflow_skill_runtime()
         if self.persistence is None:
             return
         loaded_users = self.persistence.load_users()
@@ -116,6 +117,7 @@ class CompanyApplicationService:
             scheduled_jobs=loaded_scheduled_jobs,
             scheduled_executions=loaded_scheduled_executions,
         )
+        self._bind_workflow_skill_runtime()
 
     def sync(self) -> None:
         if self.persistence is None:
@@ -2816,6 +2818,25 @@ class CompanyApplicationService:
                 risk_level=run.risk_level,
             )
         )
+
+    def _bind_workflow_skill_runtime(self) -> None:
+        self.company_os.document_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.task_planning_workflow.set_skill_executor(self._execute_workflow_skill)
+
+    def _execute_workflow_skill(
+        self,
+        skill_id: str,
+        actor_id: str,
+        input: dict,
+        reason: str,
+        task_id: str,
+    ) -> dict:
+        requested = self.request_skill_run(skill_id, actor_id, input, reason, task_id)
+        run = requested["run"]
+        if run["status"] != SkillRunStatus.COMPLETED.value:
+            detail = run.get("error") or f"Skill run entered {run['status']}"
+            raise PermissionError(f"{skill_id}: {detail}")
+        return json.loads(run["result"])
 
     def _authorize_schedule_actor(self, actor_id: str) -> None:
         if actor_id == "human_root":

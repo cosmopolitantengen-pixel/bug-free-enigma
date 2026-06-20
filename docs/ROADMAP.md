@@ -84,6 +84,7 @@ Current status:
 - Task planning now runs as a second native Workflow with permission/risk checks, persisted traces, audit, plan Memory, Evaluation, and blocked-run Incidents.
 - All 18 V1 Skills now execute through a controlled runtime with deterministic adapters, schema validation, symmetric Agent authorization, approval continuation, durable Skill Runs, blocked-run Incidents, and successful-run Evaluations.
 - SQLite schema v6 persists Skill Runs, and the dashboard exposes Skill Run requests, status, results, and approval continuation.
+- Both native Workflows now execute registered Skills through the unified Skill Runtime. Document generation produces five linked Skill Runs and task planning produces three; blocked or failed Skills stop the parent Workflow.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from app.agents.registry import AgentRegistry
 from app.approvals.service import ApprovalCenter
@@ -76,6 +77,15 @@ class DocumentGenerationWorkflow:
         self.budget = budget
         self.incidents = incidents
         self.traces = traces
+        self._skill_executor: Callable[[str, str, dict, str, str], dict] | None = None
+
+    def set_skill_executor(self, executor: Callable[[str, str, dict, str, str], dict]) -> None:
+        self._skill_executor = executor
+
+    def _run_skill(self, skill_id: str, actor_id: str, input: dict, reason: str, task_id: str) -> dict:
+        if self._skill_executor is None:
+            return {}
+        return self._skill_executor(skill_id, actor_id, input, reason, task_id)
 
     def run(self, task: Task) -> WorkflowResult:
         run = self.traces.start_run("document_generation_v1", task.task_id)
@@ -100,11 +110,40 @@ class DocumentGenerationWorkflow:
             self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, permission.reason)
             return WorkflowResult(task, None, False, True)
 
+        try:
+            plan_output = self._run_skill(
+                "task_planning_skill_v1",
+                ceo.agent_id,
+                {"goal": task.description},
+                plan_request.reason,
+                task.task_id,
+            )
+        except (PermissionError, ValueError) as exc:
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", ceo.agent_id, plan_request.action, task, risk.level, ApprovalStatus.BLOCKED, str(exc))
+            self._step(run, 2, "plan_task", ceo.agent_id, plan_request.action, task, WorkflowStepStatus.BLOCKED, risk.level, ApprovalStatus.BLOCKED, str(exc), str(exc))
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, str(exc))
+            return WorkflowResult(task, None, False, True)
+
         task.transition(TaskStatus.PLANNED)
         self._audit("task_planned", ceo.agent_id, plan_request.action, task, risk.level, ApprovalStatus.NOT_REQUIRED, "planned")
         self._step(run, 2, "plan_task", ceo.agent_id, plan_request.action, task, WorkflowStepStatus.COMPLETED, risk.level, ApprovalStatus.NOT_REQUIRED, "planned")
 
         pm = self.agents.get("project_manager_agent_v1")
+        try:
+            assignment_output = self._run_skill(
+                "task_planning_skill_v1",
+                pm.agent_id,
+                {"goal": f"Assign an authorized document Agent for: {task.description}"},
+                "Project Manager prepares the document assignment.",
+                task.task_id,
+            )
+        except (PermissionError, ValueError) as exc:
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", pm.agent_id, "assign_document_agent", task, RiskLevel.LOW, ApprovalStatus.BLOCKED, str(exc))
+            self._step(run, 3, "assign_document_agent", pm.agent_id, "assign_document_agent", task, WorkflowStepStatus.BLOCKED, RiskLevel.LOW, ApprovalStatus.BLOCKED, str(exc), str(exc))
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, str(exc))
+            return WorkflowResult(task, None, False, True)
         task.transition(TaskStatus.ASSIGNED)
         self._audit("task_assigned", pm.agent_id, "assign_document_agent", task, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, "assigned")
         self._step(run, 3, "assign_document_agent", pm.agent_id, "assign_document_agent", task, WorkflowStepStatus.COMPLETED, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, "assigned")
@@ -144,8 +183,22 @@ class DocumentGenerationWorkflow:
 
         task.transition(TaskStatus.EXECUTING)
         try:
-            output = self._write_document(task, document_agent.agent_id)
-        except PermissionError as exc:
+            draft_output = self._run_skill(
+                "document_writer_skill_v1",
+                document_agent.agent_id,
+                {
+                    "topic": task.title,
+                    "materials": [task.description, plan_output.get("plan", ""), assignment_output.get("plan", "")],
+                },
+                write_request.reason,
+                task.task_id,
+            )
+            output = self._write_document(
+                task,
+                document_agent.agent_id,
+                draft_output.get("markdown_document"),
+            )
+        except (PermissionError, ValueError) as exc:
             task.transition(TaskStatus.BLOCKED)
             self._audit("task_blocked", document_agent.agent_id, "generate_document", task, RiskLevel.MEDIUM, ApprovalStatus.BLOCKED, str(exc))
             self._step(run, 4, "write_document", document_agent.agent_id, write_request.action, task, WorkflowStepStatus.BLOCKED, RiskLevel.MEDIUM, ApprovalStatus.BLOCKED, str(exc), str(exc))
@@ -163,11 +216,53 @@ class DocumentGenerationWorkflow:
             reason="Risk Agent checks generated document.",
         )
         risk_check = self.risks.assess(risk_check_request)
+        try:
+            runtime_risk = self._run_skill(
+                "risk_check_skill_v1",
+                risk_agent.agent_id,
+                {"action": write_request.action},
+                risk_check_request.reason,
+                task.task_id,
+            )
+        except (PermissionError, ValueError) as exc:
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", risk_agent.agent_id, risk_check_request.action, task, risk_check.level, ApprovalStatus.BLOCKED, str(exc))
+            self._step(run, 5, "risk_check", risk_agent.agent_id, risk_check_request.action, task, WorkflowStepStatus.BLOCKED, risk_check.level, ApprovalStatus.BLOCKED, str(exc), str(exc))
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, str(exc))
+            return WorkflowResult(task, None, False, True)
+        if runtime_risk.get("blocked"):
+            reason = "document Skill risk check blocked the generated output"
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", risk_agent.agent_id, risk_check_request.action, task, RiskLevel.FORBIDDEN, ApprovalStatus.BLOCKED, reason)
+            self._step(run, 5, "risk_check", risk_agent.agent_id, risk_check_request.action, task, WorkflowStepStatus.BLOCKED, RiskLevel.FORBIDDEN, ApprovalStatus.BLOCKED, reason, reason)
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, reason)
+            return WorkflowResult(task, None, False, True)
         self._audit("risk_checked", risk_agent.agent_id, risk_check_request.action, task, risk_check.level, ApprovalStatus.NOT_REQUIRED, "risk checked")
         self._step(run, 5, "risk_check", risk_agent.agent_id, risk_check_request.action, task, WorkflowStepStatus.COMPLETED, risk_check.level, ApprovalStatus.NOT_REQUIRED, "risk checked")
 
         quality_agent = self.agents.get("quality_agent_v1")
         task.transition(TaskStatus.QUALITY_CHECKING)
+        try:
+            quality_output = self._run_skill(
+                "quality_check_skill_v1",
+                quality_agent.agent_id,
+                {"content": output},
+                "Quality Agent validates the generated document.",
+                task.task_id,
+            )
+        except (PermissionError, ValueError) as exc:
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", quality_agent.agent_id, "quality_check", task, RiskLevel.LOW, ApprovalStatus.BLOCKED, str(exc))
+            self._step(run, 6, "quality_check", quality_agent.agent_id, "quality_check", task, WorkflowStepStatus.FAILED, RiskLevel.LOW, ApprovalStatus.BLOCKED, str(exc), str(exc))
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.FAILED, str(exc))
+            return WorkflowResult(task, None, False, True)
+        if quality_output and not quality_output.get("passed", False):
+            reason = "; ".join(quality_output.get("issues", [])) or "quality check failed"
+            task.transition(TaskStatus.FAILED)
+            self._audit("quality_failed", quality_agent.agent_id, "quality_check", task, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, reason)
+            self._step(run, 6, "quality_check", quality_agent.agent_id, "quality_check", task, WorkflowStepStatus.FAILED, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, reason, reason)
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.FAILED, reason)
+            return WorkflowResult(task, None, False, True)
         self._audit("quality_checked", quality_agent.agent_id, "quality_check", task, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, "quality passed")
         self._step(run, 6, "quality_check", quality_agent.agent_id, "quality_check", task, WorkflowStepStatus.COMPLETED, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, "quality passed")
 
@@ -201,8 +296,15 @@ class DocumentGenerationWorkflow:
         risk_level = approval.risk.level
         task.transition(TaskStatus.EXECUTING)
         try:
-            output = self._write_document(task, document_agent.agent_id)
-        except PermissionError as exc:
+            draft_output = self._run_skill(
+                "document_writer_skill_v1",
+                document_agent.agent_id,
+                {"topic": task.title, "materials": [task.description, "Human Root approved the internal write."]},
+                "Resume approved document writing.",
+                task.task_id,
+            )
+            output = self._write_document(task, document_agent.agent_id, draft_output.get("markdown_document"))
+        except (PermissionError, ValueError) as exc:
             task.transition(TaskStatus.BLOCKED)
             self._audit("task_blocked", document_agent.agent_id, "generate_document", task, RiskLevel.MEDIUM, ApprovalStatus.BLOCKED, str(exc))
             self._step(run, 4, "write_document", document_agent.agent_id, write_action, task, WorkflowStepStatus.BLOCKED, RiskLevel.MEDIUM, ApprovalStatus.BLOCKED, str(exc), str(exc))
@@ -221,11 +323,53 @@ class DocumentGenerationWorkflow:
             reason="Risk Agent checks generated document after approval.",
         )
         risk_check = self.risks.assess(risk_check_request)
+        try:
+            runtime_risk = self._run_skill(
+                "risk_check_skill_v1",
+                risk_agent.agent_id,
+                {"action": write_action},
+                risk_check_request.reason,
+                task.task_id,
+            )
+        except (PermissionError, ValueError) as exc:
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", risk_agent.agent_id, risk_check_request.action, task, risk_check.level, ApprovalStatus.BLOCKED, str(exc))
+            self._step(run, 5, "risk_check", risk_agent.agent_id, risk_check_request.action, task, WorkflowStepStatus.BLOCKED, risk_check.level, ApprovalStatus.BLOCKED, str(exc), str(exc))
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, str(exc))
+            return WorkflowResult(task, None, False, True)
+        if runtime_risk.get("blocked"):
+            reason = "document Skill risk check blocked the approved output"
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", risk_agent.agent_id, risk_check_request.action, task, RiskLevel.FORBIDDEN, ApprovalStatus.BLOCKED, reason)
+            self._step(run, 5, "risk_check", risk_agent.agent_id, risk_check_request.action, task, WorkflowStepStatus.BLOCKED, RiskLevel.FORBIDDEN, ApprovalStatus.BLOCKED, reason, reason)
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.BLOCKED, reason)
+            return WorkflowResult(task, None, False, True)
         self._audit("risk_checked", risk_agent.agent_id, risk_check_request.action, task, risk_check.level, ApprovalStatus.NOT_REQUIRED, "risk checked")
         self._step(run, 5, "risk_check", risk_agent.agent_id, risk_check_request.action, task, WorkflowStepStatus.COMPLETED, risk_check.level, ApprovalStatus.NOT_REQUIRED, "risk checked")
 
         quality_agent = self.agents.get("quality_agent_v1")
         task.transition(TaskStatus.QUALITY_CHECKING)
+        try:
+            quality_output = self._run_skill(
+                "quality_check_skill_v1",
+                quality_agent.agent_id,
+                {"content": output},
+                "Quality Agent validates the approved document.",
+                task.task_id,
+            )
+        except (PermissionError, ValueError) as exc:
+            task.transition(TaskStatus.BLOCKED)
+            self._audit("task_blocked", quality_agent.agent_id, "quality_check", task, RiskLevel.LOW, ApprovalStatus.BLOCKED, str(exc))
+            self._step(run, 6, "quality_check", quality_agent.agent_id, "quality_check", task, WorkflowStepStatus.FAILED, RiskLevel.LOW, ApprovalStatus.BLOCKED, str(exc), str(exc))
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.FAILED, str(exc))
+            return WorkflowResult(task, None, False, True)
+        if quality_output and not quality_output.get("passed", False):
+            reason = "; ".join(quality_output.get("issues", [])) or "quality check failed"
+            task.transition(TaskStatus.FAILED)
+            self._audit("quality_failed", quality_agent.agent_id, "quality_check", task, RiskLevel.LOW, ApprovalStatus.APPROVED, reason)
+            self._step(run, 6, "quality_check", quality_agent.agent_id, "quality_check", task, WorkflowStepStatus.FAILED, RiskLevel.LOW, ApprovalStatus.APPROVED, reason, reason)
+            self.traces.complete_run(run.run_id, WorkflowRunStatus.FAILED, reason)
+            return WorkflowResult(task, None, False, True)
         self._audit("quality_checked", quality_agent.agent_id, "quality_check", task, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, "quality passed")
         self._step(run, 6, "quality_check", quality_agent.agent_id, "quality_check", task, WorkflowStepStatus.COMPLETED, RiskLevel.LOW, ApprovalStatus.NOT_REQUIRED, "quality passed")
 
@@ -240,8 +384,8 @@ class DocumentGenerationWorkflow:
         self.traces.complete_run(run.run_id, WorkflowRunStatus.COMPLETED, "completed after approval")
         return WorkflowResult(task, output, False, False)
 
-    def _write_document(self, task: Task, actor_id: str) -> str:
-        prompt = (
+    def _write_document(self, task: Task, actor_id: str, skill_draft: str | None = None) -> str:
+        prompt = skill_draft or (
             f"# {task.title}\n\n"
             f"## Goal\n\n{task.description}\n\n"
             "## Plan\n\n"
@@ -402,17 +546,6 @@ class DocumentGenerationWorkflow:
                 score=1.0,
                 metric="quality_check_passed",
                 notes="Quality check passed for generated document.",
-                risk_level=RiskLevel.LOW,
-            )
-        )
-        self.evaluations.write(
-            EvaluationRecord(
-                subject_type="skill",
-                subject_id="document_writer_skill_v1",
-                task_id=task.task_id,
-                score=1.0,
-                metric="document_generated",
-                notes="Document Writing Skill produced structured internal output.",
                 risk_level=RiskLevel.LOW,
             )
         )

@@ -60,6 +60,8 @@ The document generation workflow writes one `WorkflowRun` and seven ordered `Wor
 
 These records are exposed through `GET /workflow-runs`, `GET /workflow-runs/{run_id}/steps`, `GET /dashboard/summary`, and the static dashboard.
 
+When invoked through the application service or API, the Workflow steps dispatch through the same controlled Skill Runtime used by `POST /skills/runs/request`. A successful document run creates five task-linked Skill Runs: CEO planning, Project Manager assignment planning, document writing, risk checking, and quality checking. The document Skill draft becomes the Model Gateway input; risk or quality Skill failure stops the Workflow instead of being treated as a successful trace-only step.
+
 If `write_document` requires approval, the task enters `needs_approval` and the `WorkflowRun` enters `waiting_approval`. After Human Root approves the linked approval, `POST /tasks/{task_id}/resume` continues the same workflow run through document writing, risk check, quality check, memory write, knowledge write, evaluation, and completion. Resume is rejected for pending, rejected, blocked, or non-waiting tasks.
 
 The task planning workflow writes three ordered steps:
@@ -69,6 +71,8 @@ The task planning workflow writes three ordered steps:
 3. `validate_plan_risk`
 
 Each step rechecks Agent enabled state, Skill enabled state, exact permission, and risk policy at runtime. Success writes a scoped plan to the task, plan Memory, Workflow evaluation, audit events, and persisted traces. A disabled Skill, disabled Agent, permission violation, or blocked risk stops the Workflow and creates an Incident. The task remains `planned`; planning does not claim that execution has happened.
+
+The task planning runner produces three task-linked Skill Runs and uses the planning Skill output as the execution-plan body. Skill Runs and their Evaluations persist independently from Workflow traces, so operators can inspect both process state and capability execution state.
 
 The other catalog definitions point to their operational entrypoints:
 
