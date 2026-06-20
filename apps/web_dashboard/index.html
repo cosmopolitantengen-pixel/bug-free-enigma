@@ -101,6 +101,10 @@
             <strong id="tool-count">0</strong>
           </div>
           <div class="metric">
+            <span>Skill Runs</span>
+            <strong id="skill-run-count">0</strong>
+          </div>
+          <div class="metric">
             <span>Workflow Runs</span>
             <strong id="workflow-run-count">0</strong>
           </div>
@@ -309,6 +313,41 @@
             <div id="approval-request-result" class="result" role="status"></div>
           </section>
 
+          <section id="skill-run" class="panel">
+            <div class="panel-header">
+              <div>
+                <h2>Request Skill Run</h2>
+                <p>Run a registered Skill through input validation, Agent authorization, risk, approval, audit, and evaluation.</p>
+              </div>
+            </div>
+            <form id="skill-run-form" class="task-form">
+              <label>
+                Skill
+                <select id="skill-run-skill">
+                  <option value="task_planning_skill_v1">task_planning_skill_v1</option>
+                  <option value="summary_skill_v1">summary_skill_v1</option>
+                  <option value="risk_check_skill_v1">risk_check_skill_v1</option>
+                  <option value="quality_check_skill_v1">quality_check_skill_v1</option>
+                  <option value="code_generation_skill_v1">code_generation_skill_v1</option>
+                </select>
+              </label>
+              <label>
+                Actor
+                <input id="skill-run-actor" value="ceo_agent_v1" />
+              </label>
+              <label>
+                Input JSON
+                <textarea id="skill-run-input">{"goal":"Plan a controlled internal task."}</textarea>
+              </label>
+              <label>
+                Reason
+                <textarea id="skill-run-reason">Exercise a registered Skill through the controlled runtime.</textarea>
+              </label>
+              <button type="submit">Request Skill</button>
+            </form>
+            <div id="skill-run-result" class="result" role="status"></div>
+          </section>
+
           <section id="tool-run" class="panel tool-run-panel">
             <div class="panel-header">
               <div>
@@ -485,6 +524,13 @@ A documentation and API workflow helper with tests.</textarea>
               <h2>Tool Runs</h2>
             </div>
             <div id="tool-runs-list" class="list"></div>
+          </section>
+
+          <section class="panel" id="skill-runs">
+            <div class="panel-header">
+              <h2>Skill Runs</h2>
+            </div>
+            <div id="skill-runs-list" class="list"></div>
           </section>
 
           <section class="panel" id="models">

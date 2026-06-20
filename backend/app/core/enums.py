@@ -89,6 +89,14 @@ class ToolRunStatus(str, Enum):
     FAILED = "failed"
 
 
+class SkillRunStatus(str, Enum):
+    REQUESTED = "requested"
+    WAITING_APPROVAL = "waiting_approval"
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    FAILED = "failed"
+
+
 class WorkflowRunStatus(str, Enum):
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"

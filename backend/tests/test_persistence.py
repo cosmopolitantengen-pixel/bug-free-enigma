@@ -28,9 +28,9 @@ class PersistenceTests(unittest.TestCase):
             store = SQLiteStateStore(db_path)
             reloaded = SQLiteStateStore(db_path)
 
-            self.assertEqual(store.schema_version(), 5)
-            self.assertEqual(reloaded.schema_version(), 5)
-            self.assertEqual(len(reloaded.list_schema_migrations()), 5)
+            self.assertEqual(store.schema_version(), 6)
+            self.assertEqual(reloaded.schema_version(), 6)
+            self.assertEqual(len(reloaded.list_schema_migrations()), 6)
             self.assertEqual(reloaded.list_schema_migrations()[0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(reloaded.list_schema_migrations()[0]["version"], 1)
             self.assertEqual(reloaded.list_schema_migrations()[1]["migration_id"], "0002_audit_append_only_guards")
@@ -50,6 +50,8 @@ class PersistenceTests(unittest.TestCase):
                 "0005_agent_skill_catalogs",
             )
             self.assertEqual(reloaded.list_schema_migrations()[4]["version"], 5)
+            self.assertEqual(reloaded.list_schema_migrations()[5]["migration_id"], "0006_skill_runtime")
+            self.assertEqual(reloaded.list_schema_migrations()[5]["version"], 6)
 
             with closing(sqlite3.connect(db_path)) as connection:
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -66,7 +68,7 @@ class PersistenceTests(unittest.TestCase):
                     ).fetchall()
                 }
 
-            self.assertEqual(user_version, 5)
+            self.assertEqual(user_version, 6)
             self.assertIn("schema_migrations", table_names)
             self.assertIn("audit_logs", table_names)
             self.assertIn("workflow_runs", table_names)
@@ -76,6 +78,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("scheduled_executions", table_names)
             self.assertIn("agents", table_names)
             self.assertIn("skills", table_names)
+            self.assertIn("skill_runs", table_names)
             self.assertIn("audit_logs_no_update", trigger_names)
             self.assertIn("audit_logs_no_delete", trigger_names)
             self.assertIn("domain_events_no_update", trigger_names)
@@ -859,6 +862,29 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(runs.json()[0]["status"], "completed")
             self.assertIn("task_count", json.loads(runs.json()[0]["result"]))
             self.assertGreaterEqual(len(tools.json()), 5)
+
+    def test_skill_runs_persist_through_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "skill_runs.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            created = first.post(
+                "/skills/runs/request",
+                json={
+                    "skill_id": "task_planning_skill_v1",
+                    "actor_id": "ceo_agent_v1",
+                    "input": {"goal": "Persist a validated Skill run."},
+                    "reason": "Exercise durable Skill execution.",
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            runs = second.get("/skills/runs")
+
+            self.assertEqual(created.status_code, 200)
+            self.assertEqual(runs.status_code, 200)
+            self.assertEqual(len(runs.json()), 1)
+            self.assertEqual(runs.json()[0]["status"], "completed")
+            self.assertIn("Assign authorized Agents", json.loads(runs.json()[0]["result"])["plan"])
 
     def test_github_absorptions_persist_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:

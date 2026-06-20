@@ -107,6 +107,19 @@ class ToolRunCompleteRequest(BaseModel):
     note: str | None = None
 
 
+class SkillRunRequest(BaseModel):
+    skill_id: str
+    actor_id: str
+    input: dict = Field(default_factory=dict)
+    reason: str
+    task_id: str | None = None
+
+
+class SkillRunCompleteRequest(BaseModel):
+    completed_by: str = "human_root"
+    note: str | None = None
+
+
 class ModelGenerateRequest(BaseModel):
     prompt: str
     actor_id: str

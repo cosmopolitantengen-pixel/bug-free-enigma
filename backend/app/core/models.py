@@ -14,6 +14,7 @@ from app.core.enums import (
     ScheduleAction,
     ScheduleExecutionStatus,
     ScheduleStatus,
+    SkillRunStatus,
     TaskStatus,
     ToolRunStatus,
     WorkflowRunStatus,
@@ -240,6 +241,23 @@ class ToolRun:
     approval_id: str | None = None
     error: str | None = None
     run_id: str = field(default_factory=lambda: new_id("tool_run"))
+    created_at: datetime = field(default_factory=utc_now)
+    completed_at: datetime | None = None
+
+
+@dataclass
+class SkillRun:
+    skill_id: str
+    actor_id: str
+    input: dict[str, Any]
+    reason: str
+    task_id: str | None = None
+    status: SkillRunStatus = SkillRunStatus.REQUESTED
+    result: str | None = None
+    risk_level: RiskLevel = RiskLevel.LOW
+    approval_id: str | None = None
+    error: str | None = None
+    run_id: str = field(default_factory=lambda: new_id("skill_run"))
     created_at: datetime = field(default_factory=utc_now)
     completed_at: datetime | None = None
 

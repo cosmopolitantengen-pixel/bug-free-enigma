@@ -33,6 +33,8 @@ from app.api.schemas import (
     SchedulerTickRequest,
     SkillSearchRequest,
     SkillCreateRequest,
+    SkillRunCompleteRequest,
+    SkillRunRequest,
     StrategicGoalCreateRequest,
     StrategicGoalLinkRequest,
     StrategicGoalProgressRequest,
@@ -264,6 +266,32 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     @router.post("/skills/factory/create")
     def create_skill_proposal(payload: MissingSkillRequest) -> dict:
         return service.missing_skill(payload.capability, payload.requested_by_agent, payload.risk_level)
+
+    @router.get("/skills/runs")
+    def list_skill_runs() -> list[dict]:
+        return service.list_skill_runs()
+
+    @router.post("/skills/runs/request")
+    def request_skill_run(payload: SkillRunRequest) -> dict:
+        try:
+            return service.request_skill_run(
+                payload.skill_id,
+                payload.actor_id,
+                payload.input,
+                payload.reason,
+                payload.task_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="skill or agent not found") from exc
+
+    @router.post("/skills/runs/{run_id}/complete")
+    def complete_skill_run(run_id: str, payload: SkillRunCompleteRequest) -> dict:
+        try:
+            return service.complete_skill_run(run_id, payload.completed_by, payload.note)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="skill run, skill, agent, or approval not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/tools")
     def list_tools() -> list[dict]:

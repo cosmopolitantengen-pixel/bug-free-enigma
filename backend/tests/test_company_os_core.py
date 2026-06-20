@@ -503,6 +503,104 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertIn("Simulated Approved Content Prepare Tool execution", json.loads(completed["run"]["result"])["message"])
         self.assertEqual(service.list_audit_logs()[-1]["event_type"], "tool_run_completed")
 
+    def test_low_risk_skill_run_executes_validated_adapter_and_evaluates(self):
+        from app.services.company import CompanyApplicationService
+
+        service = CompanyApplicationService(company_os=build_company_os())
+        result = service.request_skill_run(
+            "task_planning_skill_v1",
+            "ceo_agent_v1",
+            {"goal": "Ship a controlled Skill Runtime."},
+            "Create a safe execution plan.",
+        )
+
+        self.assertEqual(result["run"]["status"], "completed")
+        self.assertIn("Assign authorized Agents", json.loads(result["run"]["result"])["plan"])
+        self.assertEqual(service.list_evaluations()[-1]["subject_type"], "skill")
+
+    def test_skill_run_invalid_input_fails_without_losing_run_record(self):
+        from app.services.company import CompanyApplicationService
+
+        service = CompanyApplicationService(company_os=build_company_os())
+        result = service.request_skill_run(
+            "summary_skill_v1",
+            "ceo_agent_v1",
+            {},
+            "Reject malformed input cleanly.",
+        )
+
+        self.assertEqual(result["run"]["status"], "failed")
+        self.assertIn("missing required skill input: content", result["run"]["error"])
+        self.assertEqual(len(service.list_skill_runs()), 1)
+
+    def test_skill_run_blocks_asymmetric_or_missing_agent_authorization(self):
+        from app.services.company import CompanyApplicationService
+
+        service = CompanyApplicationService(company_os=build_company_os())
+        result = service.request_skill_run(
+            "summary_skill_v1",
+            "risk_agent_v1",
+            {"content": "The Risk Agent is not authorized to summarize this text."},
+            "Exercise the two-sided authorization boundary.",
+        )
+
+        self.assertEqual(result["run"]["status"], "blocked")
+        self.assertIn("not authorized", result["run"]["error"])
+        self.assertEqual(result["incident"]["source_type"], "skill_run")
+
+    def test_approval_gated_skill_executes_only_after_human_decision(self):
+        from app.services.company import CompanyApplicationService
+
+        service = CompanyApplicationService(company_os=build_company_os())
+        requested = service.request_skill_run(
+            "code_generation_skill_v1",
+            "tech_agent_v1",
+            {"requirements": "Return a greeting.", "language": "Python"},
+            "Generate a draft after approval.",
+        )
+
+        self.assertEqual(requested["run"]["status"], "waiting_approval")
+        with self.assertRaises(ValueError):
+            service.complete_skill_run(requested["run"]["run_id"])
+        service.decide_approval(requested["approval"]["approval_id"], ApprovalStatus.APPROVED, "human_root", "approved")
+        completed = service.complete_skill_run(requested["run"]["run_id"], "human_root", "execute")
+
+        self.assertEqual(completed["run"]["status"], "completed")
+        self.assertIn("Draft Python implementation", json.loads(completed["run"]["result"])["source"])
+
+    def test_all_registered_v1_skills_have_executable_runtime_adapters(self):
+        from app.services.company import CompanyApplicationService
+
+        service = CompanyApplicationService(company_os=build_company_os())
+        cases = {
+            "task_planning_skill_v1": ("ceo_agent_v1", {"goal": "Plan work"}),
+            "document_writer_skill_v1": ("document_agent_v1", {"topic": "Note", "materials": []}),
+            "summary_skill_v1": ("ceo_agent_v1", {"content": "Summarize this internal text."}),
+            "risk_check_skill_v1": ("risk_agent_v1", {"action": "read_internal_state"}),
+            "quality_check_skill_v1": ("quality_agent_v1", {"content": "A sufficiently detailed quality sample."}),
+            "rewrite_skill_v1": ("document_agent_v1", {"content": "Draft", "instructions": "Clarify"}),
+            "data_cleanup_skill_v1": ("data_agent_v1", {"records": [{"name": " A "}], "rules": {}}),
+            "spreadsheet_generation_skill_v1": ("data_agent_v1", {"records": [], "columns": ["name"]}),
+            "code_generation_skill_v1": ("tech_agent_v1", {"requirements": "Draft code", "language": "Python"}),
+            "code_review_skill_v1": ("tech_agent_v1", {"source": "print('ok')", "context": "unit"}),
+            "github_project_analysis_skill_v1": ("tech_agent_v1", {"repository": "owner/repo", "metadata": {}}),
+            "approval_request_skill_v1": ("ceo_agent_v1", {"action": "prepare", "reason": "test", "target": "draft"}),
+            "audit_logging_skill_v1": ("audit_agent_v1", {"event": {"type": "test"}}),
+            "memory_write_skill_v1": ("memory_agent_v1", {"task_id": "task_adapter_test", "content": "Retain this."}),
+            "knowledge_search_skill_v1": ("memory_agent_v1", {"query": "nothing"}),
+            "skill_search_skill_v1": ("skill_manager_agent_v1", {"query": "planning"}),
+            "skill_composition_skill_v1": ("skill_manager_agent_v1", {"skill_ids": ["summary_skill_v1"], "goal": "Compose"}),
+            "temporary_skill_creation_skill_v1": ("skill_factory_agent_v1", {"capability": "Test helper", "constraints": []}),
+        }
+
+        self.assertEqual(set(cases), {skill.skill_id for skill in service.company_os.skills.list()})
+        for skill_id, (actor_id, payload) in cases.items():
+            requested = service.request_skill_run(skill_id, actor_id, payload, "Verify runtime adapter coverage.")
+            if requested["run"]["status"] == "waiting_approval":
+                service.decide_approval(requested["approval"]["approval_id"], ApprovalStatus.APPROVED, "human_root", "adapter test")
+                requested = service.complete_skill_run(requested["run"]["run_id"])
+            self.assertEqual(requested["run"]["status"], "completed", skill_id)
+
 
 if __name__ == "__main__":
     unittest.main()

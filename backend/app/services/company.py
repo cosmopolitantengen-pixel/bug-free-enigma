@@ -8,13 +8,14 @@ from datetime import datetime, timedelta, timezone
 from app.auth.service import AuthService
 from app.bootstrap import CompanyOS, build_company_os
 from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
-from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
-from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, TaskStatus, ToolRunStatus
-from app.core.models import ActionRequest, AuditEvent, KnowledgeDoc, MemoryRecord, Task, utc_now
+from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, SkillRun, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
+from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, SkillRunStatus, TaskStatus, ToolRunStatus
+from app.core.models import ActionRequest, AuditEvent, EvaluationRecord, KnowledgeDoc, MemoryRecord, RiskAssessment, Task, utc_now
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.observability import build_structured_logs
 from app.persistence.sqlite_store import SQLITE_SCHEMA_VERSION, SQLiteStateStore
 from app.services.serializers import to_plain
+from app.skills.runtime import SkillRuntimeContext, SkillRuntimeError, execute_skill_adapter
 from app.tools.adapters import ToolAdapterContext, ToolAdapterError, execute_tool_adapter
 
 
@@ -40,6 +41,7 @@ class CompanyApplicationService:
     improvement_proposals: dict[str, ImprovementProposal] = field(default_factory=dict)
     github_absorptions: dict[str, GitHubAbsorption] = field(default_factory=dict)
     tool_runs: dict[str, ToolRun] = field(default_factory=dict)
+    skill_runs: dict[str, SkillRun] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.persistence is None:
@@ -55,6 +57,7 @@ class CompanyApplicationService:
         loaded_skills = self.persistence.load_skills()
         loaded_tools = self.persistence.load_tools()
         loaded_tool_runs = self.persistence.load_tool_runs()
+        loaded_skill_runs = self.persistence.load_skill_runs()
         loaded_workflow_runs = self.persistence.load_workflow_runs()
         loaded_workflow_steps = self.persistence.load_workflow_steps()
         loaded_model_usage = self.persistence.load_model_usage()
@@ -85,6 +88,7 @@ class CompanyApplicationService:
         }
         self.github_absorptions = {proposal.proposal_id: proposal for proposal in loaded_github_absorptions}
         self.tool_runs = {run.run_id: run for run in loaded_tool_runs}
+        self.skill_runs = {run.run_id: run for run in loaded_skill_runs}
         self.company_os = build_company_os(
             approvals=loaded_approvals,
             audit_events=loaded_audit,
@@ -128,6 +132,7 @@ class CompanyApplicationService:
             skills=list(self.company_os.skills.list()),
             tools=list(self.company_os.tools.list()),
             tool_runs=list(self.tool_runs.values()),
+            skill_runs=list(self.skill_runs.values()),
             workflow_runs=list(self.company_os.traces.list_runs()),
             workflow_steps=list(self.company_os.traces.list_steps()),
             model_usage=list(self.company_os.models.list_usage()),
@@ -345,6 +350,46 @@ class CompanyApplicationService:
 
     def list_tool_runs(self) -> list[dict]:
         return [to_plain(run) for run in self.tool_runs.values()]
+
+    def list_skill_runs(self) -> list[dict]:
+        return [to_plain(run) for run in self.skill_runs.values()]
+
+    def complete_skill_run(self, run_id: str, completed_by: str = "human_root", note: str | None = None) -> dict:
+        run = self.skill_runs[run_id]
+        if run.status != SkillRunStatus.WAITING_APPROVAL:
+            raise ValueError("skill run is not waiting for approval")
+        if not run.approval_id:
+            raise ValueError("skill run has no approval")
+        approval = self.company_os.approvals.get(run.approval_id)
+        if approval.status != ApprovalStatus.APPROVED:
+            raise ValueError("skill run approval is not approved")
+
+        skill = self.company_os.skills.get(run.skill_id)
+        agent = self.company_os.agents.get(run.actor_id)
+        if not skill.enabled:
+            run.status, run.error = SkillRunStatus.BLOCKED, "skill is disabled"
+            run.completed_at = utc_now()
+        elif run.skill_id not in agent.allowed_skills or agent.agent_id not in skill.allowed_agents:
+            run.status, run.error = SkillRunStatus.BLOCKED, "skill is not authorized for this agent"
+            run.completed_at = utc_now()
+        else:
+            self._execute_skill_run(run, skill)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="skill_run_completed",
+                actor_id=completed_by,
+                action=f"run_skill:{skill.skill_id}",
+                task_id=run.task_id,
+                risk_level=run.risk_level,
+                approval_status=approval.status,
+                result=run.status.value,
+                input_ref=note,
+                output_ref=run.run_id,
+                error=run.error,
+            )
+        )
+        self.sync()
+        return {"skill": to_plain(skill), "run": to_plain(run), "approval": to_plain(approval)}
 
     def complete_tool_run(self, run_id: str, completed_by: str = "human_root", note: str | None = None) -> dict:
         run = self.tool_runs[run_id]
@@ -1471,6 +1516,107 @@ class CompanyApplicationService:
             "blocked": False,
         }
 
+    def request_skill_run(
+        self,
+        skill_id: str,
+        actor_id: str,
+        input: dict,
+        reason: str,
+        task_id: str | None = None,
+    ) -> dict:
+        skill = self.company_os.skills.get(skill_id)
+        agent = self.company_os.agents.get(actor_id)
+        permission_level = PermissionLevel.L2_INTERNAL_WRITE if skill_id == "memory_write_skill_v1" else PermissionLevel.L1_DRAFT
+        request = ActionRequest(
+            action=f"run_skill:{skill.skill_id}",
+            actor_id=actor_id,
+            task_id=task_id,
+            permission_level=permission_level,
+            reason=reason,
+            target=skill.skill_id,
+            metadata={"skill_id": skill.skill_id},
+        )
+        assessed = self.company_os.risks.assess(request)
+        risk = RiskAssessment(
+            request=request,
+            level=skill.risk_level,
+            reasons=(f"registered Skill risk is {skill.risk_level.value}",),
+            requires_approval=skill.requires_approval or assessed.requires_approval,
+            blocked=skill.risk_level == RiskLevel.FORBIDDEN or assessed.blocked,
+        )
+        permission = self.company_os.permissions.evaluate(agent, request)
+        run = SkillRun(
+            skill_id=skill.skill_id,
+            actor_id=actor_id,
+            input=input,
+            reason=reason,
+            task_id=task_id,
+            risk_level=risk.level,
+        )
+        approval = None
+        approval_status = ApprovalStatus.NOT_REQUIRED
+
+        if not skill.enabled:
+            run.status, run.error = SkillRunStatus.BLOCKED, "skill is disabled"
+            run.completed_at = utc_now()
+        elif skill.skill_id not in agent.allowed_skills or agent.agent_id not in skill.allowed_agents:
+            run.status, run.error = SkillRunStatus.BLOCKED, "skill is not authorized for this agent"
+            run.completed_at = utc_now()
+        elif risk.blocked or permission.decision == ActionDecision.BLOCK:
+            run.status = SkillRunStatus.BLOCKED
+            run.error = permission.reason if permission.decision == ActionDecision.BLOCK else "; ".join(risk.reasons)
+            run.completed_at = utc_now()
+        elif risk.requires_approval or permission.decision == ActionDecision.REQUIRE_APPROVAL:
+            approval = self.company_os.approvals.request_approval(
+                request=request,
+                risk=risk,
+                possible_benefit=f"Run {skill.name} for a controlled task step.",
+                possible_loss="Skill output could be incorrect, unsafe, or create unintended internal state.",
+            )
+            run.status = SkillRunStatus.WAITING_APPROVAL
+            run.approval_id = approval.approval_id
+            approval_status = approval.status
+        else:
+            self._execute_skill_run(run, skill)
+
+        self.skill_runs[run.run_id] = run
+        incident = None
+        if run.status == SkillRunStatus.BLOCKED:
+            incident = self._report_incident(
+                title="Skill run blocked",
+                description=run.error or "Skill run was blocked by policy.",
+                source_type="skill_run",
+                source_id=run.run_id,
+                risk_level=run.risk_level,
+                task_id=task_id,
+                actor_id=actor_id,
+                recommendation="Review Skill enablement, symmetric Agent authorization, risk, and permission boundaries.",
+            )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="skill_run_requested",
+                actor_id=actor_id,
+                action=request.action,
+                task_id=task_id,
+                risk_level=risk.level,
+                approval_status=approval_status,
+                result=run.status.value,
+                input_ref=reason,
+                output_ref=run.run_id,
+                error=run.error,
+            )
+        )
+        self.sync()
+        return {
+            "skill": to_plain(skill),
+            "run": to_plain(run),
+            "risk": to_plain(risk),
+            "permission_decision": permission.decision.value,
+            "permission_reason": permission.reason,
+            "approval": to_plain(approval) if approval else None,
+            "incident": to_plain(incident) if incident else None,
+        }
+
     def request_tool_run(
         self,
         tool_id: str,
@@ -2443,6 +2589,7 @@ class CompanyApplicationService:
         evaluations = self.company_os.evaluations.list()
         tools = self.company_os.tools.list()
         tool_runs = list(self.tool_runs.values())
+        skill_runs = list(self.skill_runs.values())
         workflow_runs = self.company_os.traces.list_runs()
         workflow_steps = self.company_os.traces.list_steps()
         workflows = self.company_os.workflows.list()
@@ -2505,6 +2652,7 @@ class CompanyApplicationService:
             "recent_failure_count": len(failed_tasks),
             "agent_count": len(agents),
             "skill_count": len(skills),
+            "skill_run_count": len(skill_runs),
             "workflow_count": 1,
             "workflow_run_count": len(workflow_runs),
             "workflow_step_count": len(workflow_steps),
@@ -2561,6 +2709,7 @@ class CompanyApplicationService:
             "agent_status_counts": agent_status_counts,
             "skill_status_counts": skill_status_counts,
             "skill_risk_counts": skill_risk_counts,
+            "skill_run_status_counts": self._count_by_value(run.status.value for run in skill_runs),
             "tool_status_counts": self._count_by_value("enabled" if tool.enabled else "disabled" for tool in tools),
             "tool_run_status_counts": self._count_by_value(run.status.value for run in tool_runs),
             "workflow_run_status_counts": self._count_by_value(run.status.value for run in workflow_runs),
@@ -2573,6 +2722,7 @@ class CompanyApplicationService:
             "recent_logs": [to_plain(event) for event in recent_audit],
             "recent_structured_logs": structured_logs[-10:],
             "recent_evaluations": [to_plain(record) for record in evaluations[-10:]],
+            "recent_skill_runs": [to_plain(run) for run in skill_runs[-10:]],
             "recent_tool_runs": [to_plain(run) for run in tool_runs[-10:]],
             "recent_workflow_runs": [to_plain(run) for run in workflow_runs[-10:]],
             "recent_workflow_steps": [to_plain(step) for step in workflow_steps[-10:]],
@@ -2638,6 +2788,34 @@ class CompanyApplicationService:
             adapter_result = {"message": f"Simulated {tool.name} execution completed."}
         run.result = json.dumps(to_plain(adapter_result), sort_keys=True)
         run.completed_at = utc_now()
+
+    def _execute_skill_run(self, run: SkillRun, skill: Skill) -> None:
+        try:
+            adapter_result = execute_skill_adapter(
+                skill.skill_id,
+                run.input,
+                SkillRuntimeContext(company_os=self.company_os),
+            )
+        except (SkillRuntimeError, KeyError) as exc:
+            run.status = SkillRunStatus.FAILED
+            run.error = str(exc)
+            run.completed_at = utc_now()
+            return
+
+        run.status = SkillRunStatus.COMPLETED
+        run.result = json.dumps(to_plain(adapter_result), sort_keys=True)
+        run.completed_at = utc_now()
+        self.company_os.evaluations.write(
+            EvaluationRecord(
+                subject_type="skill",
+                subject_id=skill.skill_id,
+                task_id=run.task_id,
+                score=1.0,
+                metric="skill_run_completed",
+                notes=f"Skill adapter completed run {run.run_id} with validated input.",
+                risk_level=run.risk_level,
+            )
+        )
 
     def _authorize_schedule_actor(self, actor_id: str) -> None:
         if actor_id == "human_root":
@@ -2843,6 +3021,7 @@ class CompanyApplicationService:
             "strategic_goals": to_plain(self.company_os.goals.list()),
             "tools": to_plain(self.company_os.tools.list()),
             "tool_runs": to_plain(list(self.tool_runs.values())),
+            "skill_runs": to_plain(list(self.skill_runs.values())),
             "workflow_runs": to_plain(self.company_os.traces.list_runs()),
             "workflow_steps": to_plain(self.company_os.traces.list_steps()),
             "model_usage": to_plain(self.company_os.models.list_usage()),

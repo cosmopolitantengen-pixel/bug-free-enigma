@@ -73,6 +73,7 @@ It currently stores:
 - knowledge_docs
 - evaluations
 - tools
+- skill_runs
 - tool_runs
 - workflow_runs
 - workflow_steps
@@ -97,6 +98,8 @@ It currently stores:
 - scheduled_jobs
 - scheduled_executions
 - backup_restore_executions
+
+Schema migration `0006_skill_runtime` adds durable Skill Run lifecycle records, including input, result or error, risk, approval linkage, and completion timestamps.
 
 User records store PBKDF2 password hashes, not plaintext passwords.
 

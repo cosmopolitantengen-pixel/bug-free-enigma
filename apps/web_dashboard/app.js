@@ -62,6 +62,7 @@ function renderDashboard(summary) {
   setText("structured-log-count", summary.structured_log_count || 0);
   setText("tool-count", summary.tool_count || 0);
   setText("tool-run-count", summary.tool_run_count || 0);
+  setText("skill-run-count", summary.skill_run_count || 0);
   setText("workflow-run-count", summary.workflow_run_count || 0);
   setText("workflow-step-count", summary.workflow_step_count || 0);
   setText("scheduled-job-count", summary.scheduled_job_count || 0);
@@ -162,13 +163,14 @@ function renderSystemIntegrity(integrity) {
 }
 
 async function refresh() {
-  const [summary, databaseSchema, integrity, goals, agents, skills, tools, toolRuns, workflows, workflowRuns, modelUsage, budget, costLogs, incidents, backups, schedules, scheduledExecutions, domainEvents, agentMessages, agentMeetings, taskHandoffs, agentBroadcasts, agentConflicts, skillProposals, agentProposals, improvementProposals, githubAbsorptions, structuredLogs, memory, knowledge, evaluations, taskReviews] = await Promise.all([
+  const [summary, databaseSchema, integrity, goals, agents, skills, skillRuns, tools, toolRuns, workflows, workflowRuns, modelUsage, budget, costLogs, incidents, backups, schedules, scheduledExecutions, domainEvents, agentMessages, agentMeetings, taskHandoffs, agentBroadcasts, agentConflicts, skillProposals, agentProposals, improvementProposals, githubAbsorptions, structuredLogs, memory, knowledge, evaluations, taskReviews] = await Promise.all([
     api("/dashboard/summary"),
     api("/database/schema"),
     api("/system/integrity"),
     api("/goals"),
     api("/agents"),
     api("/skills"),
+    api("/skills/runs"),
     api("/tools"),
     api("/tools/runs"),
     api("/workflows"),
@@ -218,6 +220,14 @@ async function refresh() {
     <div class="item">
       <strong>${escapeHtml(skill.name)}</strong>
       <span>${escapeHtml(skill.type)} / ${escapeHtml(skill.risk_level)}</span>
+    </div>
+  `);
+  renderList("skill-runs-list", skillRuns.slice(-8), (run) => `
+    <div class="item">
+      <strong>${escapeHtml(run.skill_id)} / ${escapeHtml(run.status)}</strong>
+      <span>${escapeHtml(run.actor_id)} / ${escapeHtml(run.risk_level)}</span>
+      <span>${escapeHtml(run.error || run.result || "No result yet").slice(0, 180)}</span>
+      ${run.status === "waiting_approval" ? `<div class="actions"><button type="button" data-skill-run-action="complete" data-skill-run-id="${escapeHtml(run.run_id)}">Complete</button></div>` : ""}
     </div>
   `);
   renderList("tools-list", tools.slice(0, 8), (tool) => `
@@ -545,6 +555,28 @@ async function requestToolRun(event) {
   }
 }
 
+async function requestSkillRun(event) {
+  event.preventDefault();
+  $("skill-run-result").textContent = "Requesting Skill run...";
+  try {
+    const result = await api("/skills/runs/request", {
+      method: "POST",
+      body: JSON.stringify({
+        skill_id: $("skill-run-skill").value,
+        actor_id: $("skill-run-actor").value,
+        reason: $("skill-run-reason").value,
+        input: JSON.parse($("skill-run-input").value),
+      }),
+    });
+    const status = result.run.status;
+    const klass = status === "blocked" || status === "failed" ? "danger" : status === "waiting_approval" ? "warn" : "ok";
+    $("skill-run-result").innerHTML = `<span class="${klass}">${escapeHtml(status)}</span> / ${escapeHtml(result.skill.name)}`;
+    await refresh();
+  } catch (error) {
+    $("skill-run-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;
+  }
+}
+
 async function generateModelResponse(event) {
   event.preventDefault();
   $("model-result").textContent = "Generating...";
@@ -651,6 +683,15 @@ async function completeToolRun(runId) {
       note: "completed from dashboard after approval",
     }),
   });
+  await refresh();
+}
+
+async function completeSkillRun(runId) {
+  const result = await api(`/skills/runs/${runId}/complete`, {
+    method: "POST",
+    body: JSON.stringify({ completed_by: "human_root", note: "Completed from dashboard after approval." }),
+  });
+  $("skill-run-result").innerHTML = `<span class="ok">${escapeHtml(result.run.status)}</span> / ${escapeHtml(result.skill.name)}`;
   await refresh();
 }
 
@@ -1097,6 +1138,7 @@ $("goal-link-form").addEventListener("submit", linkGoalRecord);
 $("task-form").addEventListener("submit", createAndRunTask);
 $("approval-request-form").addEventListener("submit", requestApproval);
 $("tool-run-form").addEventListener("submit", requestToolRun);
+$("skill-run-form").addEventListener("submit", requestSkillRun);
 $("model-form").addEventListener("submit", generateModelResponse);
 $("budget-policy-form").addEventListener("submit", updateBudgetPolicy);
 $("backup-form").addEventListener("submit", createBackup);
@@ -1221,6 +1263,20 @@ $("tool-runs-list").addEventListener("click", async (event) => {
     await completeToolRun(button.dataset.toolRunId);
   } catch (error) {
     $("tool-run-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;
+  } finally {
+    button.disabled = false;
+  }
+});
+$("skill-runs-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-skill-run-action]");
+  if (!button) {
+    return;
+  }
+  button.disabled = true;
+  try {
+    await completeSkillRun(button.dataset.skillRunId);
+  } catch (error) {
+    $("skill-run-result").innerHTML = `<span class="danger">${escapeHtml(error.message)}</span>`;
   } finally {
     button.disabled = false;
   }

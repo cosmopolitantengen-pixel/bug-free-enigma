@@ -100,7 +100,7 @@ class ApiRouteTests(unittest.TestCase):
 
             self.assertEqual(sqlite_schema.status_code, 200)
             self.assertEqual(sqlite_schema.json()["backend"], "sqlite")
-            self.assertEqual(sqlite_schema.json()["schema_version"], 5)
+            self.assertEqual(sqlite_schema.json()["schema_version"], 6)
             self.assertEqual(sqlite_schema.json()["migrations"][0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(sqlite_schema.json()["migrations"][1]["migration_id"], "0002_audit_append_only_guards")
             self.assertEqual(
@@ -115,6 +115,7 @@ class ApiRouteTests(unittest.TestCase):
                 sqlite_schema.json()["migrations"][4]["migration_id"],
                 "0005_agent_skill_catalogs",
             )
+            self.assertEqual(sqlite_schema.json()["migrations"][5]["migration_id"], "0006_skill_runtime")
 
     def test_catalog_registration_rejects_unknown_references(self):
         bad_agent = self.client.post(

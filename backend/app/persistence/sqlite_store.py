@@ -17,6 +17,7 @@ from app.core.enums import (
     ScheduleAction,
     ScheduleExecutionStatus,
     ScheduleStatus,
+    SkillRunStatus,
     TaskStatus,
     ToolRunStatus,
     WorkflowRunStatus,
@@ -44,6 +45,7 @@ from app.core.models import (
     ScheduledExecution,
     ScheduledJob,
     Skill,
+    SkillRun,
     StrategicGoal,
     Task,
     TaskHandoff,
@@ -58,7 +60,7 @@ from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementPr
 from app.services.serializers import to_plain
 
 
-SQLITE_SCHEMA_VERSION = 5
+SQLITE_SCHEMA_VERSION = 6
 BASELINE_MIGRATION_VERSION = 1
 BASELINE_MIGRATION_ID = "0001_initial_local_state"
 BASELINE_MIGRATION_DESCRIPTION = "Create initial local AI Company OS state tables."
@@ -74,6 +76,9 @@ SCHEDULER_EVENT_MIGRATION_DESCRIPTION = "Add durable schedules, executions, and 
 CATALOG_PERSISTENCE_MIGRATION_VERSION = 5
 CATALOG_PERSISTENCE_MIGRATION_ID = "0005_agent_skill_catalogs"
 CATALOG_PERSISTENCE_MIGRATION_DESCRIPTION = "Persist registered Agent and Skill catalogs."
+SKILL_RUNTIME_MIGRATION_VERSION = 6
+SKILL_RUNTIME_MIGRATION_ID = "0006_skill_runtime"
+SKILL_RUNTIME_MIGRATION_DESCRIPTION = "Persist controlled Skill execution runs."
 
 
 class SQLiteStateStore:
@@ -136,6 +141,12 @@ class SQLiteStateStore:
                 );
 
                 CREATE TABLE IF NOT EXISTS tool_runs (
+                    run_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS skill_runs (
                     run_id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     payload_json TEXT NOT NULL
@@ -324,6 +335,10 @@ class SQLiteStateStore:
         rows = self._select_payloads("tool_runs", "created_at")
         return [_tool_run_from_plain(row) for row in rows]
 
+    def load_skill_runs(self) -> list[SkillRun]:
+        rows = self._select_payloads("skill_runs", "created_at")
+        return [_skill_run_from_plain(row) for row in rows]
+
     def load_workflow_runs(self) -> list[WorkflowRun]:
         rows = self._select_payloads("workflow_runs", "started_at")
         return [_workflow_run_from_plain(row) for row in rows]
@@ -463,6 +478,16 @@ class SQLiteStateStore:
         with closing(self._connect()) as connection:
             connection.execute(
                 "INSERT INTO tool_runs (run_id, created_at, payload_json) VALUES (?, ?, ?) "
+                "ON CONFLICT(run_id) DO UPDATE SET payload_json = excluded.payload_json",
+                (run.run_id, run.created_at.isoformat(), payload),
+            )
+            connection.commit()
+
+    def save_skill_run(self, run: SkillRun) -> None:
+        payload = _json(to_plain(run))
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT INTO skill_runs (run_id, created_at, payload_json) VALUES (?, ?, ?) "
                 "ON CONFLICT(run_id) DO UPDATE SET payload_json = excluded.payload_json",
                 (run.run_id, run.created_at.isoformat(), payload),
             )
@@ -660,6 +685,7 @@ class SQLiteStateStore:
         skills: list[Skill],
         tools: list[Tool],
         tool_runs: list[ToolRun],
+        skill_runs: list[SkillRun],
         workflow_runs: list[WorkflowRun],
         workflow_steps: list[WorkflowStep],
         model_usage: list[ModelUsageRecord],
@@ -704,6 +730,8 @@ class SQLiteStateStore:
             self.save_tool(tool)
         for run in tool_runs:
             self.save_tool_run(run)
+        for run in skill_runs:
+            self.save_skill_run(run)
         for run in workflow_runs:
             self.save_workflow_run(run)
         for step in workflow_steps:
@@ -775,6 +803,10 @@ class SQLiteStateStore:
                 "tool_runs",
                 (("run_id", "run_id"), ("created_at", "created_at")),
             ),
+            "skill_runs": (
+                "skill_runs",
+                (("run_id", "run_id"), ("created_at", "created_at")),
+            ),
             "workflow_runs": (
                 "workflow_runs",
                 (("run_id", "run_id"), ("started_at", "started_at")),
@@ -836,7 +868,7 @@ class SQLiteStateStore:
         }
 
         prepared: dict[str, tuple[str, tuple[tuple[str, str], ...], list[dict[str, Any]]]] = {}
-        optional_legacy_collections = {"agents", "skills", "scheduled_jobs"}
+        optional_legacy_collections = {"agents", "skills", "skill_runs", "scheduled_jobs"}
         for snapshot_key, (table, columns) in collection_specs.items():
             records = snapshot.get(
                 snapshot_key,
@@ -955,6 +987,8 @@ class SQLiteStateStore:
             self._apply_scheduler_event_bus(connection)
         if self._current_schema_version(connection) < CATALOG_PERSISTENCE_MIGRATION_VERSION:
             self._apply_catalog_persistence(connection)
+        if self._current_schema_version(connection) < SKILL_RUNTIME_MIGRATION_VERSION:
+            self._apply_skill_runtime(connection)
 
     def _apply_audit_append_only_guards(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
@@ -1080,6 +1114,28 @@ class SQLiteStateStore:
             ),
         )
         connection.execute(f"PRAGMA user_version = {CATALOG_PERSISTENCE_MIGRATION_VERSION}")
+
+    def _apply_skill_runtime(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS skill_runs (
+                run_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (migration_id, version, description, applied_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                SKILL_RUNTIME_MIGRATION_ID,
+                SKILL_RUNTIME_MIGRATION_VERSION,
+                SKILL_RUNTIME_MIGRATION_DESCRIPTION,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.execute(f"PRAGMA user_version = {SKILL_RUNTIME_MIGRATION_VERSION}")
 
     def _current_schema_version(self, connection: sqlite3.Connection) -> int:
         cursor = connection.execute("PRAGMA user_version")
@@ -1273,6 +1329,24 @@ def _tool_run_from_plain(payload: dict[str, Any]) -> ToolRun:
         reason=payload["reason"],
         task_id=payload.get("task_id"),
         status=ToolRunStatus(payload.get("status", ToolRunStatus.REQUESTED.value)),
+        result=payload.get("result"),
+        risk_level=RiskLevel(payload.get("risk_level", RiskLevel.LOW.value)),
+        approval_id=payload.get("approval_id"),
+        error=payload.get("error"),
+        run_id=payload["run_id"],
+        created_at=_dt(payload["created_at"]) or datetime.min,
+        completed_at=_dt(payload.get("completed_at")),
+    )
+
+
+def _skill_run_from_plain(payload: dict[str, Any]) -> SkillRun:
+    return SkillRun(
+        skill_id=payload["skill_id"],
+        actor_id=payload["actor_id"],
+        input=payload.get("input", {}),
+        reason=payload["reason"],
+        task_id=payload.get("task_id"),
+        status=SkillRunStatus(payload.get("status", SkillRunStatus.REQUESTED.value)),
         result=payload.get("result"),
         risk_level=RiskLevel(payload.get("risk_level", RiskLevel.LOW.value)),
         approval_id=payload.get("approval_id"),

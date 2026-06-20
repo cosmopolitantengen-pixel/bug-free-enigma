@@ -6,6 +6,7 @@ The first version focuses on the operating foundation:
 
 - Human Root always keeps the highest authority.
 - Agents, Skills, and Workflows are registered before use.
+- Skill calls use validated inputs and run through Agent authorization, risk, approval, audit, persistence, and evaluation controls.
 - Tools are registered before use and run through Agent permission, risk, approval, and audit checks.
 - Model calls go through a gateway that records usage and audit events.
 - Budget guardrails check model calls before usage and cost are recorded.
@@ -49,7 +50,7 @@ To enable local SQLite persistence for the API, set:
 $env:AI_COMPANY_OS_SQLITE_PATH='E:\1\data\company_os.db'
 ```
 
-The current SQLite adapter persists Agent and Skill catalogs, tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, tool runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
+The current SQLite adapter persists Agent and Skill catalogs, Skill Runs, tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, Tool Runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
 It also persists local users with PBKDF2 password hashes for the development auth flow.
 
 ## Local Dashboard

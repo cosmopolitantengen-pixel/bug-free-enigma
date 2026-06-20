@@ -25,15 +25,16 @@ The first runnable loop is:
 8. Audit Log records every key action.
 9. Memory and Knowledge Base store the result.
 10. Tool requests run through permission, risk, approval, and audit controls.
-11. Workflow Run and Workflow Step traces record the execution path.
-12. Model calls go through a gateway with usage and audit records.
-13. Budget guardrails check model calls and record cost logs.
-14. Blocked operational events create incidents for human follow-up.
-15. Agents can leave auditable messages, coordination meeting records, task handoffs, internal event broadcasts, and conflict arbitration records.
-16. Task reviews turn retrospective notes into review memory, knowledge docs, and audit events.
-17. Review-driven improvement proposals route lessons through approval, sandbox checks, and registered knowledge.
-18. Strategic goals track operating progress and link tasks, reviews, and improvements to the higher-level objective.
-19. Dashboard can read task, goal, agent, skill, tool, workflow, model, budget, incident, communication, review, improvement, approval, risk, and audit state.
+11. Skill requests run through schema validation, two-sided authorization, risk, approval, audit, persistence, and evaluation controls.
+12. Workflow Run and Workflow Step traces record the execution path.
+13. Model calls go through a gateway with usage and audit records.
+14. Budget guardrails check model calls and record cost logs.
+15. Blocked operational events create incidents for human follow-up.
+16. Agents can leave auditable messages, coordination meeting records, task handoffs, internal event broadcasts, and conflict arbitration records.
+17. Task reviews turn retrospective notes into review memory, knowledge docs, and audit events.
+18. Review-driven improvement proposals route lessons through approval, sandbox checks, and registered knowledge.
+19. Strategic goals track operating progress and link tasks, reviews, and improvements to the higher-level objective.
+20. Dashboard can read task, goal, agent, skill, tool, workflow, model, budget, incident, communication, review, improvement, approval, risk, and audit state.
 
 Current status:
 
@@ -81,6 +82,8 @@ Current status:
 - Formal Agent and Skill registrations are audited, persisted in SQLite, included in verified backups, and restored transactionally.
 - All 10 required V1 Workflows are registered as validated Agent/Skill step definitions with explicit operational entrypoints.
 - Task planning now runs as a second native Workflow with permission/risk checks, persisted traces, audit, plan Memory, Evaluation, and blocked-run Incidents.
+- All 18 V1 Skills now execute through a controlled runtime with deterministic adapters, schema validation, symmetric Agent authorization, approval continuation, durable Skill Runs, blocked-run Incidents, and successful-run Evaluations.
+- SQLite schema v6 persists Skill Runs, and the dashboard exposes Skill Run requests, status, results, and approval continuation.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
