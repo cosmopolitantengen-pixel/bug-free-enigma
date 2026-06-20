@@ -293,6 +293,31 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(service.list_workflow_steps()[0]["status"], "blocked")
         self.assertGreaterEqual(len(service.list_incidents()), 2)
 
+    def test_retrospective_workflow_blocks_before_review_when_memory_skill_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        skill = company_os.skills.get("memory_write_skill_v1")
+        company_os.skills.restore(replace(skill, enabled=False))
+        service = CompanyApplicationService(company_os=company_os)
+
+        result = service.run_registered_workflow(
+            "retrospective_v1",
+            "Blocked retrospective",
+            "This retrospective has enough detail to pass quality before memory is blocked.",
+            input={"lessons": ["Do not bypass disabled Skills"], "quality_score": 0.8},
+        )
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertIsNone(result["review"])
+        self.assertIsNone(result["knowledge"])
+        self.assertEqual(len(service.list_task_reviews()), 0)
+        self.assertEqual(len(service.list_knowledge()), 0)
+        self.assertEqual([run["status"] for run in service.list_skill_runs()], ["completed", "blocked"])
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+
     def test_document_workflow_resumes_after_approval(self):
         from app.services.company import CompanyApplicationService
 

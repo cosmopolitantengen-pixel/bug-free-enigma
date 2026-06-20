@@ -117,6 +117,66 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(steps[0]["status"], "failed")
         self.assertTrue(all(step["status"] == "completed" for step in steps[1:]))
 
+    def test_retrospective_workflow_records_review_memory_knowledge_and_skills(self):
+        source = self.client.post(
+            "/tasks",
+            json={"title": "Completed source task", "description": "Work to review."},
+        ).json()
+        retrospective = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "retrospective_v1",
+                "title": "Source task retrospective",
+                "description": "Capture concrete lessons from the completed source task.",
+                "input": {
+                    "source_task_id": source["task_id"],
+                    "outcome": "completed",
+                    "summary": "The task completed safely with clear authorization and review evidence.",
+                    "what_went_well": "The control path remained visible.",
+                    "what_went_wrong": "The first draft needed clarification.",
+                    "lessons": ["Validate inputs early", "Keep runtime records"],
+                    "follow_up_actions": ["Add another native Workflow"],
+                    "quality_score": 0.9,
+                },
+            },
+        )
+        workflow_task_id = retrospective.json()["task"]["task_id"]
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = [run for run in self.client.get("/skills/runs").json() if run["task_id"] == workflow_task_id]
+        reviews = self.client.get("/task-reviews").json()
+        memory = self.client.get("/memory").json()
+        knowledge = self.client.get("/knowledge").json()
+
+        self.assertEqual(retrospective.status_code, 200)
+        self.assertFalse(retrospective.json()["blocked"])
+        self.assertEqual(retrospective.json()["task"]["status"], "reviewed")
+        self.assertEqual(retrospective.json()["review"]["task_id"], source["task_id"])
+        self.assertEqual(retrospective.json()["review"]["lessons"], ["Validate inputs early", "Keep runtime records"])
+        self.assertEqual(runs[-1]["workflow_id"], "retrospective_v1")
+        self.assertEqual(runs[-1]["status"], "completed")
+        self.assertEqual(len(steps), 3)
+        self.assertEqual(len(skill_runs), 3)
+        self.assertEqual(memory[-1]["task_id"], source["task_id"])
+        self.assertEqual(knowledge[-1]["source_task_id"], source["task_id"])
+        self.assertEqual(reviews[-1]["review_id"], retrospective.json()["review"]["review_id"])
+
+    def test_retrospective_rejects_unknown_source_before_creating_workflow_task(self):
+        before = len(self.client.get("/tasks").json())
+        response = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "retrospective_v1",
+                "title": "Invalid retrospective",
+                "description": "Do not create an orphan task.",
+                "input": {"source_task_id": "task_missing", "summary": "A valid length summary for validation."},
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("source task not found", response.json()["detail"])
+        self.assertEqual(len(self.client.get("/tasks").json()), before)
+
     def test_dedicated_workflow_rejects_generic_run_without_creating_task(self):
         task_count = len(self.client.get("/tasks").json())
         response = self.client.post(

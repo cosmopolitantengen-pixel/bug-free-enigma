@@ -497,6 +497,7 @@ async function createAndRunTask(event) {
         workflow_id: $("task-workflow").value,
         title: $("task-title").value,
         description: $("task-description").value,
+        input: JSON.parse($("task-workflow-input").value || "{}"),
       }),
     });
     $("task-result").innerHTML = `<span class="ok">Workflow result:</span> ${escapeHtml(result.task.status)} (${escapeHtml(result.task.task_id)})`;

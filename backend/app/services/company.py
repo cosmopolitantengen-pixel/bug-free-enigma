@@ -449,12 +449,19 @@ class CompanyApplicationService:
         title: str,
         description: str,
         user_id: str = "human_root",
+        input: dict | None = None,
     ) -> dict:
         definition = self.company_os.workflows.get(workflow_id)
         if not definition.enabled:
             raise ValueError("workflow is disabled")
-        if workflow_id not in {"document_generation_v1", "task_planning_v1", "quality_check_v1"}:
+        if workflow_id not in {"document_generation_v1", "task_planning_v1", "quality_check_v1", "retrospective_v1"}:
             raise ValueError(f"workflow uses dedicated entrypoint: {definition.entrypoint}")
+        workflow_input = input or {}
+        if workflow_id == "retrospective_v1":
+            self.company_os.retrospective_workflow.validate_input(workflow_input, description)
+            source_task_id = workflow_input.get("source_task_id")
+            if source_task_id is not None and source_task_id not in self.tasks:
+                raise ValueError(f"retrospective source task not found: {source_task_id}")
         task = self.create_task(title, description, user_id)
         if workflow_id == "document_generation_v1":
             result = self.run_task(task["task_id"])
@@ -481,6 +488,22 @@ class CompanyApplicationService:
                 "blocked": quality_result.blocked,
                 "passed": quality_result.passed,
                 "incident": to_plain(quality_result.incident) if quality_result.incident else None,
+            }
+        if workflow_id == "retrospective_v1":
+            retrospective_result = self.company_os.retrospective_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(retrospective_result.task),
+                "output": retrospective_result.output,
+                "review": to_plain(retrospective_result.review) if retrospective_result.review else None,
+                "knowledge": to_plain(retrospective_result.knowledge) if retrospective_result.knowledge else None,
+                "approval_required": False,
+                "blocked": retrospective_result.blocked,
+                "incident": to_plain(retrospective_result.incident) if retrospective_result.incident else None,
             }
         raise ValueError("unsupported workflow execution mode")
 
@@ -2835,6 +2858,7 @@ class CompanyApplicationService:
         self.company_os.document_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.task_planning_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
 
     def _execute_workflow_skill(
         self,

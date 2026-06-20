@@ -28,6 +28,7 @@ class WorkflowRunRequest(BaseModel):
     title: str
     description: str
     user_id: str = "human_root"
+    input: dict = Field(default_factory=dict)
 
 
 class StrategicGoalCreateRequest(BaseModel):

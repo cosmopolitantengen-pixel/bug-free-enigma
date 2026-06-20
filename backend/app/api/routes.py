@@ -672,6 +672,7 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
                 payload.title,
                 payload.description,
                 payload.user_id,
+                payload.input,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="workflow not found") from exc

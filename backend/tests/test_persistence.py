@@ -292,6 +292,45 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(skill_runs), 3)
             self.assertIn("quality_check_v1", [record["subject_id"] for record in evaluations])
 
+    def test_retrospective_workflow_state_persists_through_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "retrospective_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            source = first.post(
+                "/tasks",
+                json={"title": "Persistent source", "description": "Review this task."},
+            ).json()
+            recorded = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "retrospective_v1",
+                    "title": "Persistent retrospective",
+                    "description": "Persist the complete retrospective execution and its learning records.",
+                    "input": {
+                        "source_task_id": source["task_id"],
+                        "lessons": ["Persistence needs end-to-end evidence"],
+                        "follow_up_actions": ["Reload every record type"],
+                        "quality_score": 0.95,
+                    },
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            runs = second.get("/workflow-runs").json()
+            reviews = second.get("/task-reviews").json()
+            memory = second.get("/memory").json()
+            knowledge = second.get("/knowledge").json()
+            skill_runs = second.get("/skills/runs").json()
+
+            self.assertEqual(recorded.status_code, 200)
+            self.assertEqual(runs[0]["workflow_id"], "retrospective_v1")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(len(reviews), 1)
+            self.assertEqual(reviews[0]["task_id"], source["task_id"])
+            self.assertEqual(memory[0]["task_id"], source["task_id"])
+            self.assertEqual(knowledge[0]["source_task_id"], source["task_id"])
+            self.assertEqual(len(skill_runs), 3)
+
     def test_incidents_persist_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "incidents.db")

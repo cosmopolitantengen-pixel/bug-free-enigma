@@ -86,6 +86,7 @@ Current status:
 - SQLite schema v6 persists Skill Runs, and the dashboard exposes Skill Run requests, status, results, and approval continuation.
 - Document generation and task planning execute registered Skills through the unified Skill Runtime. Document generation produces five linked Skill Runs and task planning produces three; blocked or failed Skills stop the parent Workflow.
 - Quality checking is the third native Workflow, with separate quality-failure and control-block semantics, three linked Skill Runs, persisted traces, Evaluation, Audit, and Incident handling.
+- Retrospective is the fourth native Workflow. Structured review input produces three controlled Skill Runs and gates TaskReview and Knowledge creation on successful quality, memory, and audit steps.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
@@ -118,7 +119,7 @@ Current interim implementation:
 - Dashboard includes a task review form and recent review history
 - Dashboard includes review-driven improvement proposal controls
 - Dashboard includes strategic goal creation, progress updates, and record linking
-- Dashboard lists the validated Workflow catalog and can run document-generation or task-planning Workflows from one selector
+- Dashboard lists the validated Workflow catalog and can run document-generation, task-planning, quality-check, or retrospective Workflows from one selector
 
 ## Phase 4: Controlled Evolution
 

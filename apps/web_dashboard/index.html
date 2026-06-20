@@ -181,6 +181,7 @@
                   <option value="document_generation_v1">Document Generation</option>
                   <option value="task_planning_v1">Task Planning</option>
                   <option value="quality_check_v1">Quality Check</option>
+                  <option value="retrospective_v1">Retrospective</option>
                 </select>
               </label>
               <label>
@@ -190,6 +191,10 @@
               <label>
                 Description
                 <textarea id="task-description">Create a safe internal operating note for AI Company OS.</textarea>
+              </label>
+              <label>
+                Workflow Input JSON
+                <textarea id="task-workflow-input">{}</textarea>
               </label>
               <button type="submit">Create and Run</button>
             </form>

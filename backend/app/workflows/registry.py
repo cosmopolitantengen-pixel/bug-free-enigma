@@ -141,7 +141,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="retrospective_v1",
             name="Retrospective",
             description="Capture quality outcomes, lessons, memory, and follow-up improvements.",
-            entrypoint="POST /task-reviews",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "review_outcome", "quality_agent_v1", "quality_check", PermissionLevel.L1_DRAFT, "quality_check_skill_v1"),
                 step(2, "write_review_memory", "memory_agent_v1", "write_memory", PermissionLevel.L2_INTERNAL_WRITE, "memory_write_skill_v1"),
