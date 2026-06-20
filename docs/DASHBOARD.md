@@ -24,6 +24,7 @@ GET /agents
 GET /skills
 GET /tools
 GET /tools/runs
+GET /workflows
 GET /workflow-runs
 GET /model-usage
 GET /budget/summary
@@ -43,8 +44,7 @@ GET /logs/structured
 GET /memory
 GET /knowledge
 GET /evaluations
-POST /tasks
-POST /tasks/{task_id}/run
+POST /workflows/run
 POST /tasks/{task_id}/resume
 POST /approvals/request
 POST /incidents/{incident_id}/acknowledge
@@ -98,7 +98,7 @@ POST /agents/proposals/{proposal_id}/register
 - View skill risk distribution.
 - View Agents and Skills.
 - View registered Tools, recent Tool Runs, and adapter result/error summaries.
-- View recent Workflow Runs and step traces.
+- View the complete V1 Workflow catalog, declared steps, execution modes, entrypoints, recent runs, and step traces.
 - View model usage counts, token estimates, and recent model calls.
 - View budget usage and recent cost logs.
 - Update the active model budget policy from Settings as Human Root.
@@ -115,7 +115,7 @@ POST /agents/proposals/{proposal_id}/register
 - View normalized structured JSON logs across audit, workflow, tool, model, cost, and incident categories.
 - View Memory and Knowledge Base entries.
 - View recent evaluation records and average score.
-- Create and run a document Workflow task.
+- Select and run either the document-generation or task-planning native Workflow.
 - Resume a waiting document Workflow after Human Root approval.
 - Submit an action through the Approval Center.
 - Request a controlled Tool Run from the dashboard.

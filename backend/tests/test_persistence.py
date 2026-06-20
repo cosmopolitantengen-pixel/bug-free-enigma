@@ -228,6 +228,34 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(reloaded.list_cost_logs()), 1)
             self.assertEqual(len(reloaded.list_incidents()), 0)
 
+    def test_task_planning_workflow_traces_memory_and_evaluation_persist(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "task_planning.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            planned = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "task_planning_v1",
+                    "title": "Persistent plan",
+                    "description": "Retain planning controls across restart.",
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            tasks = second.get("/tasks").json()
+            runs = second.get("/workflow-runs").json()
+            steps = second.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
+            memory = second.get("/memory").json()
+            evaluations = second.get("/evaluations").json()
+
+            self.assertEqual(planned.status_code, 200)
+            self.assertEqual(tasks[0]["status"], "planned")
+            self.assertEqual(runs[0]["workflow_id"], "task_planning_v1")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(len(steps), 3)
+            self.assertEqual(memory[0]["memory_type"], "plan")
+            self.assertEqual(evaluations[0]["subject_id"], "task_planning_v1")
+
     def test_incidents_persist_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "incidents.db")

@@ -44,6 +44,7 @@ POST /tools/runs/request
 POST /tools/runs/{id}/complete
 
 GET /workflows
+GET /workflows/{id}
 GET /workflow-runs
 GET /workflow-runs/{id}/steps
 POST /workflows/run
@@ -239,6 +240,8 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 
 `POST /agents` and `POST /skills` validate every referenced Skill, Tool, Agent, and reporting line before Human Root registration. Accepted entries write audit events and persist in SQLite. Factory-approved registrations use the same durable catalogs.
 
+`GET /workflows` returns the 10 validated V1 Workflow definitions, including ordered Agent/Skill steps and operational entrypoints. `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` accepts `workflow_id`, `title`, `description`, and optional `user_id`; it currently runs the native document-generation and task-planning workflows. A service-backed Workflow rejects the generic runner before creating a task and identifies its dedicated entrypoint.
+
 `GET /system/integrity` returns operational self-checks for persistence backend, schema version, SQLite audit append-only guards, backup checksum state, open incidents, pending approvals, and budget policy status. It reports an overall `ok`, `warning`, or `critical` status plus individual check messages.
 
 `GET /dashboard/summary` returns operational sections for the dashboard:
@@ -276,7 +279,7 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 - integrity status and issue counts
 - evaluation count and average score
 - tool and tool-run counts
-- workflow run and workflow step counts
+- registered Workflow, Workflow Run, and Workflow Step counts
 - model usage, token, and estimated cost counts
 - budget used/max token and cost counts
 - incident and open-incident counts
@@ -290,7 +293,7 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 - GitHub absorption counts
 - strategic goal counts, active goal counts, and average goal progress
 
-`GET /evaluations` returns Agent, Skill, and Workflow evaluation records. The first document workflow writes deterministic evaluation records when it completes.
+`GET /evaluations` returns Agent, Skill, and Workflow evaluation records. Document generation and task planning write deterministic Workflow evaluations when they complete.
 
 `POST /models/generate` checks the Budget Guard, then runs a deterministic local model gateway call if allowed. Allowed calls record `ModelUsageRecord`, `CostLog`, and a `model_called` audit event. Blocked calls record a blocked `CostLog` plus a `model_blocked` audit event. `GET /model-usage` returns usage records with provider, model, actor, task, purpose, token estimates, and estimated cost.
 

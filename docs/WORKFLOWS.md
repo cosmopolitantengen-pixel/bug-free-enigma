@@ -44,6 +44,10 @@ A Workflow coordinates Agents, Skills, Tools, approvals, quality checks, audit l
 
 ## Current Implementation
 
+The Workflow Registry now contains all 10 V1 definitions. Every definition declares an ID, version, execution mode, entrypoint, ordered steps, responsible Agent, action, permission level, and optional Skill. Registration rejects non-contiguous steps, missing Agents or Skills, Agent permissions that do not exactly include the requested level, and unauthorized Agent/Skill pairs.
+
+`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1` and `task_planning_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
+
 The document generation workflow writes one `WorkflowRun` and seven ordered `WorkflowStep` records:
 
 1. `task_created`
@@ -57,3 +61,21 @@ The document generation workflow writes one `WorkflowRun` and seven ordered `Wor
 These records are exposed through `GET /workflow-runs`, `GET /workflow-runs/{run_id}/steps`, `GET /dashboard/summary`, and the static dashboard.
 
 If `write_document` requires approval, the task enters `needs_approval` and the `WorkflowRun` enters `waiting_approval`. After Human Root approves the linked approval, `POST /tasks/{task_id}/resume` continues the same workflow run through document writing, risk check, quality check, memory write, knowledge write, evaluation, and completion. Resume is rejected for pending, rejected, blocked, or non-waiting tasks.
+
+The task planning workflow writes three ordered steps:
+
+1. `understand_goal`
+2. `decompose_task`
+3. `validate_plan_risk`
+
+Each step rechecks Agent enabled state, Skill enabled state, exact permission, and risk policy at runtime. Success writes a scoped plan to the task, plan Memory, Workflow evaluation, audit events, and persisted traces. A disabled Skill, disabled Agent, permission violation, or blocked risk stops the Workflow and creates an Incident. The task remains `planned`; planning does not claim that execution has happened.
+
+The other catalog definitions point to their operational entrypoints:
+
+- Agent collaboration: meetings and task handoffs
+- Skill/Agent missing handling: controlled Factory proposal APIs
+- Approval: Approval Center request and decision APIs
+- Quality check: document Workflow quality stage
+- Retrospective: task review API
+- GitHub analysis: absorption analysis, sandbox, approval, and knowledge registration APIs
+- Tool call: controlled Tool Run request and completion APIs

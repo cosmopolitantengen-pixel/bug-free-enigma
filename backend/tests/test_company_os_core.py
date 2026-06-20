@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from dataclasses import replace
 
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -12,7 +13,8 @@ if BACKEND_DIR not in sys.path:
 from app.agents.registry import AgentRegistry
 from app.bootstrap import build_company_os
 from app.core.enums import ActionDecision, ApprovalStatus, PermissionLevel, RiskLevel, TaskStatus
-from app.core.models import ActionRequest, Agent, AuditEvent, BudgetPolicy, RiskAssessment, Task
+from app.core.models import ActionRequest, Agent, AuditEvent, BudgetPolicy, RiskAssessment, Task, WorkflowDefinition, WorkflowStepDefinition
+from app.workflows.registry import WorkflowRegistry
 
 
 class CompanyOSCoreTests(unittest.TestCase):
@@ -38,6 +40,61 @@ class CompanyOSCoreTests(unittest.TestCase):
             self.assertTrue(skill.allowed_agents <= agent_ids)
             for agent_id in skill.allowed_agents:
                 self.assertIn(skill.skill_id, company_os.agents.get(agent_id).allowed_skills)
+
+    def test_v1_workflow_catalog_is_complete_and_validated(self):
+        company_os = build_company_os()
+        workflows = company_os.workflows.list()
+
+        self.assertEqual(len(workflows), 10)
+        self.assertEqual(
+            {workflow.workflow_id for workflow in workflows},
+            {
+                "document_generation_v1",
+                "task_planning_v1",
+                "agent_collaboration_v1",
+                "skill_missing_v1",
+                "agent_missing_v1",
+                "approval_v1",
+                "quality_check_v1",
+                "retrospective_v1",
+                "github_project_analysis_v1",
+                "tool_call_v1",
+            },
+        )
+        registry = WorkflowRegistry(company_os.agents, company_os.skills)
+        with self.assertRaises(ValueError):
+            registry.register(
+                WorkflowDefinition(
+                    workflow_id="invalid_sequence_v1",
+                    name="Invalid Sequence",
+                    description="Must fail validation.",
+                    entrypoint="none",
+                    steps=(
+                        WorkflowStepDefinition(
+                            sequence=2,
+                            step_name="bad_step",
+                            actor_id="ceo_agent_v1",
+                            action="plan_task",
+                            permission_level=PermissionLevel.L1_DRAFT,
+                            skill_id="task_planning_skill_v1",
+                        ),
+                    ),
+                )
+            )
+
+    def test_task_planning_workflow_blocks_disabled_skill_and_reports_incident(self):
+        company_os = build_company_os()
+        skill = company_os.skills.get("task_planning_skill_v1")
+        company_os.skills.restore(replace(skill, enabled=False))
+        task = Task(title="Blocked planning", description="Disabled Skills must stop execution.")
+
+        result = company_os.task_planning_workflow.run(task)
+
+        self.assertTrue(result.blocked)
+        self.assertEqual(task.status, TaskStatus.BLOCKED)
+        self.assertEqual(company_os.traces.list_runs()[-1].status.value, "blocked")
+        self.assertEqual(company_os.traces.list_steps()[-1].status.value, "blocked")
+        self.assertEqual(company_os.incidents.list()[-1].source_type, "workflow")
 
     def test_agents_cannot_register_root_permissions(self):
         registry = AgentRegistry()

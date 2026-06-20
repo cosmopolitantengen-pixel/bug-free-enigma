@@ -36,6 +36,7 @@ class DashboardStaticTests(unittest.TestCase):
             "active-scheduled-job-count",
             "domain-event-count",
             "workflow-runs-list",
+            "workflow-catalog-list",
             "workflow-steps-list",
             "model-token-count",
             "model-usage-count",
@@ -177,6 +178,7 @@ class DashboardStaticTests(unittest.TestCase):
             "github-absorption-result",
             "github-absorptions-list",
             "task-form",
+            "task-workflow",
             "approval-request-form",
             "approval-request-result",
             "agents-list",
@@ -221,6 +223,8 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn("/tools/runs/request", script)
         self.assertIn("/complete", script)
         self.assertIn("/workflow-runs", script)
+        self.assertIn("/workflows", script)
+        self.assertIn("workflow_id", script)
         self.assertIn("recent_workflow_steps", script)
         self.assertIn("/model-usage", script)
         self.assertIn("/models/generate", script)

@@ -244,6 +244,28 @@ class ToolRun:
     completed_at: datetime | None = None
 
 
+@dataclass(frozen=True)
+class WorkflowStepDefinition:
+    sequence: int
+    step_name: str
+    actor_id: str
+    action: str
+    permission_level: PermissionLevel
+    skill_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowDefinition:
+    workflow_id: str
+    name: str
+    description: str
+    entrypoint: str
+    steps: tuple[WorkflowStepDefinition, ...]
+    execution_mode: str = "service"
+    version: str = "1.0.0"
+    enabled: bool = True
+
+
 @dataclass
 class WorkflowRun:
     workflow_id: str

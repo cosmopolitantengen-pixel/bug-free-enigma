@@ -79,6 +79,8 @@ Current status:
 - Durable one-time and recurring internal schedules can create or run tasks through an explicit Human Root tick, with lifecycle controls, execution history, incidents, audit events, and append-only domain events.
 - The complete V1 catalog now boots with 17 scoped Agents and 18 registered Skills, with cross-catalog reference validation.
 - Formal Agent and Skill registrations are audited, persisted in SQLite, included in verified backups, and restored transactionally.
+- All 10 required V1 Workflows are registered as validated Agent/Skill step definitions with explicit operational entrypoints.
+- Task planning now runs as a second native Workflow with permission/risk checks, persisted traces, audit, plan Memory, Evaluation, and blocked-run Incidents.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
@@ -111,6 +113,7 @@ Current interim implementation:
 - Dashboard includes a task review form and recent review history
 - Dashboard includes review-driven improvement proposal controls
 - Dashboard includes strategic goal creation, progress updates, and record linking
+- Dashboard lists the validated Workflow catalog and can run document-generation or task-planning Workflows from one selector
 
 ## Phase 4: Controlled Evolution
 

@@ -23,6 +23,13 @@ class TaskCreateRequest(BaseModel):
     user_id: str = "human_root"
 
 
+class WorkflowRunRequest(BaseModel):
+    workflow_id: str = "document_generation_v1"
+    title: str
+    description: str
+    user_id: str = "human_root"
+
+
 class StrategicGoalCreateRequest(BaseModel):
     title: str
     description: str

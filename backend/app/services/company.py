@@ -390,6 +390,41 @@ class CompanyApplicationService:
     def list_workflow_runs(self) -> list[dict]:
         return [to_plain(run) for run in self.company_os.traces.list_runs()]
 
+    def list_workflows(self) -> list[dict]:
+        return [to_plain(workflow) for workflow in self.company_os.workflows.list()]
+
+    def get_workflow(self, workflow_id: str) -> dict:
+        return to_plain(self.company_os.workflows.get(workflow_id))
+
+    def run_registered_workflow(
+        self,
+        workflow_id: str,
+        title: str,
+        description: str,
+        user_id: str = "human_root",
+    ) -> dict:
+        definition = self.company_os.workflows.get(workflow_id)
+        if not definition.enabled:
+            raise ValueError("workflow is disabled")
+        if workflow_id not in {"document_generation_v1", "task_planning_v1"}:
+            raise ValueError(f"workflow uses dedicated entrypoint: {definition.entrypoint}")
+        task = self.create_task(title, description, user_id)
+        if workflow_id == "document_generation_v1":
+            result = self.run_task(task["task_id"])
+            return {"workflow": to_plain(definition), **result}
+        if workflow_id == "task_planning_v1":
+            planning_result = self.company_os.task_planning_workflow.run(self.tasks[task["task_id"]])
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(planning_result.task),
+                "output": planning_result.output,
+                "approval_required": planning_result.approval_required,
+                "blocked": planning_result.blocked,
+                "incident": None,
+            }
+        raise ValueError("unsupported workflow execution mode")
+
     def list_workflow_steps(self, run_id: str | None = None) -> list[dict]:
         return [to_plain(step) for step in self.company_os.traces.list_steps(run_id)]
 
@@ -2410,6 +2445,7 @@ class CompanyApplicationService:
         tool_runs = list(self.tool_runs.values())
         workflow_runs = self.company_os.traces.list_runs()
         workflow_steps = self.company_os.traces.list_steps()
+        workflows = self.company_os.workflows.list()
         model_usage = self.company_os.models.list_usage()
         cost_logs = self.company_os.budget.list_cost_logs()
         incidents = self.company_os.incidents.list()
@@ -2472,6 +2508,7 @@ class CompanyApplicationService:
             "workflow_count": 1,
             "workflow_run_count": len(workflow_runs),
             "workflow_step_count": len(workflow_steps),
+            "registered_workflow_count": len(workflows),
             "model_usage_count": len(model_usage),
             "model_token_count": sum(record.total_tokens for record in model_usage),
             "model_estimated_cost": round(sum(record.estimated_cost for record in model_usage), 6),

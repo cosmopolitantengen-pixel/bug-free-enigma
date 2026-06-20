@@ -162,7 +162,7 @@ function renderSystemIntegrity(integrity) {
 }
 
 async function refresh() {
-  const [summary, databaseSchema, integrity, goals, agents, skills, tools, toolRuns, workflowRuns, modelUsage, budget, costLogs, incidents, backups, schedules, scheduledExecutions, domainEvents, agentMessages, agentMeetings, taskHandoffs, agentBroadcasts, agentConflicts, skillProposals, agentProposals, improvementProposals, githubAbsorptions, structuredLogs, memory, knowledge, evaluations, taskReviews] = await Promise.all([
+  const [summary, databaseSchema, integrity, goals, agents, skills, tools, toolRuns, workflows, workflowRuns, modelUsage, budget, costLogs, incidents, backups, schedules, scheduledExecutions, domainEvents, agentMessages, agentMeetings, taskHandoffs, agentBroadcasts, agentConflicts, skillProposals, agentProposals, improvementProposals, githubAbsorptions, structuredLogs, memory, knowledge, evaluations, taskReviews] = await Promise.all([
     api("/dashboard/summary"),
     api("/database/schema"),
     api("/system/integrity"),
@@ -171,6 +171,7 @@ async function refresh() {
     api("/skills"),
     api("/tools"),
     api("/tools/runs"),
+    api("/workflows"),
     api("/workflow-runs"),
     api("/model-usage"),
     api("/budget/summary"),
@@ -237,6 +238,13 @@ async function refresh() {
             </div>`
           : ""
       }
+    </div>
+  `);
+  renderList("workflow-catalog-list", workflows, (workflow) => `
+    <div class="item">
+      <strong>${escapeHtml(workflow.name)} / ${escapeHtml(workflow.execution_mode)}</strong>
+      <span>${escapeHtml(workflow.workflow_id)} / ${escapeHtml(workflow.steps.length)} steps</span>
+      <span>${escapeHtml(workflow.entrypoint)}</span>
     </div>
   `);
   renderList("workflow-runs-list", workflowRuns.slice(-8), (run) => `
@@ -473,16 +481,15 @@ async function createAndRunTask(event) {
   $("task-result").textContent = "Creating task...";
 
   try {
-    const created = await api("/tasks", {
+    const result = await api("/workflows/run", {
       method: "POST",
       body: JSON.stringify({
+        workflow_id: $("task-workflow").value,
         title: $("task-title").value,
         description: $("task-description").value,
       }),
     });
-    $("task-result").textContent = "Running workflow...";
-    const result = await api(`/tasks/${created.task_id}/run`, { method: "POST" });
-    $("task-result").innerHTML = `<span class="ok">Completed:</span> ${escapeHtml(result.task.status)} (${escapeHtml(result.task.task_id)})`;
+    $("task-result").innerHTML = `<span class="ok">Workflow result:</span> ${escapeHtml(result.task.status)} (${escapeHtml(result.task.task_id)})`;
     $("goal-link-record-id").value = result.task.task_id;
     await refresh();
   } catch (error) {

@@ -36,6 +36,54 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(len(skills.json()), 18)
         self.assertGreaterEqual(len(tools.json()), 5)
         self.assertEqual(workflows.json()[0]["workflow_id"], "document_generation_v1")
+        self.assertEqual(len(workflows.json()), 10)
+        self.assertTrue(all(workflow["steps"] for workflow in workflows.json()))
+
+    def test_task_planning_workflow_runs_through_registered_catalog(self):
+        workflow = self.client.get("/workflows/task_planning_v1")
+        planned = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "task_planning_v1",
+                "title": "Plan controlled launch",
+                "description": "Break the goal into safe, auditable steps.",
+            },
+        )
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        memory = self.client.get("/memory").json()
+        evaluations = self.client.get("/evaluations").json()
+        audit = self.client.get("/audit-logs").json()
+
+        self.assertEqual(workflow.status_code, 200)
+        self.assertEqual(workflow.json()["execution_mode"], "native")
+        self.assertEqual(planned.status_code, 200)
+        self.assertEqual(planned.json()["workflow"]["workflow_id"], "task_planning_v1")
+        self.assertEqual(planned.json()["task"]["status"], "planned")
+        self.assertIn("# Task Plan", planned.json()["output"])
+        self.assertFalse(planned.json()["blocked"])
+        self.assertEqual(runs[-1]["workflow_id"], "task_planning_v1")
+        self.assertEqual(runs[-1]["status"], "completed")
+        self.assertEqual(len(steps), 3)
+        self.assertTrue(all(step["status"] == "completed" for step in steps))
+        self.assertEqual(memory[-1]["memory_type"], "plan")
+        self.assertEqual(evaluations[-1]["subject_id"], "task_planning_v1")
+        self.assertEqual(audit[-1]["event_type"], "task_plan_completed")
+
+    def test_dedicated_workflow_rejects_generic_run_without_creating_task(self):
+        task_count = len(self.client.get("/tasks").json())
+        response = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "skill_missing_v1",
+                "title": "Wrong entrypoint",
+                "description": "Must use the missing Skill endpoint.",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("POST /skills/missing", response.json()["detail"])
+        self.assertEqual(len(self.client.get("/tasks").json()), task_count)
 
     def test_database_schema_reports_memory_and_sqlite_backends(self):
         memory_schema = self.client.get("/database/schema")
@@ -1258,6 +1306,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("tool_status_counts", payload)
         self.assertIn("tool_run_status_counts", payload)
         self.assertIn("workflow_run_status_counts", payload)
+        self.assertEqual(payload["registered_workflow_count"], 10)
         self.assertIn("recent_model_usage", payload)
         self.assertIn("model_usage_by_model", payload)
         self.assertIn("recent_cost_logs", payload)

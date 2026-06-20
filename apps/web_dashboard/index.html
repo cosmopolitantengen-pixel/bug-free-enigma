@@ -167,10 +167,17 @@
             <div class="panel-header">
               <div>
                 <h2>Create Task</h2>
-                <p>Run the first document workflow through planning, risk, quality, audit, memory, and knowledge.</p>
+                <p>Run a registered task workflow through its permission, risk, trace, and audit controls.</p>
               </div>
             </div>
             <form id="task-form" class="task-form">
+              <label>
+                Workflow
+                <select id="task-workflow">
+                  <option value="document_generation_v1">Document Generation</option>
+                  <option value="task_planning_v1">Task Planning</option>
+                </select>
+              </label>
               <label>
                 Title
                 <input id="task-title" value="Internal operating note" />
@@ -378,9 +385,10 @@
         <section class="grid">
           <section class="panel" id="workflows">
             <div class="panel-header">
-              <h2>Workflow Runs</h2>
+              <h2>Workflow Catalog & Runs</h2>
               <span id="workflow-step-count" class="pill">0</span>
             </div>
+            <div id="workflow-catalog-list" class="list"></div>
             <div id="workflow-runs-list" class="list"></div>
           </section>
 

@@ -15,6 +15,8 @@
 - Agent missing handling
 - Proposal sandbox checks before Skill and Agent registration
 - Workflow execution
+- Complete 10-Workflow V1 catalog registration and definition validation
+- Native task-planning Workflow permission/risk/Skill checks, traces, audit, Memory, Evaluation, Incident, API, dashboard, and SQLite reload
 - Approval-gated Workflow resume after Human Root approval
 - Workflow Run and Workflow Step trace persistence
 - Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem read boundaries, and adapter failure handling
@@ -74,6 +76,7 @@ The suite currently covers:
 - Tool registry bootstrap, low-risk internal adapter output, approval-gated Tool Run completion, knowledge/audit/database/filesystem adapters, failed adapter input, filesystem path boundary checks, disallowed/disabled Tool Run blocking, API exposure, dashboard mount points, and SQLite reload
 - Filesystem read external-content inspection for clean and instruction-risk source files
 - Workflow Run and Workflow Step creation, API exposure, dashboard summary, dashboard mount points, and SQLite reload
+- V1 Workflow catalog API/detail exposure, dedicated-entrypoint rejection without orphan tasks, and dashboard catalog rendering
 - Approval-gated document Workflow resume, non-waiting resume rejection, and dashboard resume controls
 - Model Gateway deterministic generation, model usage API exposure, dashboard summary, dashboard mount points, audit event creation, and SQLite reload
 - Budget Guard cost recording, over-budget blocking, dashboard summary, API exposure, and SQLite reload

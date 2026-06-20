@@ -42,6 +42,7 @@ from app.api.schemas import (
     ToolCreateRequest,
     ToolRunCompleteRequest,
     ToolRunRequest,
+    WorkflowRunRequest,
 )
 from app.core.enums import ApprovalStatus
 from app.services.company import CompanyApplicationService
@@ -316,7 +317,14 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
 
     @router.get("/workflows")
     def list_workflows() -> list[dict]:
-        return [{"workflow_id": "document_generation_v1", "name": "Document Generation", "enabled": True}]
+        return service.list_workflows()
+
+    @router.get("/workflows/{workflow_id}")
+    def get_workflow(workflow_id: str) -> dict:
+        try:
+            return service.get_workflow(workflow_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="workflow not found") from exc
 
     @router.get("/workflow-runs")
     def list_workflow_runs() -> list[dict]:
@@ -629,9 +637,18 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             raise HTTPException(status_code=404, detail="agent not found") from exc
 
     @router.post("/workflows/run")
-    def run_workflow(payload: TaskCreateRequest) -> dict:
-        task = service.create_task(payload.title, payload.description, payload.user_id)
-        return service.run_task(task["task_id"])
+    def run_workflow(payload: WorkflowRunRequest) -> dict:
+        try:
+            return service.run_registered_workflow(
+                payload.workflow_id,
+                payload.title,
+                payload.description,
+                payload.user_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="workflow not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/goals")
     def list_strategic_goals(status: str | None = None, owner_agent: str | None = None) -> list[dict]:

@@ -50,6 +50,8 @@ from app.scheduler.store import SchedulerStore
 from app.skills.registry import SkillRegistry, default_skills
 from app.tools.registry import ToolRegistry, default_tools
 from app.workflows.document_generation import DocumentGenerationWorkflow
+from app.workflows.registry import WorkflowRegistry, default_workflows
+from app.workflows.task_planning import TaskPlanningWorkflow
 from app.workflows.traces import WorkflowTraceStore
 
 
@@ -77,7 +79,9 @@ class CompanyOS:
     goals: GoalStore
     events: EventBus
     scheduler: SchedulerStore
+    workflows: WorkflowRegistry
     document_workflow: DocumentGenerationWorkflow
+    task_planning_workflow: TaskPlanningWorkflow
 
 
 def build_company_os(
@@ -153,6 +157,9 @@ def build_company_os(
     goals = GoalStore(strategic_goals)
     events = EventBus(domain_events)
     scheduler = SchedulerStore(scheduled_jobs, scheduled_executions)
+    workflows = WorkflowRegistry(agents, skills)
+    for workflow in default_workflows():
+        workflows.register(workflow)
     document_workflow = DocumentGenerationWorkflow(
         agents=agents,
         skills=skills,
@@ -165,6 +172,19 @@ def build_company_os(
         evaluations=evaluation_store,
         models=model_gateway,
         budget=budget_guard,
+        incidents=incident_store,
+        traces=traces,
+    )
+    task_planning_workflow = TaskPlanningWorkflow(
+        workflows=workflows,
+        agents=agents,
+        skills=skills,
+        permissions=permissions,
+        risks=risks,
+        approvals=approvals_center,
+        audit=audit,
+        memory=memory,
+        evaluations=evaluation_store,
         incidents=incident_store,
         traces=traces,
     )
@@ -191,7 +211,9 @@ def build_company_os(
         goals=goals,
         events=events,
         scheduler=scheduler,
+        workflows=workflows,
         document_workflow=document_workflow,
+        task_planning_workflow=task_planning_workflow,
     )
 
 
