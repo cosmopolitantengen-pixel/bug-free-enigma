@@ -459,6 +459,7 @@ class CompanyApplicationService:
             "task_planning_v1",
             "agent_collaboration_v1",
             "skill_missing_v1",
+            "agent_missing_v1",
             "quality_check_v1",
             "retrospective_v1",
         }:
@@ -468,6 +469,8 @@ class CompanyApplicationService:
             self.company_os.agent_collaboration_workflow.validate_input(workflow_input, description)
         if workflow_id == "skill_missing_v1":
             self.company_os.skill_missing_workflow.validate_input(workflow_input, description)
+        if workflow_id == "agent_missing_v1":
+            self.company_os.agent_missing_workflow.validate_input(workflow_input, description)
         if workflow_id == "retrospective_v1":
             self.company_os.retrospective_workflow.validate_input(workflow_input, description)
             source_task_id = workflow_input.get("source_task_id")
@@ -519,6 +522,26 @@ class CompanyApplicationService:
                 "replacement": missing_result.replacement,
                 "composition": missing_result.composition,
                 "temporary_skill": missing_result.temporary_skill,
+                "proposal": missing_result.proposal,
+                "approval_required": missing_result.approval_required,
+                "blocked": missing_result.blocked,
+                "incident": to_plain(missing_result.incident) if missing_result.incident else None,
+            }
+        if workflow_id == "agent_missing_v1":
+            missing_result = self.company_os.agent_missing_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return {
+                "workflow": to_plain(definition),
+                "task": to_plain(missing_result.task),
+                "output": missing_result.output,
+                "outcome": missing_result.outcome,
+                "existing_agent": missing_result.existing_agent,
+                "knowledge_matches": missing_result.knowledge_matches,
+                "proposal_plan": missing_result.proposal_plan,
+                "risk_review": missing_result.risk_review,
                 "proposal": missing_result.proposal,
                 "approval_required": missing_result.approval_required,
                 "blocked": missing_result.blocked,
@@ -2256,13 +2279,20 @@ class CompanyApplicationService:
         ]
         return [to_plain(event) for event in risky_events]
 
-    def missing_skill(self, capability: str, requested_by_agent: str, risk_level: RiskLevel) -> dict:
+    def missing_skill(
+        self,
+        capability: str,
+        requested_by_agent: str,
+        risk_level: RiskLevel,
+        task_id: str | None = None,
+    ) -> dict:
         proposal = self.company_os.gaps.missing_skill(capability, requested_by_agent, risk_level)
         approval = self.request_action_approval(
             action="create_skill",
             actor_id="ceo_agent_v1",
             permission_level=PermissionLevel.L2_INTERNAL_WRITE if risk_level == RiskLevel.LOW else PermissionLevel.L3_EXTERNAL_PREPARE,
             reason=f"Create Skill proposal: {proposal.name}",
+            task_id=task_id,
             target=proposal.proposal_id,
             possible_benefit=f"Add missing capability: {capability}",
             possible_loss="A new Skill could expand system behavior beyond intended boundaries.",
@@ -2273,13 +2303,20 @@ class CompanyApplicationService:
         self.sync()
         return to_plain(proposal)
 
-    def missing_agent(self, role: str, department: str, repeated_reason: str) -> dict:
+    def missing_agent(
+        self,
+        role: str,
+        department: str,
+        repeated_reason: str,
+        task_id: str | None = None,
+    ) -> dict:
         proposal = self.company_os.gaps.missing_agent(role, department, repeated_reason)
         approval = self.request_action_approval(
             action="create_agent",
             actor_id="ceo_agent_v1",
             permission_level=PermissionLevel.L3_EXTERNAL_PREPARE,
             reason=f"Create Agent proposal: {proposal.name}",
+            task_id=task_id,
             target=proposal.proposal_id,
             possible_benefit=f"Add a dedicated Agent for repeated need: {repeated_reason}",
             possible_loss="A new Agent could receive inappropriate permissions or responsibilities.",
@@ -2925,6 +2962,8 @@ class CompanyApplicationService:
         self.company_os.skill_missing_workflow.set_skill_requester(self.request_skill_run)
         self.company_os.skill_missing_workflow.set_skill_continuation(self._continue_workflow_skill)
         self.company_os.skill_missing_workflow.set_proposal_creator(self.missing_skill)
+        self.company_os.agent_missing_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.agent_missing_workflow.set_proposal_creator(self.missing_agent)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
 

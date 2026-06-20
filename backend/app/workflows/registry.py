@@ -109,7 +109,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="agent_missing_v1",
             name="Agent Missing Handling",
             description="Detect a repeated role gap and route a constrained Agent proposal through control gates.",
-            entrypoint="POST /agents/missing",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "detect_role_gap", "capability_gap_detector_agent_v1", "detect_role_gap", PermissionLevel.L1_DRAFT, "knowledge_search_skill_v1"),
                 step(2, "prepare_agent_proposal", "agent_factory_agent_v1", "create_agent", PermissionLevel.L2_INTERNAL_WRITE, "task_planning_skill_v1"),

@@ -46,7 +46,7 @@ A Workflow coordinates Agents, Skills, Tools, approvals, quality checks, audit l
 
 The Workflow Registry now contains all 10 V1 definitions. Every definition declares an ID, version, execution mode, entrypoint, ordered steps, responsible Agent, action, permission level, and optional Skill. Registration rejects non-contiguous steps, missing Agents or Skills, Agent permissions that do not exactly include the requested level, and unauthorized Agent/Skill pairs.
 
-`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `skill_missing_v1`, `quality_check_v1`, and `retrospective_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
+`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `skill_missing_v1`, `agent_missing_v1`, `quality_check_v1`, and `retrospective_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
 
 The document generation workflow writes one `WorkflowRun` and seven ordered `WorkflowStep` records:
 
@@ -78,6 +78,8 @@ The Agent collaboration runner accepts structured `input` with a target Agent, p
 
 The Skill Missing runner accepts `capability`, `requested_by_agent`, optional `candidate_skill_ids`, constraints, risk level, and `allow_replacement`. It first searches for an enabled Skill already authorized for the requesting Agent. If no replacement is selected, it can compose only candidates that are registered, enabled, and authorized for that Agent. A sufficient composition completes without mutating the catalog. A real gap requests the medium-risk temporary-Skill Skill through the controlled runtime; the Workflow and task wait for Human Root approval, then `POST /tasks/{task_id}/resume` continues the same persisted Workflow and creates the formal disabled proposal. Registration still requires the proposal's separate approval and sandbox checks. Unneeded branches are traced as `skipped`, not falsely marked completed.
 
+The Agent Missing runner accepts `role`, `department`, `repeated_reason`, optional `knowledge_query`, and `allow_existing_agent`. It searches Knowledge and the registered Agent catalog first. A matching enabled role is returned without creating a proposal, while a real gap runs Agent Factory planning and Risk Skills before creating a disabled Agent proposal. The proposal approval carries the Workflow task ID. Enabling the Agent remains impossible until Human Root approval and a passing sandbox check are both recorded through the existing Factory APIs.
+
 The quality check runner executes three ordered Skills:
 
 1. `quality_check_skill_v1` evaluates supplied content.
@@ -90,7 +92,6 @@ The retrospective runner accepts an optional structured `input` object with `sou
 
 The other catalog definitions point to their operational entrypoints:
 
-- Agent missing handling: controlled Factory proposal APIs
 - Approval: Approval Center request and decision APIs
 - GitHub analysis: absorption analysis, sandbox, approval, and knowledge registration APIs
 - Tool call: controlled Tool Run request and completion APIs

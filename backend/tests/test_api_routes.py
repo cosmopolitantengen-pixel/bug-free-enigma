@@ -271,6 +271,88 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get("/tasks").json(), [])
         self.assertEqual(self.client.get("/workflow-runs").json(), [])
 
+    def test_agent_missing_workflow_reuses_existing_registered_agent(self):
+        resolved = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "agent_missing_v1",
+                "title": "Resolve document role need",
+                "description": "Check the registry before proposing another Agent.",
+                "input": {
+                    "role": "Document",
+                    "department": "Document",
+                    "repeated_reason": "Internal documents need a stable owner.",
+                },
+            },
+        )
+        payload = resolved.json()
+        workflow = self.client.get("/workflows/agent_missing_v1").json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(workflow["execution_mode"], "native")
+        self.assertEqual(payload["outcome"], "existing_agent")
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertEqual(payload["existing_agent"]["agent_id"], "document_agent_v1")
+        self.assertIsNone(payload["proposal"])
+        self.assertEqual([step["status"] for step in steps], ["completed", "skipped", "skipped"])
+        self.assertEqual(len(skill_runs), 1)
+        self.assertEqual(self.client.get("/agents/proposals").json(), [])
+
+    def test_agent_missing_workflow_routes_real_role_gap_to_linked_proposal(self):
+        resolved = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "agent_missing_v1",
+                "title": "Resolve training role gap",
+                "description": "Repeated training work needs a dedicated constrained owner.",
+                "input": {
+                    "role": "Training",
+                    "department": "Knowledge",
+                    "repeated_reason": "Training requests recur across internal projects.",
+                },
+            },
+        )
+        payload = resolved.json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = self.client.get("/skills/runs").json()
+        proposals = self.client.get("/agents/proposals").json()
+        approvals = self.client.get("/approvals").json()
+
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(payload["outcome"], "proposal")
+        self.assertTrue(payload["approval_required"])
+        self.assertEqual(payload["task"]["status"], "needs_approval")
+        self.assertEqual(payload["task"]["approval_id"], payload["proposal"]["approval_id"])
+        self.assertEqual(payload["proposal"]["status"], "pending_approval")
+        self.assertFalse(payload["proposal"]["enabled_by_default"])
+        self.assertIn("Assign authorized Agents", payload["proposal_plan"])
+        self.assertFalse(payload["risk_review"]["blocked"])
+        self.assertEqual([step["status"] for step in steps], ["completed"] * 3)
+        self.assertEqual(len(skill_runs), 3)
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(approvals[0]["request"]["task_id"], payload["task"]["task_id"])
+        self.assertEqual(runs[-1]["status"], "completed")
+
+    def test_agent_missing_workflow_validates_input_before_task_creation(self):
+        rejected = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "agent_missing_v1",
+                "title": "Invalid role gap",
+                "description": "Do not create an orphan task.",
+                "input": {"role": "", "department": "Knowledge"},
+            },
+        )
+
+        self.assertEqual(rejected.status_code, 400)
+        self.assertIn("role is required", rejected.json()["detail"])
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/workflow-runs").json(), [])
+
     def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
         checked = self.client.post(
             "/workflows/run",
@@ -379,14 +461,14 @@ class ApiRouteTests(unittest.TestCase):
         response = self.client.post(
             "/workflows/run",
             json={
-                "workflow_id": "agent_missing_v1",
+                "workflow_id": "approval_v1",
                 "title": "Wrong entrypoint",
-                "description": "Must use the missing Agent endpoint.",
+                "description": "Must use the Approval Center endpoint.",
             },
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("POST /agents/missing", response.json()["detail"])
+        self.assertIn("POST /approvals/request", response.json()["detail"])
         self.assertEqual(len(self.client.get("/tasks").json()), task_count)
 
     def test_database_schema_reports_memory_and_sqlite_backends(self):

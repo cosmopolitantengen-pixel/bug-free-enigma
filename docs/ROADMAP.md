@@ -89,6 +89,7 @@ Current status:
 - Retrospective is the fourth native Workflow. Structured review input produces three controlled Skill Runs and gates TaskReview and Knowledge creation on successful quality, memory, and audit steps.
 - Agent collaboration is the fifth native Workflow. It validates participants before task creation, executes three controlled Skill Runs, records a meeting and linked task handoff, preserves partial records on a later control block, and persists the complete communication trail.
 - Skill Missing handling is the sixth native Workflow. It prefers an authorized replacement, then an authorized multi-Skill composition, and creates a controlled proposal only for a real gap. Medium-risk temporary Skill preparation pauses at Human Root approval and can resume after a SQLite restart.
+- Agent Missing handling is the seventh native Workflow. It reuses an existing role when possible, otherwise runs Knowledge, planning, and risk Skills before creating a disabled Agent proposal whose approval is linked to the Workflow task.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
@@ -121,7 +122,7 @@ Current interim implementation:
 - Dashboard includes a task review form and recent review history
 - Dashboard includes review-driven improvement proposal controls
 - Dashboard includes strategic goal creation, progress updates, and record linking
-- Dashboard lists the validated Workflow catalog and can run document-generation, task-planning, Agent-collaboration, Skill-Missing, quality-check, or retrospective Workflows from one selector
+- Dashboard lists the validated Workflow catalog and can run document-generation, task-planning, Agent-collaboration, Skill/Agent-Missing, quality-check, or retrospective Workflows from one selector
 
 ## Phase 4: Controlled Evolution
 
@@ -133,6 +134,7 @@ Current interim implementation:
 Current interim implementation:
 
 - Missing Skill and Agent requests create proposal records.
+- Native Skill/Agent Missing Workflows now prefer registered capability before proposing expansion and retain task-linked traces, Skill Runs, evaluations, approvals, and blocked-run incidents.
 - Proposal sandbox checks verify basic permission/risk boundaries before registration.
 - Registration is blocked until both approval and sandbox checks pass.
 - Review-driven improvement proposals follow the same approval and sandbox pattern, then register as knowledge records instead of mutating runtime behavior directly.

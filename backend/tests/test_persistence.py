@@ -355,6 +355,44 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(approvals), 2)
             self.assertIn("skill_missing_v1", [record["subject_id"] for record in evaluations])
 
+    def test_agent_missing_workflow_proposal_state_persists_through_sqlite(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "agent_missing_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            resolved = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "agent_missing_v1",
+                    "title": "Persistent Agent gap",
+                    "description": "Persist a controlled Agent Factory proposal and linked approval.",
+                    "input": {
+                        "role": "Training",
+                        "department": "Knowledge",
+                        "repeated_reason": "Training work recurs across projects.",
+                    },
+                },
+            )
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            tasks = second.get("/tasks").json()
+            runs = second.get("/workflow-runs").json()
+            steps = second.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
+            skill_runs = second.get("/skills/runs").json()
+            proposals = second.get("/agents/proposals").json()
+            approvals = second.get("/approvals").json()
+            evaluations = second.get("/evaluations").json()
+
+            self.assertEqual(resolved.status_code, 200)
+            self.assertEqual(tasks[0]["status"], "needs_approval")
+            self.assertEqual(tasks[0]["approval_id"], proposals[0]["approval_id"])
+            self.assertEqual(runs[0]["workflow_id"], "agent_missing_v1")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual([step["status"] for step in steps], ["completed"] * 3)
+            self.assertEqual(len(skill_runs), 3)
+            self.assertEqual(proposals[0]["status"], "pending_approval")
+            self.assertEqual(approvals[0]["request"]["task_id"], tasks[0]["task_id"])
+            self.assertIn("agent_missing_v1", [record["subject_id"] for record in evaluations])
+
     def test_quality_check_workflow_state_persists_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "quality_workflow.db")

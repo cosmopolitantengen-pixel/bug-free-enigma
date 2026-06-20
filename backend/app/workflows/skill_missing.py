@@ -75,7 +75,7 @@ class SkillMissingWorkflow:
         self._skill_executor: Callable[[str, str, dict, str, str], dict] | None = None
         self._skill_requester: Callable[[str, str, dict, str, str], dict[str, Any]] | None = None
         self._skill_continuation: Callable[[str, str], dict[str, Any]] | None = None
-        self._proposal_creator: Callable[[str, str, RiskLevel], dict[str, Any]] | None = None
+        self._proposal_creator: Callable[[str, str, RiskLevel, str], dict[str, Any]] | None = None
 
     def set_skill_executor(self, executor: Callable[[str, str, dict, str, str], dict]) -> None:
         self._skill_executor = executor
@@ -94,7 +94,7 @@ class SkillMissingWorkflow:
 
     def set_proposal_creator(
         self,
-        creator: Callable[[str, str, RiskLevel], dict[str, Any]],
+        creator: Callable[[str, str, RiskLevel, str], dict[str, Any]],
     ) -> None:
         self._proposal_creator = creator
 
@@ -310,6 +310,7 @@ class SkillMissingWorkflow:
             data["capability"],
             data["requested_by_agent"],
             data["risk_level"],
+            task.task_id,
         )
         if proposal.get("status") == ProposalStatus.BLOCKED.value:
             return self._block(

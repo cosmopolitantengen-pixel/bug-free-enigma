@@ -375,6 +375,61 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
         self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
 
+    def test_agent_missing_workflow_blocks_before_proposal_when_risk_skill_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        skill = company_os.skills.get("risk_check_skill_v1")
+        company_os.skills.restore(replace(skill, enabled=False))
+        service = CompanyApplicationService(company_os=company_os)
+
+        result = service.run_registered_workflow(
+            "agent_missing_v1",
+            "Blocked Agent gap handler",
+            "A real role gap must stop when risk review is unavailable.",
+            input={
+                "role": "Training",
+                "department": "Knowledge",
+                "repeated_reason": "Training work appears repeatedly.",
+            },
+        )
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["outcome"], "blocked")
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertIsNone(result["proposal"])
+        self.assertEqual([run["status"] for run in service.list_skill_runs()], ["completed", "completed", "blocked"])
+        self.assertEqual([step["status"] for step in service.list_workflow_steps()], ["completed", "completed", "blocked"])
+        self.assertEqual(service.list_agent_proposals(), [])
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
+
+    def test_agent_missing_workflow_does_not_reuse_disabled_agent(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        document_agent = company_os.agents.get("document_agent_v1")
+        company_os.agents.restore(replace(document_agent, enabled=False))
+        service = CompanyApplicationService(company_os=company_os)
+
+        result = service.run_registered_workflow(
+            "agent_missing_v1",
+            "Disabled role replacement",
+            "A disabled Agent cannot satisfy an active role need.",
+            input={
+                "role": "Document",
+                "department": "Document",
+                "repeated_reason": "Document work still needs an enabled owner.",
+            },
+        )
+
+        self.assertEqual(result["outcome"], "proposal")
+        self.assertIsNone(result["existing_agent"])
+        self.assertEqual(result["task"]["status"], "needs_approval")
+        self.assertEqual(len(service.list_skill_runs()), 3)
+
     def test_document_workflow_resumes_after_approval(self):
         from app.services.company import CompanyApplicationService
 

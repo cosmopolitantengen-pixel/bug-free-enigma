@@ -12,6 +12,8 @@ Evolution is the controlled path from observed work to proposed system improveme
 4. Run deterministic sandbox checks.
 5. Register the approved and sandbox-passed improvement as a knowledge record.
 
+Missing Skill and Agent Workflows also use controlled evolution. They search registered capability first, run auditable planning and risk Skills, and create disabled proposals only when a real gap remains. Agent and Skill registration still requires separate Human Root approval and deterministic sandbox evidence.
+
 ## Safety Boundary
 
 Improvement proposals are intentionally conservative:
