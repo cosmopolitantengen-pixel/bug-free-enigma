@@ -69,6 +69,7 @@ The suite currently covers:
 - Static dashboard mount points and backend dashboard data contract
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
+- PostgreSQL migrations, append-only guards, and pgvector round trips when `AI_COMPANY_OS_TEST_POSTGRES_URL` is configured
 - Skill and Agent proposal persistence plus approval-gated registration
 - Complete 17-Agent/18-Skill V1 bootstrap catalogs, invalid reference rejection, audited formal registration, SQLite reload, and backup rollback
 - Skill and Agent proposal sandbox gating, audit events, dashboard controls, and SQLite reload

@@ -13,7 +13,7 @@ from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, SkillRunS
 from app.core.models import ActionRequest, AuditEvent, EvaluationRecord, KnowledgeDoc, MemoryRecord, RiskAssessment, Task, utc_now
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.observability import build_structured_logs
-from app.persistence.sqlite_store import SQLITE_SCHEMA_VERSION, SQLiteStateStore
+from app.persistence.store import StateStore
 from app.services.serializers import to_plain
 from app.skills.runtime import SkillRuntimeContext, SkillRuntimeError, execute_skill_adapter
 from app.tools.adapters import ToolAdapterContext, ToolAdapterError, execute_tool_adapter
@@ -34,7 +34,7 @@ ARBITRATION_PRIORITY_AREAS = {
 class CompanyApplicationService:
     company_os: CompanyOS = field(default_factory=build_company_os)
     tasks: dict[str, Task] = field(default_factory=dict)
-    persistence: SQLiteStateStore | None = None
+    persistence: StateStore | None = None
     auth: AuthService = field(default_factory=AuthService)
     skill_proposals: dict[str, SkillProposal] = field(default_factory=dict)
     agent_proposals: dict[str, AgentProposal] = field(default_factory=dict)
@@ -180,7 +180,7 @@ class CompanyApplicationService:
                 "migrations": [],
             }
         return {
-            "backend": "sqlite",
+            "backend": self.persistence.backend_name,
             "schema_version": self.persistence.schema_version(),
             "migrations": self.persistence.list_schema_migrations(),
         }
@@ -1381,7 +1381,7 @@ class CompanyApplicationService:
         reason: str,
     ) -> dict:
         if self.persistence is None:
-            raise ValueError("backup restore execution requires SQLite persistence")
+            raise ValueError("backup restore execution requires durable persistence")
         if actor_id != "human_root":
             raise ValueError("only human_root can execute a backup restore")
         if not reason.strip():
@@ -3528,7 +3528,7 @@ class CompanyApplicationService:
         return {
             "name": "persistence_backend",
             "status": "ok",
-            "message": "SQLite persistence is configured.",
+            "message": f"{self.persistence.backend_name} persistence is configured.",
         }
 
     def _schema_integrity_check(self) -> dict:
@@ -3539,11 +3539,12 @@ class CompanyApplicationService:
                 "message": "Schema version check is skipped for in-memory state.",
             }
         version = self.persistence.schema_version()
-        expected = SQLITE_SCHEMA_VERSION
+        expected = self.persistence.expected_schema_version
+        backend = self.persistence.backend_name
         return {
             "name": "schema_version",
             "status": "ok" if version == expected else "critical",
-            "message": f"SQLite schema version is {version}; expected {expected}.",
+            "message": f"{backend} schema version is {version}; expected {expected}.",
         }
 
     def _audit_storage_integrity_check(self) -> dict:
@@ -3554,10 +3555,15 @@ class CompanyApplicationService:
                 "message": "Database audit append-only trigger check is skipped for in-memory state.",
             }
         enabled = self.persistence.audit_append_only_guards_enabled()
+        backend = self.persistence.backend_name
         return {
             "name": "audit_append_only_storage",
             "status": "ok" if enabled else "critical",
-            "message": "SQLite audit append-only triggers are installed." if enabled else "SQLite audit append-only triggers are missing.",
+            "message": (
+                f"{backend} audit append-only triggers are installed."
+                if enabled
+                else f"{backend} audit append-only triggers are missing."
+            ),
         }
 
     def _backup_integrity_check(self) -> dict:

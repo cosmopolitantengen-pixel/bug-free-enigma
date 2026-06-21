@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-import os
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import build_router
 from app.bootstrap import build_company_os
 from app.core.models import Task
-from app.persistence.sqlite_store import SQLiteStateStore
+from app.persistence.factory import create_state_store
 from app.services.company import CompanyApplicationService
 
 
-def create_app(sqlite_path: str | None = None) -> FastAPI:
-    persistence_path = sqlite_path or os.getenv("AI_COMPANY_OS_SQLITE_PATH")
-    persistence = SQLiteStateStore(persistence_path) if persistence_path else None
+def create_app(
+    sqlite_path: str | None = None,
+    database_url: str | None = None,
+) -> FastAPI:
+    persistence = create_state_store(sqlite_path=sqlite_path, database_url=database_url)
     company_os = build_company_os()
     service = CompanyApplicationService(company_os=company_os, persistence=persistence)
     fastapi_app = FastAPI(title="AI Company OS", version="0.1.0")

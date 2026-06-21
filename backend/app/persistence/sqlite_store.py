@@ -82,6 +82,9 @@ SKILL_RUNTIME_MIGRATION_DESCRIPTION = "Persist controlled Skill execution runs."
 
 
 class SQLiteStateStore:
+    backend_name = "sqlite"
+    expected_schema_version = SQLITE_SCHEMA_VERSION
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         if self.path.parent:

@@ -11,7 +11,7 @@ The first version focuses on the operating foundation:
 - Model calls go through a gateway that records usage and audit events.
 - Budget guardrails check model calls before usage and cost are recorded.
 - Blocked and high-risk operational failures create incidents for human follow-up.
-- Human Root can create verified state backups and apply approval-gated SQLite restores with automatic pre-restore checkpoints.
+- Human Root can create verified state backups and apply approval-gated durable restores with automatic pre-restore checkpoints.
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
 - The V1 catalog boots with 17 scoped Agent roles and 18 registered Skills; approved catalog additions persist across restarts.
@@ -28,7 +28,7 @@ This repository currently contains:
 - A no-dependency Python core in `backend/app/`
 - Unit tests in `backend/tests/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 API and persistence baseline. PostgreSQL/pgvector, Redis workers, a Next.js dashboard, and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, a backend container, a Redis service foundation, and PostgreSQL CI coverage are also present. Redis workers, a Next.js dashboard, embedding-provider wiring, and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -54,6 +54,12 @@ $env:AI_COMPANY_OS_SQLITE_PATH='E:\1\data\company_os.db'
 The current SQLite adapter persists Agent and Skill catalogs, Skill Runs, tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, Tool Runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
 It also persists local users with PBKDF2 password hashes for the development auth flow.
 
+For the PostgreSQL/pgvector stack, create `.env` from `.env.example`, replace the password, and run:
+
+```powershell
+docker compose --env-file .env up --build
+```
+
 ## Local Dashboard
 
 A dependency-free dashboard shell is available at:
@@ -64,10 +70,10 @@ apps/web_dashboard/index.html
 
 Start the backend, open that file in a browser, and keep the API Base field pointed at `http://127.0.0.1:8000`.
 
-## First Build Direction
+## Next Production Direction
 
 1. Keep the core rules deterministic and well tested.
-2. Add FastAPI endpoints over the core services.
-3. Add SQLite/PostgreSQL persistence.
-4. Add the dashboard once the backend contracts are stable.
-5. Add real model calls only after audit, risk, approval, and permission gates are already in place.
+2. Move scheduled execution onto Redis-backed workers.
+3. Replace the dashboard shell with Next.js and TypeScript.
+4. Wire live embedding and model providers through the existing gateways.
+5. Add real connectors only through the existing audit, risk, approval, and permission gates.

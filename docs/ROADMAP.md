@@ -99,11 +99,11 @@ Current status:
 
 - Add FastAPI routes for the required API surface.
 - Add database models and migrations.
-- Start with SQLite for local development, then support PostgreSQL.
+- Use SQLite for local development and PostgreSQL/pgvector for production persistence.
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, SQLite schema/migrations, append-only audit guards, and structured logs are complete for the deterministic V1 baseline. PostgreSQL/pgvector and production migration tooling remain.
+Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector knowledge storage, structured logs, Compose foundation, and PostgreSQL CI job are complete. Redis workers and broader production operations remain.
 
 ## Phase 3: Dashboard
 

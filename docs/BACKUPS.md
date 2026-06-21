@@ -43,4 +43,4 @@ POST /backups/{backup_id}/restore
 
 Restore replaces restorable business state such as Agent and Skill catalogs, tasks, memory, knowledge, evaluations, goals, tools, workflow traces, usage records, proposals, communication records, and scheduled jobs. It deliberately preserves users, approvals, append-only audit logs, domain events, schedule execution history, incidents, backups, and the schema migration ledger. Failed integrity checks do not mutate live state and create an audit event plus incident.
 
-Restore execution is supported only with SQLite persistence. In-memory mode can create and inspect snapshots but cannot apply them durably.
+Restore execution is supported with SQLite and PostgreSQL persistence. In-memory mode can create and inspect snapshots but cannot apply them durably.

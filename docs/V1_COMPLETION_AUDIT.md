@@ -45,7 +45,8 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full backend suite: 140 tests pass.
+- Full local backend suite: 147 tests pass, with the dedicated PostgreSQL integration test skipped when no test database URL is configured.
+- GitHub Actions provisions PostgreSQL with pgvector and runs the full suite with the integration test enabled.
 - FastAPI application startup smoke check passes.
 - Dashboard JavaScript syntax check passes.
 - Git diff whitespace validation passes.
@@ -56,9 +57,9 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 These are not proven complete and must not be represented as delivered:
 
-1. PostgreSQL/pgvector persistence and migrations beyond the current SQLite adapter.
-2. Redis-backed workers and production scheduler execution.
-3. Next.js/TypeScript replacement for the dependency-free dashboard shell.
+1. Redis-backed workers and production scheduler execution.
+2. Next.js/TypeScript replacement for the dependency-free dashboard shell.
+3. Live embedding generation and retrieval wiring above the pgvector persistence boundary.
 4. Real model-provider adapters beyond the deterministic local gateway.
 5. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
 6. Production authentication/session hardening, secrets management, deployment automation, and browser-level end-to-end CI.

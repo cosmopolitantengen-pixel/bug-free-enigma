@@ -103,7 +103,7 @@ Schema migration `0006_skill_runtime` adds durable Skill Run lifecycle records, 
 
 User records store PBKDF2 password hashes, not plaintext passwords.
 
-SQLite initialization records the baseline migration `0001_initial_local_state`, applies `0002_audit_append_only_guards`, `0003_backup_restore_execution_ledger`, `0004_scheduler_event_bus`, and `0005_agent_skill_catalogs`, and sets `PRAGMA user_version` to `5`. The second migration protects `audit_logs`; the third adds a unique restore-approval consumption ledger; the fourth adds durable jobs, execution history, domain events, and append-only event triggers; the fifth adds durable formal Agent and Skill catalogs. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
+SQLite initialization records the baseline migration `0001_initial_local_state`, applies migrations through `0006_skill_runtime`, and sets `PRAGMA user_version` to `6`. The migrations protect append-only history, add the unique restore-approval ledger, durable schedules and events, formal Agent and Skill catalogs, and Skill Run lifecycle records. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
 
 Skill and Agent proposal payloads include approval state plus sandbox status, notes, and sandbox timestamp. The first implementation stores proposal state as JSON so the future migration layer can promote fields into relational columns when needed.
 
@@ -123,10 +123,24 @@ Scheduled job payloads store action, timing, recurrence, run limits, counters, a
 
 Task review payloads store retrospective outcomes, quality scores, lessons, and follow-up actions. Recording a review also creates review memory, a knowledge document, and an audit event.
 
-The adapter is intentionally small and can be replaced by SQLAlchemy/PostgreSQL later without changing the core permission, risk, approval, audit, Agent, Skill, and Workflow services.
+## PostgreSQL And pgvector
+
+The production adapter lives at `backend/app/persistence/postgres_store.py`. It implements the same application persistence contract with PostgreSQL JSONB records and three migrations:
+
+1. State tables, indexes, and the one-time restore approval ledger.
+2. PostgreSQL append-only triggers for audit logs and domain events.
+3. The `vector` extension plus 1536-dimensional knowledge embeddings and an HNSW cosine index.
+
+The application selects this backend when `AI_COMPANY_OS_DATABASE_URL` or `DATABASE_URL` contains a PostgreSQL URL. The SQLite path and PostgreSQL URL are mutually exclusive.
 
 Use this environment variable to enable SQLite for the API:
 
 ```text
 AI_COMPANY_OS_SQLITE_PATH=E:\1\data\company_os.db
+```
+
+Use this environment variable for PostgreSQL:
+
+```text
+AI_COMPANY_OS_DATABASE_URL=postgresql://user:password@localhost:5432/ai_company_os
 ```
