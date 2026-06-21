@@ -157,7 +157,8 @@ def default_workflows() -> list[WorkflowDefinition]:
             workflow_id="github_project_analysis_v1",
             name="GitHub Project Analysis",
             description="Treat repository material as untrusted, assess it, and register knowledge only after approval.",
-            entrypoint="POST /github/absorptions/analyze",
+            entrypoint="POST /workflows/run",
+            execution_mode="native",
             steps=(
                 step(1, "analyze_repository", "tech_agent_v1", "analyze_github_repository", PermissionLevel.L1_DRAFT, "github_project_analysis_skill_v1"),
                 step(2, "review_repository_risk", "risk_agent_v1", "risk_check", PermissionLevel.L1_DRAFT, "risk_check_skill_v1"),

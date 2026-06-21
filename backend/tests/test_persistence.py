@@ -439,6 +439,60 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(skill_runs), 3)
             self.assertIn("approval_v1", [record["subject_id"] for record in evaluations])
 
+    def test_github_analysis_workflow_resumes_and_registers_after_sqlite_reload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "github_analysis_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            waiting = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "github_project_analysis_v1",
+                    "title": "Persistent GitHub analysis",
+                    "description": "Resume approved metadata analysis after process restart.",
+                    "input": {
+                        "repo_url": "https://github.com/example/persistent-project",
+                        "readme": "Maintained documentation and API testing helpers.",
+                        "license_name": "Apache-2.0",
+                        "maintenance_signal": "active",
+                    },
+                },
+            ).json()
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            waiting_run = second.get("/workflow-runs").json()[0]
+            second.post(
+                f"/approvals/{waiting['approval']['approval_id']}/approve",
+                json={"note": "Approve after SQLite reload."},
+            )
+            resumed = second.post(f"/tasks/{waiting['task']['task_id']}/resume")
+
+            third = TestClient(create_app(sqlite_path=db_path))
+            tasks = third.get("/tasks").json()
+            runs = third.get("/workflow-runs").json()
+            steps = third.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
+            skill_runs = third.get("/skills/runs").json()
+            proposals = third.get("/github/absorptions").json()
+            knowledge = third.get("/knowledge").json()
+            approvals = third.get("/approvals").json()
+            evaluations = third.get("/evaluations").json()
+
+            self.assertEqual(waiting_run["status"], "waiting_approval")
+            self.assertEqual(resumed.status_code, 200)
+            self.assertEqual(resumed.json()["outcome"], "registered_knowledge")
+            self.assertEqual(tasks[0]["status"], "completed")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(
+                [step["status"] for step in steps],
+                ["waiting_approval", "completed", "completed", "completed"],
+            )
+            self.assertEqual(len(skill_runs), 3)
+            self.assertEqual(len(approvals), 1)
+            self.assertEqual(proposals[0]["status"], "registered")
+            self.assertEqual(proposals[0]["sandbox_status"], "passed")
+            self.assertEqual(proposals[0]["registered_doc_id"], knowledge[0]["doc_id"])
+            self.assertEqual(knowledge[0]["source_task_id"], tasks[0]["task_id"])
+            self.assertIn("github_project_analysis_v1", [record["subject_id"] for record in evaluations])
+
     def test_quality_check_workflow_state_persists_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "quality_workflow.db")

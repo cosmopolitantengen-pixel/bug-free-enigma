@@ -8,6 +8,21 @@ It does not fetch repositories, execute code, install dependencies, enable Tools
 
 ## Current Flow
 
+The native end-to-end Workflow is:
+
+```text
+POST /workflows/run (github_project_analysis_v1)
+-> one task-scoped Human Root approval
+-> POST /tasks/{task_id}/resume
+-> GitHub analysis Skill
+-> risk Skill
+-> absorption proposal and capability curation Skill
+-> deterministic sandbox
+-> Knowledge document, only when sandbox passed
+```
+
+The lower-level API remains available for operators that need to inspect and advance each proposal stage manually:
+
 ```text
 POST /github/absorptions/analyze
 -> approval request

@@ -463,6 +463,41 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(result["task"]["status"], "blocked")
         self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
         self.assertEqual(service.list_skill_runs()[-1]["status"], "blocked")
+
+    def test_github_analysis_workflow_blocks_on_resume_when_analysis_skill_is_disabled(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        service = CompanyApplicationService(company_os=company_os)
+        waiting = service.run_registered_workflow(
+            "github_project_analysis_v1",
+            "Controlled GitHub analysis",
+            "Approved analysis must still honor the live Skill registry.",
+            input={
+                "repo_url": "https://github.com/example/safe-project",
+                "readme": "A documented API test helper.",
+                "license_name": "MIT",
+            },
+        )
+        service.decide_approval(
+            waiting["approval"]["approval_id"],
+            ApprovalStatus.APPROVED,
+            "human_root",
+            "Approve before disabling the analysis Skill.",
+        )
+        analysis_skill = company_os.skills.get("github_project_analysis_skill_v1")
+        company_os.skills.restore(replace(analysis_skill, enabled=False))
+
+        result = service.resume_task(waiting["task"]["task_id"])
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertIsNone(result["proposal"])
+        self.assertEqual(service.list_skill_runs()[-1]["status"], "blocked")
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertEqual(service.list_workflow_steps()[-1]["status"], "blocked")
+        self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
         self.assertEqual(service.list_incidents()[-1]["source_type"], "workflow")
 
     def test_document_workflow_resumes_after_approval(self):

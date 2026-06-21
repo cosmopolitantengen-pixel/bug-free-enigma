@@ -46,7 +46,7 @@ A Workflow coordinates Agents, Skills, Tools, approvals, quality checks, audit l
 
 The Workflow Registry now contains all 10 V1 definitions. Every definition declares an ID, version, execution mode, entrypoint, ordered steps, responsible Agent, action, permission level, and optional Skill. Registration rejects non-contiguous steps, missing Agents or Skills, Agent permissions that do not exactly include the requested level, and unauthorized Agent/Skill pairs.
 
-`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `skill_missing_v1`, `agent_missing_v1`, `approval_v1`, `quality_check_v1`, and `retrospective_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
+`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `skill_missing_v1`, `agent_missing_v1`, `approval_v1`, `quality_check_v1`, `retrospective_v1`, and `github_project_analysis_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
 
 The document generation workflow writes one `WorkflowRun` and seven ordered `WorkflowStep` records:
 
@@ -92,7 +92,8 @@ All three calls create task-linked Skill Runs. Content that fails quality is a b
 
 The retrospective runner accepts an optional structured `input` object with `source_task_id`, outcome, summary, what-went-well/wrong notes, lessons, follow-up actions, quality score, and risk level. It validates the complete payload and source task before creating the Workflow task, then executes quality, memory-write, and audit Skills. Only after all three Skill Runs complete does it persist the TaskReview and reusable Knowledge document. The Workflow task and source task remain distinct and are linked through Review, Memory, and Knowledge records.
 
+The GitHub project analysis runner accepts `repo_url`, `readme`, `license_name`, `maintenance_signal`, and an optional requesting Agent. It stores one task-scoped approval before any GitHub Analysis Skill executes. Approval metadata limits reuse to the two registered GitHub analysis steps in that Workflow task; live Agent/Skill authorization is still rechecked for every Skill Run. After approval, the Workflow treats README text as untrusted external content, runs three task-linked Skills, creates the existing absorption proposal, executes deterministic license/security sandbox checks, and registers only a passed analysis as Knowledge. A failed sandbox blocks the task and creates an Incident. Human rejection cancels the task without running Skills. The complete waiting and resumed state survives SQLite restart.
+
 The other catalog definitions point to their operational entrypoints:
 
-- GitHub analysis: absorption analysis, sandbox, approval, and knowledge registration APIs
 - Tool call: controlled Tool Run request and completion APIs

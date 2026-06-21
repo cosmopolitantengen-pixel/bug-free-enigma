@@ -91,6 +91,7 @@ Current status:
 - Skill Missing handling is the sixth native Workflow. It prefers an authorized replacement, then an authorized multi-Skill composition, and creates a controlled proposal only for a real gap. Medium-risk temporary Skill preparation pauses at Human Root approval and can resume after a SQLite restart.
 - Agent Missing handling is the seventh native Workflow. It reuses an existing role when possible, otherwise runs Knowledge, planning, and risk Skills before creating a disabled Agent proposal whose approval is linked to the Workflow task.
 - Approval is the eighth native Workflow. Low-risk requests complete without a fabricated approval, controlled requests pause for Human Root and resume after a persisted decision, rejection is enforced as a valid outcome, and forbidden actions remain blocked.
+- GitHub project analysis is the ninth native Workflow. It uses one task-scoped Human Root approval, executes registered analysis/risk Skills only after approval, preserves the external-content boundary, blocks failed sandbox evidence, and registers passed analyses as Knowledge only across SQLite restarts.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
@@ -123,7 +124,7 @@ Current interim implementation:
 - Dashboard includes a task review form and recent review history
 - Dashboard includes review-driven improvement proposal controls
 - Dashboard includes strategic goal creation, progress updates, and record linking
-- Dashboard lists the validated Workflow catalog and can run document-generation, task-planning, Agent-collaboration, Skill/Agent-Missing, Approval, quality-check, or retrospective Workflows from one selector
+- Dashboard lists the validated Workflow catalog and can run document-generation, task-planning, Agent-collaboration, Skill/Agent-Missing, Approval, quality-check, retrospective, or GitHub-project-analysis Workflows from one selector
 
 ## Phase 4: Controlled Evolution
 

@@ -463,6 +463,7 @@ class CompanyApplicationService:
             "approval_v1",
             "quality_check_v1",
             "retrospective_v1",
+            "github_project_analysis_v1",
         }:
             raise ValueError(f"workflow uses dedicated entrypoint: {definition.entrypoint}")
         workflow_input = input or {}
@@ -479,6 +480,9 @@ class CompanyApplicationService:
             source_task_id = workflow_input.get("source_task_id")
             if source_task_id is not None and source_task_id not in self.tasks:
                 raise ValueError(f"retrospective source task not found: {source_task_id}")
+        if workflow_id == "github_project_analysis_v1":
+            github_input = self.company_os.github_project_analysis_workflow.validate_input(workflow_input)
+            self.company_os.agents.get(github_input["requested_by_agent"])
         task = self.create_task(title, description, user_id)
         if workflow_id == "document_generation_v1":
             result = self.run_task(task["task_id"])
@@ -595,7 +599,31 @@ class CompanyApplicationService:
                 "blocked": retrospective_result.blocked,
                 "incident": to_plain(retrospective_result.incident) if retrospective_result.incident else None,
             }
+        if workflow_id == "github_project_analysis_v1":
+            github_result = self.company_os.github_project_analysis_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return self._github_workflow_response(definition, github_result)
         raise ValueError("unsupported workflow execution mode")
+
+    def _github_workflow_response(self, definition, result) -> dict:
+        return {
+            "workflow": to_plain(definition),
+            "task": to_plain(result.task),
+            "output": result.output,
+            "outcome": result.outcome,
+            "approval": result.approval,
+            "proposal": result.proposal,
+            "sandbox": result.sandbox,
+            "knowledge": result.knowledge,
+            "analysis": result.analysis,
+            "risk": result.risk,
+            "approval_required": result.approval_required,
+            "blocked": result.blocked,
+            "incident": to_plain(result.incident) if result.incident else None,
+        }
 
     def list_workflow_steps(self, run_id: str | None = None) -> list[dict]:
         return [to_plain(step) for step in self.company_os.traces.list_steps(run_id)]
@@ -1650,6 +1678,7 @@ class CompanyApplicationService:
         input: dict,
         reason: str,
         task_id: str | None = None,
+        authorization_approval_id: str | None = None,
     ) -> dict:
         skill = self.company_os.skills.get(skill_id)
         agent = self.company_os.agents.get(actor_id)
@@ -1682,6 +1711,16 @@ class CompanyApplicationService:
         )
         approval = None
         approval_status = ApprovalStatus.NOT_REQUIRED
+        authorization = None
+        if authorization_approval_id is not None:
+            authorization = self.company_os.approvals.get(authorization_approval_id)
+            approved_skills = authorization.request.metadata.get("approved_skill_ids", [])
+            if authorization.status != ApprovalStatus.APPROVED:
+                raise ValueError("Skill authorization approval is not approved")
+            if authorization.request.task_id != task_id:
+                raise ValueError("Skill authorization approval does not match task")
+            if skill.skill_id not in approved_skills:
+                raise ValueError("Skill is outside the authorization approval scope")
 
         if not skill.enabled:
             run.status, run.error = SkillRunStatus.BLOCKED, "skill is disabled"
@@ -1694,15 +1733,21 @@ class CompanyApplicationService:
             run.error = permission.reason if permission.decision == ActionDecision.BLOCK else "; ".join(risk.reasons)
             run.completed_at = utc_now()
         elif risk.requires_approval or permission.decision == ActionDecision.REQUIRE_APPROVAL:
-            approval = self.company_os.approvals.request_approval(
-                request=request,
-                risk=risk,
-                possible_benefit=f"Run {skill.name} for a controlled task step.",
-                possible_loss="Skill output could be incorrect, unsafe, or create unintended internal state.",
-            )
-            run.status = SkillRunStatus.WAITING_APPROVAL
-            run.approval_id = approval.approval_id
-            approval_status = approval.status
+            if authorization is not None:
+                approval = authorization
+                run.approval_id = authorization.approval_id
+                approval_status = authorization.status
+                self._execute_skill_run(run, skill)
+            else:
+                approval = self.company_os.approvals.request_approval(
+                    request=request,
+                    risk=risk,
+                    possible_benefit=f"Run {skill.name} for a controlled task step.",
+                    possible_loss="Skill output could be incorrect, unsafe, or create unintended internal state.",
+                )
+                run.status = SkillRunStatus.WAITING_APPROVAL
+                run.approval_id = approval.approval_id
+                approval_status = approval.status
         else:
             self._execute_skill_run(run, skill)
 
@@ -2019,6 +2064,16 @@ class CompanyApplicationService:
                 "blocked": result.blocked,
                 "incident": result.incident,
             }
+        if workflow_run and workflow_run.workflow_id == "github_project_analysis_v1":
+            if not task.approval_id:
+                raise ValueError("GitHub project analysis task has no approval")
+            approval = to_plain(self.company_os.approvals.get(task.approval_id))
+            result = self.company_os.github_project_analysis_workflow.resume_after_decision(task, approval)
+            self.sync()
+            return self._github_workflow_response(
+                self.company_os.workflows.get("github_project_analysis_v1"),
+                result,
+            )
         result = self.company_os.document_workflow.resume_after_approval(task)
         incident = None
         if result.blocked:
@@ -2085,6 +2140,7 @@ class CompanyApplicationService:
         possible_benefit: str = "Complete the requested action.",
         possible_loss: str = "Unsafe or unauthorized action.",
         reversible: bool = True,
+        metadata: dict | None = None,
     ) -> dict:
         request = ActionRequest(
             action=action,
@@ -2094,6 +2150,7 @@ class CompanyApplicationService:
             reason=reason,
             target=target,
             reversible=reversible,
+            metadata=metadata or {},
         )
         risk = self.company_os.risks.assess(request)
         permission_decision = None
@@ -2431,6 +2488,8 @@ class CompanyApplicationService:
         readme: str,
         license_name: str = "unknown",
         maintenance_signal: str = "unknown",
+        task_id: str | None = None,
+        approval_id: str | None = None,
     ) -> dict:
         self.company_os.agents.get(requested_by_agent)
         clean_url = repo_url.strip()
@@ -2446,26 +2505,38 @@ class CompanyApplicationService:
             license_name=license_name,
             maintenance_signal=maintenance_signal,
         )
-        approval = self.request_action_approval(
-            action="analyze_github_repository",
-            actor_id=requested_by_agent,
-            permission_level=PermissionLevel.L3_EXTERNAL_PREPARE,
-            reason=f"Analyze GitHub repository for controlled absorption: {proposal.repo_url}",
-            target=proposal.proposal_id,
-            possible_benefit="Capture reusable open-source capability ideas as controlled internal knowledge.",
-            possible_loss="Unsafe, incompatible, or prompt-injection content could be mistaken for executable system behavior.",
-        )
-        proposal.approval_id = approval["approval"]["approval_id"] if approval["approval"] else None
-        proposal.status = self._proposal_status_from_approval(approval["approval"])
+        if approval_id is not None:
+            existing_approval = self.company_os.approvals.get(approval_id)
+            if existing_approval.status != ApprovalStatus.APPROVED:
+                raise ValueError("GitHub analysis approval is not approved")
+            if existing_approval.request.task_id != task_id:
+                raise ValueError("GitHub analysis approval does not match task")
+            if existing_approval.request.metadata.get("workflow_id") != "github_project_analysis_v1":
+                raise ValueError("approval is outside GitHub Project Analysis Workflow scope")
+            approval_payload = to_plain(existing_approval)
+        else:
+            approval_result = self.request_action_approval(
+                action="analyze_github_repository",
+                actor_id=requested_by_agent,
+                permission_level=PermissionLevel.L3_EXTERNAL_PREPARE,
+                reason=f"Analyze GitHub repository for controlled absorption: {proposal.repo_url}",
+                task_id=task_id,
+                target=proposal.proposal_id,
+                possible_benefit="Capture reusable open-source capability ideas as controlled internal knowledge.",
+                possible_loss="Unsafe, incompatible, or prompt-injection content could be mistaken for executable system behavior.",
+            )
+            approval_payload = approval_result["approval"]
+        proposal.approval_id = approval_payload["approval_id"] if approval_payload else None
+        proposal.status = self._proposal_status_from_approval(approval_payload)
         self.github_absorptions[proposal.proposal_id] = proposal
         self.company_os.audit.append(
             AuditEvent(
                 event_type="github_absorption_analyzed",
                 actor_id=requested_by_agent,
                 action="analyze_github_repository",
-                task_id=None,
+                task_id=task_id,
                 risk_level=proposal.risk_level,
-                approval_status=ApprovalStatus.PENDING,
+                approval_status=ApprovalStatus(approval_payload["status"]) if approval_payload else ApprovalStatus.NOT_REQUIRED,
                 result=proposal.status.value,
                 input_ref=proposal.repo_url,
                 output_ref=proposal.proposal_id,
@@ -2481,6 +2552,11 @@ class CompanyApplicationService:
     def sandbox_github_absorption(self, proposal_id: str) -> dict:
         self._refresh_proposal_statuses()
         proposal = self.github_absorptions[proposal_id]
+        task_id = (
+            self.company_os.approvals.get(proposal.approval_id).request.task_id
+            if proposal.approval_id
+            else None
+        )
         known_agent_ids = {agent.agent_id for agent in self.company_os.agents.list()}
         proposal = self.company_os.sandbox.test_github_absorption(proposal, known_agent_ids)
         self.company_os.audit.append(
@@ -2488,7 +2564,7 @@ class CompanyApplicationService:
                 event_type="github_absorption_sandboxed",
                 actor_id="sandbox_center",
                 action="sandbox_github_absorption",
-                task_id=None,
+                task_id=task_id,
                 risk_level=proposal.risk_level,
                 approval_status=ApprovalStatus.NOT_REQUIRED,
                 result=proposal.sandbox_status.value,
@@ -2504,6 +2580,8 @@ class CompanyApplicationService:
         proposal = self.github_absorptions[proposal_id]
         self._ensure_proposal_approved(proposal.approval_id)
         self._ensure_proposal_sandbox_passed(proposal.sandbox_status)
+        approval = self.company_os.approvals.get(proposal.approval_id)
+        task_id = approval.request.task_id
         content = (
             f"Repository: {proposal.repo_url}\n"
             f"License: {proposal.license_name}\n"
@@ -2520,6 +2598,7 @@ class CompanyApplicationService:
             KnowledgeDoc(
                 title=f"GitHub absorption analysis: {proposal.repo_url}",
                 content=content,
+                source_task_id=task_id,
             )
         )
         proposal.status = ProposalStatus.REGISTERED
@@ -2529,7 +2608,7 @@ class CompanyApplicationService:
                 event_type="github_absorption_registered",
                 actor_id="human_root",
                 action="register_github_absorption",
-                task_id=None,
+                task_id=task_id,
                 risk_level=proposal.risk_level,
                 approval_status=ApprovalStatus.APPROVED,
                 result=knowledge.doc_id,
@@ -2999,6 +3078,14 @@ class CompanyApplicationService:
         self.company_os.agent_missing_workflow.set_proposal_creator(self.missing_agent)
         self.company_os.approval_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.approval_workflow.set_approval_requester(self.request_action_approval)
+        self.company_os.github_project_analysis_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.github_project_analysis_workflow.set_approved_skill_executor(
+            self._execute_approved_workflow_skill
+        )
+        self.company_os.github_project_analysis_workflow.set_approval_requester(self.request_action_approval)
+        self.company_os.github_project_analysis_workflow.set_proposal_creator(self.analyze_github_absorption)
+        self.company_os.github_project_analysis_workflow.set_sandbox_runner(self.sandbox_github_absorption)
+        self.company_os.github_project_analysis_workflow.set_proposal_registrar(self.register_github_absorption)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
 
@@ -3011,6 +3098,29 @@ class CompanyApplicationService:
         task_id: str,
     ) -> dict:
         requested = self.request_skill_run(skill_id, actor_id, input, reason, task_id)
+        run = requested["run"]
+        if run["status"] != SkillRunStatus.COMPLETED.value:
+            detail = run.get("error") or f"Skill run entered {run['status']}"
+            raise PermissionError(f"{skill_id}: {detail}")
+        return json.loads(run["result"])
+
+    def _execute_approved_workflow_skill(
+        self,
+        skill_id: str,
+        actor_id: str,
+        input: dict,
+        reason: str,
+        task_id: str,
+        approval_id: str,
+    ) -> dict:
+        requested = self.request_skill_run(
+            skill_id,
+            actor_id,
+            input,
+            reason,
+            task_id,
+            authorization_approval_id=approval_id,
+        )
         run = requested["run"]
         if run["status"] != SkillRunStatus.COMPLETED.value:
             detail = run.get("error") or f"Skill run entered {run['status']}"

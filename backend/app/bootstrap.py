@@ -53,6 +53,7 @@ from app.workflows.agent_collaboration import AgentCollaborationWorkflow
 from app.workflows.agent_missing import AgentMissingWorkflow
 from app.workflows.approval import ApprovalWorkflow
 from app.workflows.document_generation import DocumentGenerationWorkflow
+from app.workflows.github_project_analysis import GitHubProjectAnalysisWorkflow
 from app.workflows.quality_check import QualityCheckWorkflow
 from app.workflows.retrospective import RetrospectiveWorkflow
 from app.workflows.registry import WorkflowRegistry, default_workflows
@@ -92,6 +93,7 @@ class CompanyOS:
     skill_missing_workflow: SkillMissingWorkflow
     agent_missing_workflow: AgentMissingWorkflow
     approval_workflow: ApprovalWorkflow
+    github_project_analysis_workflow: GitHubProjectAnalysisWorkflow
     quality_check_workflow: QualityCheckWorkflow
     retrospective_workflow: RetrospectiveWorkflow
 
@@ -243,6 +245,13 @@ def build_company_os(
         incidents=incident_store,
         traces=traces,
     )
+    github_project_analysis_workflow = GitHubProjectAnalysisWorkflow(
+        workflows=workflows,
+        audit=audit,
+        evaluations=evaluation_store,
+        incidents=incident_store,
+        traces=traces,
+    )
     quality_check_workflow = QualityCheckWorkflow(
         workflows=workflows,
         audit=audit,
@@ -289,6 +298,7 @@ def build_company_os(
         skill_missing_workflow=skill_missing_workflow,
         agent_missing_workflow=agent_missing_workflow,
         approval_workflow=approval_workflow,
+        github_project_analysis_workflow=github_project_analysis_workflow,
         quality_check_workflow=quality_check_workflow,
         retrospective_workflow=retrospective_workflow,
     )

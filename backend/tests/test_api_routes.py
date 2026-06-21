@@ -500,6 +500,133 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get("/tasks").json(), [])
         self.assertEqual(self.client.get("/workflow-runs").json(), [])
 
+    def test_github_analysis_workflow_uses_one_approval_and_registers_safe_knowledge(self):
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "github_project_analysis_v1",
+                "title": "Analyze safe repository",
+                "description": "Assess supplied repository material without executing it.",
+                "input": {
+                    "repo_url": "https://github.com/example/safe-project",
+                    "requested_by_agent": "ceo_agent_v1",
+                    "readme": "Documentation and API testing helpers for internal developer workflows.",
+                    "license_name": "MIT",
+                    "maintenance_signal": "active",
+                },
+            },
+        )
+        payload = waiting.json()
+        approval_id = payload["approval"]["approval_id"]
+        approved = self.client.post(
+            f"/approvals/{approval_id}/approve",
+            json={"note": "Approved for metadata-only analysis and Knowledge registration."},
+        )
+        resumed = self.client.post(f"/tasks/{payload['task']['task_id']}/resume")
+        result = resumed.json()
+        runs = self.client.get("/workflow-runs").json()
+        steps = self.client.get(f"/workflow-runs/{runs[-1]['run_id']}/steps").json()
+        skill_runs = [
+            run
+            for run in self.client.get("/skills/runs").json()
+            if run["task_id"] == payload["task"]["task_id"]
+        ]
+
+        self.assertEqual(waiting.status_code, 200)
+        self.assertEqual(payload["outcome"], "waiting_approval")
+        self.assertEqual(payload["task"]["status"], "needs_approval")
+        self.assertEqual(approved.status_code, 200)
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(result["outcome"], "registered_knowledge")
+        self.assertEqual(result["task"]["status"], "completed")
+        self.assertEqual(result["proposal"]["status"], "registered")
+        self.assertEqual(result["sandbox"]["sandbox_status"], "passed")
+        self.assertEqual(result["knowledge"]["doc_id"], result["proposal"]["registered_doc_id"])
+        self.assertEqual(result["knowledge"]["source_task_id"], payload["task"]["task_id"])
+        self.assertEqual(runs[-1]["status"], "completed")
+        self.assertEqual([step["status"] for step in steps], ["waiting_approval"] + ["completed"] * 3)
+        self.assertEqual(len(skill_runs), 3)
+        self.assertEqual(len(self.client.get("/approvals").json()), 1)
+        github_runs = [run for run in skill_runs if run["skill_id"] == "github_project_analysis_skill_v1"]
+        self.assertEqual(len(github_runs), 2)
+        self.assertTrue(all(run["approval_id"] == approval_id for run in github_runs))
+
+    def test_github_analysis_workflow_blocks_failed_sandbox_without_knowledge(self):
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "github_project_analysis_v1",
+                "title": "Analyze unknown-license repository",
+                "description": "Unsafe absorption evidence must stop registration.",
+                "input": {
+                    "repo_url": "https://github.com/example/unknown-license",
+                    "readme": "A maintained API helper with tests and documentation.",
+                    "license_name": "unknown",
+                    "maintenance_signal": "active",
+                },
+            },
+        ).json()
+        self.client.post(
+            f"/approvals/{waiting['approval']['approval_id']}/approve",
+            json={"note": "Analyze, but still enforce sandbox policy."},
+        )
+        resumed = self.client.post(f"/tasks/{waiting['task']['task_id']}/resume")
+
+        self.assertEqual(resumed.status_code, 200)
+        self.assertTrue(resumed.json()["blocked"])
+        self.assertEqual(resumed.json()["task"]["status"], "blocked")
+        self.assertEqual(resumed.json()["sandbox"]["sandbox_status"], "failed")
+        self.assertIsNone(resumed.json()["knowledge"])
+        self.assertIsNotNone(resumed.json()["incident"])
+        self.assertEqual(self.client.get("/knowledge").json(), [])
+
+    def test_github_analysis_workflow_enforces_human_rejection(self):
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "github_project_analysis_v1",
+                "title": "Reject repository analysis",
+                "description": "A rejected analysis must not execute Skills.",
+                "input": {
+                    "repo_url": "https://github.com/example/rejected",
+                    "readme": "Documentation project with tests.",
+                    "license_name": "MIT",
+                },
+            },
+        ).json()
+        self.client.post(
+            f"/approvals/{waiting['approval']['approval_id']}/reject",
+            json={"note": "Do not analyze this repository."},
+        )
+        resumed = self.client.post(f"/tasks/{waiting['task']['task_id']}/resume")
+
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["outcome"], "rejected")
+        self.assertEqual(resumed.json()["task"]["status"], "cancelled")
+        self.assertFalse(resumed.json()["blocked"])
+        self.assertEqual(self.client.get("/skills/runs").json(), [])
+        self.assertEqual(self.client.get("/github/absorptions").json(), [])
+
+    def test_github_analysis_workflow_validates_agent_before_task_creation(self):
+        response = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "github_project_analysis_v1",
+                "title": "Invalid GitHub analysis",
+                "description": "Do not create an orphan task.",
+                "input": {
+                    "repo_url": "https://github.com/example/project",
+                    "requested_by_agent": "unknown_agent_v1",
+                    "readme": "A valid repository description.",
+                    "license_name": "MIT",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/workflow-runs").json(), [])
+
     def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
         checked = self.client.post(
             "/workflows/run",
@@ -608,14 +735,14 @@ class ApiRouteTests(unittest.TestCase):
         response = self.client.post(
             "/workflows/run",
             json={
-                "workflow_id": "github_project_analysis_v1",
+                "workflow_id": "tool_call_v1",
                 "title": "Wrong entrypoint",
-                "description": "Must use the GitHub absorber endpoint.",
+                "description": "Must use the controlled Tool Run endpoint.",
             },
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("POST /github/absorptions/analyze", response.json()["detail"])
+        self.assertIn("POST /tools/runs/request", response.json()["detail"])
         self.assertEqual(len(self.client.get("/tasks").json()), task_count)
 
     def test_database_schema_reports_memory_and_sqlite_backends(self):
