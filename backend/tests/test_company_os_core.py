@@ -755,6 +755,74 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertIn("Simulated Approved Content Prepare Tool execution", json.loads(completed["run"]["result"])["message"])
         self.assertEqual(service.list_audit_logs()[-1]["event_type"], "tool_run_completed")
 
+    def test_tool_call_workflow_revalidates_actor_after_approval(self):
+        from dataclasses import replace
+        from app.services.company import CompanyApplicationService
+
+        company_os = build_company_os()
+        service = CompanyApplicationService(company_os=company_os)
+        service.register_tool(
+            tool_id="workflow_revalidation_tool",
+            name="Workflow Revalidation Tool",
+            type="internal",
+            description="Prepare controlled content after approval.",
+            action="prepare_external_content",
+            permission_level=PermissionLevel.L3_EXTERNAL_PREPARE,
+            risk_level=RiskLevel.MEDIUM,
+            requires_approval=True,
+            input_schema={"topic": "string"},
+            output_schema={"message": "string"},
+            version="1.0.0",
+            enabled=True,
+        )
+        service.register_agent(
+            agent_id="workflow_revalidation_agent",
+            name="Workflow Revalidation Agent",
+            department="QA",
+            role="Verify live controls before approved Tool execution.",
+            permissions=[
+                PermissionLevel.L0_READ,
+                PermissionLevel.L1_DRAFT,
+                PermissionLevel.L2_INTERNAL_WRITE,
+                PermissionLevel.L3_EXTERNAL_PREPARE,
+            ],
+            forbidden=[],
+            allowed_skills=[],
+            allowed_tools=["workflow_revalidation_tool"],
+            reports_to="human_root",
+            risk_level=RiskLevel.LOW,
+            version="1.0.0",
+            enabled=True,
+        )
+        waiting = service.run_registered_workflow(
+            "tool_call_v1",
+            "Revalidate approved Tool",
+            "The live Agent state must still authorize execution.",
+            input={
+                "tool_id": "workflow_revalidation_tool",
+                "actor_id": "workflow_revalidation_agent",
+                "tool_input": {"topic": "launch"},
+                "reason": "Prepare content after approval.",
+            },
+        )
+        service.decide_approval(
+            waiting["approval"]["approval_id"],
+            ApprovalStatus.APPROVED,
+            "human_root",
+            "Approve before changing live Agent state.",
+        )
+        actor = company_os.agents.get("workflow_revalidation_agent")
+        company_os.agents.restore(replace(actor, enabled=False))
+
+        result = service.resume_task(waiting["task"]["task_id"])
+
+        self.assertTrue(result["blocked"])
+        self.assertEqual(result["task"]["status"], "blocked")
+        self.assertEqual(result["tool_run"]["status"], "blocked")
+        self.assertIn("disabled", result["tool_run"]["error"])
+        self.assertEqual(service.list_workflow_runs()[0]["status"], "blocked")
+        self.assertGreaterEqual(len(service.list_incidents()), 2)
+
     def test_low_risk_skill_run_executes_validated_adapter_and_evaluates(self):
         from app.services.company import CompanyApplicationService
 

@@ -115,7 +115,7 @@ POST /agents/proposals/{proposal_id}/register
 - View normalized structured JSON logs across audit, workflow, tool, model, cost, and incident categories.
 - View Memory and Knowledge Base entries.
 - View recent evaluation records and average score.
-- Select and run document-generation, task-planning, Agent-collaboration, Skill/Agent-Missing, Approval, quality-check, retrospective, or GitHub-project-analysis native Workflows.
+- Select and run all 10 V1 native Workflows, including GitHub Project Analysis and Tool Call.
 - Resume a waiting document Workflow after Human Root approval.
 - Submit an action through the Approval Center.
 - Request a controlled Tool Run from the dashboard.

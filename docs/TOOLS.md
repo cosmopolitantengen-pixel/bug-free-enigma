@@ -42,6 +42,8 @@ A Tool is a registered capability an Agent can request. Tools are lower authorit
 - Every Tool Run request writes an audit event.
 - Completion writes a separate `tool_run_completed` audit event.
 
+`POST /workflows/run` with `tool_call_v1` wraps the same Tool Runtime in a complete task process. Approval-request, risk, and audit Skills create task-linked Skill Runs; the actual Tool Run remains the execution source of truth. Approval-gated calls resume through `POST /tasks/{task_id}/resume`, rechecking live Agent enablement, Tool authorization, permission, and risk before execution. Rejected calls are closed without execution. Workflow and Tool evidence persist across SQLite restarts.
+
 ## Current Internal Adapters
 
 The first implementation includes a small controlled adapter layer for safe internal tools:

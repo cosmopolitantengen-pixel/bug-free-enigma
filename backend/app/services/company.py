@@ -406,6 +406,17 @@ class CompanyApplicationService:
 
         tool = self.company_os.tools.get(run.tool_id)
         agent = self.company_os.agents.get(run.actor_id)
+        request = ActionRequest(
+            action=tool.action,
+            actor_id=run.actor_id,
+            task_id=run.task_id,
+            permission_level=tool.permission_level,
+            reason=run.reason,
+            target=tool.tool_id,
+            metadata={"tool_id": tool.tool_id},
+        )
+        permission = self.company_os.permissions.evaluate(agent, request)
+        risk = self.company_os.risks.assess(request)
         if not tool.enabled:
             run.status = ToolRunStatus.BLOCKED
             run.error = "tool is disabled"
@@ -414,8 +425,25 @@ class CompanyApplicationService:
             run.status = ToolRunStatus.BLOCKED
             run.error = "tool is not allowed for this agent"
             run.completed_at = utc_now()
+        elif risk.blocked or permission.decision == ActionDecision.BLOCK:
+            run.status = ToolRunStatus.BLOCKED
+            run.error = permission.reason if permission.decision == ActionDecision.BLOCK else "; ".join(risk.reasons)
+            run.completed_at = utc_now()
         else:
             self._execute_tool_run(run, tool)
+
+        incident = None
+        if run.status == ToolRunStatus.BLOCKED:
+            incident = self._report_incident(
+                title="Approved Tool run blocked on revalidation",
+                description=run.error or "Tool run controls changed before execution.",
+                source_type="tool_run",
+                source_id=run.run_id,
+                risk_level=run.risk_level,
+                task_id=run.task_id,
+                actor_id=run.actor_id,
+                recommendation="Review live Tool state, Agent authorization, permission, and risk policy.",
+            )
 
         self.company_os.audit.append(
             AuditEvent(
@@ -429,6 +457,44 @@ class CompanyApplicationService:
                 input_ref=note,
                 output_ref=run.run_id,
                 error=run.error,
+            )
+        )
+        self.sync()
+        return {
+            "tool": to_plain(tool),
+            "run": to_plain(run),
+            "approval": to_plain(approval),
+            "incident": to_plain(incident) if incident else None,
+        }
+
+    def deny_tool_run(self, run_id: str, reason: str) -> dict:
+        run = self.tool_runs[run_id]
+        if run.status != ToolRunStatus.WAITING_APPROVAL:
+            raise ValueError("tool run is not waiting for approval")
+        if not run.approval_id:
+            raise ValueError("tool run has no approval")
+        approval = self.company_os.approvals.get(run.approval_id)
+        if approval.status not in {
+            ApprovalStatus.REJECTED,
+            ApprovalStatus.BLOCKED,
+            ApprovalStatus.MODIFIED,
+        }:
+            raise ValueError("tool run approval has not denied execution")
+        run.status = ToolRunStatus.BLOCKED
+        run.error = reason
+        run.completed_at = utc_now()
+        tool = self.company_os.tools.get(run.tool_id)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="tool_run_decision_enforced",
+                actor_id="human_root",
+                action=run.action,
+                task_id=run.task_id,
+                risk_level=run.risk_level,
+                approval_status=approval.status,
+                result="not_executed",
+                input_ref=reason,
+                output_ref=run.run_id,
             )
         )
         self.sync()
@@ -464,6 +530,7 @@ class CompanyApplicationService:
             "quality_check_v1",
             "retrospective_v1",
             "github_project_analysis_v1",
+            "tool_call_v1",
         }:
             raise ValueError(f"workflow uses dedicated entrypoint: {definition.entrypoint}")
         workflow_input = input or {}
@@ -483,6 +550,10 @@ class CompanyApplicationService:
         if workflow_id == "github_project_analysis_v1":
             github_input = self.company_os.github_project_analysis_workflow.validate_input(workflow_input)
             self.company_os.agents.get(github_input["requested_by_agent"])
+        if workflow_id == "tool_call_v1":
+            tool_input = self.company_os.tool_call_workflow.validate_input(workflow_input)
+            self.company_os.tools.get(tool_input["tool_id"])
+            self.company_os.agents.get(tool_input["actor_id"])
         task = self.create_task(title, description, user_id)
         if workflow_id == "document_generation_v1":
             result = self.run_task(task["task_id"])
@@ -606,6 +677,13 @@ class CompanyApplicationService:
             )
             self.sync()
             return self._github_workflow_response(definition, github_result)
+        if workflow_id == "tool_call_v1":
+            tool_result = self.company_os.tool_call_workflow.run(
+                self.tasks[task["task_id"]],
+                workflow_input,
+            )
+            self.sync()
+            return self._tool_workflow_response(definition, tool_result)
         raise ValueError("unsupported workflow execution mode")
 
     def _github_workflow_response(self, definition, result) -> dict:
@@ -619,6 +697,21 @@ class CompanyApplicationService:
             "sandbox": result.sandbox,
             "knowledge": result.knowledge,
             "analysis": result.analysis,
+            "risk": result.risk,
+            "approval_required": result.approval_required,
+            "blocked": result.blocked,
+            "incident": to_plain(result.incident) if result.incident else None,
+        }
+
+    def _tool_workflow_response(self, definition, result) -> dict:
+        return {
+            "workflow": to_plain(definition),
+            "task": to_plain(result.task),
+            "output": result.output,
+            "outcome": result.outcome,
+            "tool": result.tool,
+            "tool_run": result.tool_run,
+            "approval": result.approval,
             "risk": result.risk,
             "approval_required": result.approval_required,
             "blocked": result.blocked,
@@ -2074,6 +2167,27 @@ class CompanyApplicationService:
                 self.company_os.workflows.get("github_project_analysis_v1"),
                 result,
             )
+        if workflow_run and workflow_run.workflow_id == "tool_call_v1":
+            if not task.approval_id:
+                raise ValueError("Tool Call task has no approval")
+            approval = to_plain(self.company_os.approvals.get(task.approval_id))
+            candidates = [
+                run
+                for run in self.tool_runs.values()
+                if run.task_id == task.task_id and run.approval_id == task.approval_id
+            ]
+            if not candidates:
+                raise ValueError("Tool Call task has no waiting Tool Run")
+            result = self.company_os.tool_call_workflow.resume_after_decision(
+                task,
+                approval,
+                to_plain(candidates[-1]),
+            )
+            self.sync()
+            return self._tool_workflow_response(
+                self.company_os.workflows.get("tool_call_v1"),
+                result,
+            )
         result = self.company_os.document_workflow.resume_after_approval(task)
         incident = None
         if result.blocked:
@@ -3088,6 +3202,11 @@ class CompanyApplicationService:
         self.company_os.github_project_analysis_workflow.set_proposal_registrar(self.register_github_absorption)
         self.company_os.quality_check_workflow.set_skill_executor(self._execute_workflow_skill)
         self.company_os.retrospective_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.tool_call_workflow.set_skill_executor(self._execute_workflow_skill)
+        self.company_os.tool_call_workflow.set_tool_requester(self.request_tool_run)
+        self.company_os.tool_call_workflow.set_tool_completer(self.complete_tool_run)
+        self.company_os.tool_call_workflow.set_tool_denier(self.deny_tool_run)
+        self.company_os.tool_call_workflow.set_tool_getter(self._get_tool)
 
     def _execute_workflow_skill(
         self,
@@ -3103,6 +3222,9 @@ class CompanyApplicationService:
             detail = run.get("error") or f"Skill run entered {run['status']}"
             raise PermissionError(f"{skill_id}: {detail}")
         return json.loads(run["result"])
+
+    def _get_tool(self, tool_id: str) -> dict:
+        return to_plain(self.company_os.tools.get(tool_id))
 
     def _execute_approved_workflow_skill(
         self,

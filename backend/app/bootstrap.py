@@ -59,6 +59,7 @@ from app.workflows.retrospective import RetrospectiveWorkflow
 from app.workflows.registry import WorkflowRegistry, default_workflows
 from app.workflows.skill_missing import SkillMissingWorkflow
 from app.workflows.task_planning import TaskPlanningWorkflow
+from app.workflows.tool_call import ToolCallWorkflow
 from app.workflows.traces import WorkflowTraceStore
 
 
@@ -96,6 +97,7 @@ class CompanyOS:
     github_project_analysis_workflow: GitHubProjectAnalysisWorkflow
     quality_check_workflow: QualityCheckWorkflow
     retrospective_workflow: RetrospectiveWorkflow
+    tool_call_workflow: ToolCallWorkflow
 
 
 def build_company_os(
@@ -268,6 +270,13 @@ def build_company_os(
         incidents=incident_store,
         traces=traces,
     )
+    tool_call_workflow = ToolCallWorkflow(
+        workflows=workflows,
+        audit=audit,
+        evaluations=evaluation_store,
+        incidents=incident_store,
+        traces=traces,
+    )
     return CompanyOS(
         agents=agents,
         skills=skills,
@@ -301,6 +310,7 @@ def build_company_os(
         github_project_analysis_workflow=github_project_analysis_workflow,
         quality_check_workflow=quality_check_workflow,
         retrospective_workflow=retrospective_workflow,
+        tool_call_workflow=tool_call_workflow,
     )
 
 

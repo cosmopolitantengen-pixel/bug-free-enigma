@@ -1164,6 +1164,83 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("task_count", json.loads(runs.json()[0]["result"]))
             self.assertGreaterEqual(len(tools.json()), 5)
 
+    def test_tool_call_workflow_resumes_after_sqlite_reload(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "tool_call_workflow.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            first.post(
+                "/tools",
+                json={
+                    "tool_id": "persistent_workflow_tool",
+                    "name": "Persistent Workflow Tool",
+                    "type": "internal",
+                    "description": "Prepare content after a persisted approval.",
+                    "action": "prepare_external_content",
+                    "permission_level": "L3_EXTERNAL_PREPARE",
+                    "risk_level": "medium",
+                    "requires_approval": True,
+                    "input_schema": {"topic": "string"},
+                    "output_schema": {"message": "string"},
+                    "enabled": True,
+                },
+            )
+            first.post(
+                "/agents",
+                json={
+                    "agent_id": "persistent_workflow_agent",
+                    "name": "Persistent Workflow Agent",
+                    "department": "QA",
+                    "role": "Resume approved Tool Workflows after restart.",
+                    "permissions": ["L0_READ", "L1_DRAFT", "L2_INTERNAL_WRITE", "L3_EXTERNAL_PREPARE"],
+                    "allowed_tools": ["persistent_workflow_tool"],
+                    "reports_to": "human_root",
+                    "risk_level": "low",
+                    "enabled": True,
+                },
+            )
+            waiting = first.post(
+                "/workflows/run",
+                json={
+                    "workflow_id": "tool_call_v1",
+                    "title": "Persistent Tool Call",
+                    "description": "Resume the same Tool Run after SQLite reload.",
+                    "input": {
+                        "tool_id": "persistent_workflow_tool",
+                        "actor_id": "persistent_workflow_agent",
+                        "tool_input": {"topic": "persistent launch"},
+                        "reason": "Prepare approved content after restart.",
+                    },
+                },
+            ).json()
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            second.post(
+                f"/approvals/{waiting['approval']['approval_id']}/approve",
+                json={"note": "Approve after reload."},
+            )
+            resumed = second.post(f"/tasks/{waiting['task']['task_id']}/resume")
+
+            third = TestClient(create_app(sqlite_path=db_path))
+            tasks = third.get("/tasks").json()
+            runs = third.get("/workflow-runs").json()
+            steps = third.get(f"/workflow-runs/{runs[0]['run_id']}/steps").json()
+            tool_runs = third.get("/tools/runs").json()
+            skill_runs = third.get("/skills/runs").json()
+            evaluations = third.get("/evaluations").json()
+
+            self.assertEqual(resumed.status_code, 200)
+            self.assertEqual(resumed.json()["outcome"], "completed")
+            self.assertEqual(tasks[0]["status"], "completed")
+            self.assertEqual(runs[0]["status"], "completed")
+            self.assertEqual(tool_runs[0]["status"], "completed")
+            self.assertEqual(tool_runs[0]["task_id"], tasks[0]["task_id"])
+            self.assertEqual(len(skill_runs), 3)
+            self.assertEqual(
+                [step["status"] for step in steps],
+                ["completed", "completed", "waiting_approval", "completed"],
+            )
+            self.assertIn("tool_call_v1", [record["subject_id"] for record in evaluations])
+
     def test_skill_runs_persist_through_sqlite(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "skill_runs.db")

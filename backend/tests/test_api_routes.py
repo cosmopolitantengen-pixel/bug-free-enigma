@@ -627,6 +627,206 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(self.client.get("/tasks").json(), [])
         self.assertEqual(self.client.get("/workflow-runs").json(), [])
 
+    def test_tool_call_workflow_completes_low_risk_tool_with_linked_evidence(self):
+        completed = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Inspect tasks through Tool Workflow",
+                "description": "Run a low-risk internal Tool through all controls.",
+                "input": {
+                    "tool_id": "task_manager_tool",
+                    "actor_id": "ceo_agent_v1",
+                    "tool_input": {"operation": "inspect"},
+                    "reason": "Inspect internal task state.",
+                },
+            },
+        )
+        payload = completed.json()
+        run = self.client.get("/workflow-runs").json()[-1]
+        steps = self.client.get(f"/workflow-runs/{run['run_id']}/steps").json()
+        skill_runs = [
+            item
+            for item in self.client.get("/skills/runs").json()
+            if item["task_id"] == payload["task"]["task_id"]
+        ]
+
+        self.assertEqual(completed.status_code, 200)
+        self.assertEqual(payload["outcome"], "completed")
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertEqual(payload["tool_run"]["status"], "completed")
+        self.assertEqual(payload["tool_run"]["task_id"], payload["task"]["task_id"])
+        self.assertFalse(payload["approval_required"])
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual([step["status"] for step in steps], ["completed"] * 3)
+        self.assertEqual(len(skill_runs), 3)
+
+    def test_tool_call_workflow_records_adapter_failure_without_control_block(self):
+        failed = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Fail invalid Tool input",
+                "description": "Adapter validation failure is an execution failure, not a policy block.",
+                "input": {
+                    "tool_id": "task_manager_tool",
+                    "actor_id": "ceo_agent_v1",
+                    "tool_input": {"operation": "get"},
+                    "reason": "Exercise deterministic adapter validation.",
+                },
+            },
+        )
+
+        self.assertEqual(failed.status_code, 200)
+        self.assertEqual(failed.json()["outcome"], "failed")
+        self.assertEqual(failed.json()["task"]["status"], "failed")
+        self.assertEqual(failed.json()["tool_run"]["status"], "failed")
+        self.assertFalse(failed.json()["blocked"])
+        self.assertIsNone(failed.json()["incident"])
+        self.assertEqual(self.client.get("/workflow-runs").json()[-1]["status"], "failed")
+
+    def test_tool_call_workflow_blocks_unauthorized_tool_pair_and_audits(self):
+        blocked = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Block unauthorized Tool",
+                "description": "Risk Agent cannot write Knowledge through an unassigned Tool.",
+                "input": {
+                    "tool_id": "knowledge_base_tool",
+                    "actor_id": "risk_agent_v1",
+                    "tool_input": {"operation": "write", "title": "No", "content": "No"},
+                    "reason": "Verify Tool authorization remains authoritative.",
+                },
+            },
+        )
+
+        self.assertEqual(blocked.status_code, 200)
+        self.assertEqual(blocked.json()["outcome"], "blocked")
+        self.assertEqual(blocked.json()["task"]["status"], "blocked")
+        self.assertEqual(blocked.json()["tool_run"]["status"], "blocked")
+        self.assertIsNotNone(blocked.json()["incident"])
+        self.assertEqual(len(self.client.get("/knowledge").json()), 0)
+        self.assertEqual(len(self.client.get("/skills/runs").json()), 3)
+
+    def test_tool_call_workflow_resumes_approved_tool_run(self):
+        self._register_workflow_approval_tool()
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Approved Tool Workflow",
+                "description": "Pause and resume one controlled Tool Run.",
+                "input": {
+                    "tool_id": "workflow_approval_tool",
+                    "actor_id": "workflow_approval_agent",
+                    "tool_input": {"topic": "launch"},
+                    "reason": "Prepare approved external content.",
+                },
+            },
+        ).json()
+        self.client.post(
+            f"/approvals/{waiting['approval']['approval_id']}/approve",
+            json={"note": "Approve the linked Tool Run."},
+        )
+        resumed = self.client.post(f"/tasks/{waiting['task']['task_id']}/resume")
+        run = self.client.get("/workflow-runs").json()[-1]
+        steps = self.client.get(f"/workflow-runs/{run['run_id']}/steps").json()
+
+        self.assertEqual(waiting["outcome"], "waiting_approval")
+        self.assertEqual(waiting["task"]["status"], "needs_approval")
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["outcome"], "completed")
+        self.assertEqual(resumed.json()["task"]["status"], "completed")
+        self.assertEqual(resumed.json()["tool_run"]["status"], "completed")
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(
+            [step["status"] for step in steps],
+            ["completed", "completed", "waiting_approval", "completed"],
+        )
+
+    def test_tool_call_workflow_enforces_rejection_without_executing_tool(self):
+        self._register_workflow_approval_tool()
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Rejected Tool Workflow",
+                "description": "Human rejection must close the waiting Tool Run.",
+                "input": {
+                    "tool_id": "workflow_approval_tool",
+                    "actor_id": "workflow_approval_agent",
+                    "tool_input": {"topic": "reject"},
+                    "reason": "Prepare content only when approved.",
+                },
+            },
+        ).json()
+        self.client.post(
+            f"/approvals/{waiting['approval']['approval_id']}/reject",
+            json={"note": "Do not execute this Tool."},
+        )
+        resumed = self.client.post(f"/tasks/{waiting['task']['task_id']}/resume")
+
+        self.assertEqual(resumed.status_code, 200)
+        self.assertEqual(resumed.json()["outcome"], "rejected")
+        self.assertEqual(resumed.json()["task"]["status"], "cancelled")
+        self.assertEqual(resumed.json()["tool_run"]["status"], "blocked")
+        self.assertIsNone(resumed.json()["tool_run"]["result"])
+        self.assertFalse(resumed.json()["blocked"])
+        self.assertEqual(self.client.get("/workflow-runs").json()[-1]["status"], "completed")
+
+    def test_tool_call_workflow_validates_references_before_task_creation(self):
+        response = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Unknown Tool",
+                "description": "Do not create an orphan Workflow task.",
+                "input": {
+                    "tool_id": "missing_tool",
+                    "actor_id": "ceo_agent_v1",
+                    "tool_input": {},
+                    "reason": "Validate references first.",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/workflow-runs").json(), [])
+
+    def _register_workflow_approval_tool(self):
+        self.client.post(
+            "/tools",
+            json={
+                "tool_id": "workflow_approval_tool",
+                "name": "Workflow Approval Tool",
+                "type": "internal",
+                "description": "Prepare controlled content after approval.",
+                "action": "prepare_external_content",
+                "permission_level": "L3_EXTERNAL_PREPARE",
+                "risk_level": "medium",
+                "requires_approval": True,
+                "input_schema": {"topic": "string"},
+                "output_schema": {"message": "string"},
+                "enabled": True,
+            },
+        )
+        self.client.post(
+            "/agents",
+            json={
+                "agent_id": "workflow_approval_agent",
+                "name": "Workflow Approval Agent",
+                "department": "QA",
+                "role": "Exercise approval-gated Tool Workflows.",
+                "permissions": ["L0_READ", "L1_DRAFT", "L2_INTERNAL_WRITE", "L3_EXTERNAL_PREPARE"],
+                "allowed_tools": ["workflow_approval_tool"],
+                "reports_to": "human_root",
+                "risk_level": "low",
+                "enabled": True,
+            },
+        )
+
     def test_quality_check_workflow_runs_quality_risk_and_audit_skills(self):
         checked = self.client.post(
             "/workflows/run",
@@ -730,20 +930,12 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("source task not found", response.json()["detail"])
         self.assertEqual(len(self.client.get("/tasks").json()), before)
 
-    def test_dedicated_workflow_rejects_generic_run_without_creating_task(self):
-        task_count = len(self.client.get("/tasks").json())
-        response = self.client.post(
-            "/workflows/run",
-            json={
-                "workflow_id": "tool_call_v1",
-                "title": "Wrong entrypoint",
-                "description": "Must use the controlled Tool Run endpoint.",
-            },
-        )
+    def test_all_v1_workflows_expose_the_common_native_runner(self):
+        workflows = self.client.get("/workflows").json()
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("POST /tools/runs/request", response.json()["detail"])
-        self.assertEqual(len(self.client.get("/tasks").json()), task_count)
+        self.assertEqual(len(workflows), 10)
+        self.assertTrue(all(item["execution_mode"] == "native" for item in workflows))
+        self.assertTrue(all(item["entrypoint"] == "POST /workflows/run" for item in workflows))
 
     def test_database_schema_reports_memory_and_sqlite_backends(self):
         memory_schema = self.client.get("/database/schema")

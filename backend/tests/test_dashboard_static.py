@@ -230,6 +230,7 @@ class DashboardStaticTests(unittest.TestCase):
         self.assertIn('value="agent_missing_v1"', index)
         self.assertIn('value="approval_v1"', index)
         self.assertIn('value="github_project_analysis_v1"', index)
+        self.assertIn('value="tool_call_v1"', index)
         self.assertIn("recent_workflow_steps", script)
         self.assertIn("/model-usage", script)
         self.assertIn("/models/generate", script)

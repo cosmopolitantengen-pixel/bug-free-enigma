@@ -46,7 +46,7 @@ A Workflow coordinates Agents, Skills, Tools, approvals, quality checks, audit l
 
 The Workflow Registry now contains all 10 V1 definitions. Every definition declares an ID, version, execution mode, entrypoint, ordered steps, responsible Agent, action, permission level, and optional Skill. Registration rejects non-contiguous steps, missing Agents or Skills, Agent permissions that do not exactly include the requested level, and unauthorized Agent/Skill pairs.
 
-`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `skill_missing_v1`, `agent_missing_v1`, `approval_v1`, `quality_check_v1`, `retrospective_v1`, and `github_project_analysis_v1`. Definitions backed by an existing controlled service expose that service as their dedicated entrypoint rather than pretending a no-op generic run completed real work.
+`GET /workflows` lists the catalog and `GET /workflows/{workflow_id}` returns one definition. `POST /workflows/run` is the common native runner for all 10 V1 Workflow definitions: `document_generation_v1`, `task_planning_v1`, `agent_collaboration_v1`, `skill_missing_v1`, `agent_missing_v1`, `approval_v1`, `quality_check_v1`, `retrospective_v1`, `github_project_analysis_v1`, and `tool_call_v1`.
 
 The document generation workflow writes one `WorkflowRun` and seven ordered `WorkflowStep` records:
 
@@ -94,6 +94,4 @@ The retrospective runner accepts an optional structured `input` object with `sou
 
 The GitHub project analysis runner accepts `repo_url`, `readme`, `license_name`, `maintenance_signal`, and an optional requesting Agent. It stores one task-scoped approval before any GitHub Analysis Skill executes. Approval metadata limits reuse to the two registered GitHub analysis steps in that Workflow task; live Agent/Skill authorization is still rechecked for every Skill Run. After approval, the Workflow treats README text as untrusted external content, runs three task-linked Skills, creates the existing absorption proposal, executes deterministic license/security sandbox checks, and registers only a passed analysis as Knowledge. A failed sandbox blocks the task and creates an Incident. Human rejection cancels the task without running Skills. The complete waiting and resumed state survives SQLite restart.
 
-The other catalog definitions point to their operational entrypoints:
-
-- Tool call: controlled Tool Run request and completion APIs
+The Tool Call runner accepts `tool_id`, `actor_id`, `tool_input`, and `reason`. It executes approval-request and risk Skills before routing the actual task-linked call through the authoritative Tool Runtime. Low-risk runs finish immediately; controlled runs pause the task and Workflow on the Tool Run approval and resume the same persisted run after a final decision. Human rejection closes the Tool Run without execution and cancels the task. Adapter validation errors produce `failed` task/Workflow state, while disabled, unauthorized, policy-blocked, or post-approval revalidation failures produce `blocked` state and Incidents. The Audit Skill runs for completed, failed, blocked, and rejected Tool outcomes.

@@ -76,7 +76,8 @@ The suite currently covers:
 - Tool registry bootstrap, low-risk internal adapter output, approval-gated Tool Run completion, knowledge/audit/database/filesystem adapters, failed adapter input, filesystem path boundary checks, disallowed/disabled Tool Run blocking, API exposure, dashboard mount points, and SQLite reload
 - Filesystem read external-content inspection for clean and instruction-risk source files
 - Workflow Run and Workflow Step creation, API exposure, dashboard summary, dashboard mount points, and SQLite reload
-- V1 Workflow catalog API/detail exposure, dedicated-entrypoint rejection without orphan tasks, and dashboard catalog rendering
+- V1 Workflow catalog API/detail exposure, all 10 common native entrypoints, and dashboard catalog rendering
+- Native Tool Call completion, adapter failure, authorization block, approval/rejection, post-approval revalidation, and SQLite restart continuation
 - Approval-gated document Workflow resume, non-waiting resume rejection, and dashboard resume controls
 - Model Gateway deterministic generation, model usage API exposure, dashboard summary, dashboard mount points, audit event creation, and SQLite reload
 - Budget Guard cost recording, over-budget blocking, dashboard summary, API exposure, and SQLite reload
