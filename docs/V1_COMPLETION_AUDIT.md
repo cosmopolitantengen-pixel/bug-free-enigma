@@ -45,7 +45,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 156 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 168 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
 - FastAPI application startup smoke check passes.
@@ -59,9 +59,8 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 These are not proven complete and must not be represented as delivered:
 
-1. Live embedding generation and retrieval wiring above the pgvector persistence boundary.
-2. Real model-provider adapters beyond the deterministic local gateway.
-3. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
-4. Production authentication/session hardening, secrets management, queue failure alerting, deployment automation, and automated browser-level end-to-end CI.
+1. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
+2. Production authentication/session hardening and managed secrets integration.
+3. Queue failure alerting, deployment automation, automated browser-level end-to-end CI, and provider-specific pricing/streaming policy.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

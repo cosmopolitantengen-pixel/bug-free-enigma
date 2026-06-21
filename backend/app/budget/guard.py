@@ -33,6 +33,24 @@ class BudgetGuard:
     def estimate_cost(self, tokens: int) -> float:
         return round(tokens * self.policy.cost_per_token, 6)
 
+    def max_output_tokens(self, prompt: str) -> int:
+        prompt_tokens = self._estimate_tokens(prompt)
+        if not self.policy.enabled:
+            return max(1, self.policy.max_tokens_per_call - prompt_tokens)
+        spent_tokens = sum(log.tokens for log in self._cost_logs if log.result == "recorded")
+        spent_cost = sum(log.amount for log in self._cost_logs if log.result == "recorded")
+        limits = [
+            self.policy.max_tokens_per_call - prompt_tokens,
+            self.policy.max_total_tokens - spent_tokens - prompt_tokens,
+        ]
+        if self.policy.cost_per_token > 0:
+            remaining_cost_tokens = int(
+                max(0, self.policy.max_estimated_cost - spent_cost)
+                / self.policy.cost_per_token
+            )
+            limits.append(remaining_cost_tokens - prompt_tokens)
+        return max(1, min(limits))
+
     def record_cost(
         self,
         source_type: str,

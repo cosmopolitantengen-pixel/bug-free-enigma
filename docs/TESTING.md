@@ -21,6 +21,8 @@
 - Workflow Run and Workflow Step trace persistence
 - Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem read boundaries, and adapter failure handling
 - Model Gateway usage and cost logging
+- OpenAI Responses and Embeddings request/response contracts through mocked HTTP transports
+- pgvector Knowledge indexing orchestration, semantic search, Root-only reindex, and lexical fallback
 - Budget Guard allowed and blocked model calls
 - Root-managed Budget Policy updates and SQLite reload
 - Incident creation, acknowledgement, resolution, and persistence

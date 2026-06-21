@@ -529,6 +529,11 @@ class PostgresStateStore:
                 (doc_id, _vector(embedding), _json(metadata or {})),
             )
 
+    def list_knowledge_embedding_doc_ids(self) -> set[str]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT doc_id FROM knowledge_embeddings").fetchall()
+        return {str(row[0]) for row in rows}
+
     def search_knowledge_embeddings(
         self, embedding: list[float], *, limit: int = 10
     ) -> list[dict[str, Any]]:

@@ -33,6 +33,7 @@ from app.incidents.store import IncidentStore
 from app.knowledge_base.store import KnowledgeBase
 from app.memory.store import MemoryStore
 from app.models.gateway import ModelGateway
+from app.models.providers import ModelProviderError
 from app.permissions.engine import PermissionEngine
 from app.safety.risk import RiskEngine
 from app.skills.registry import SkillRegistry
@@ -432,13 +433,51 @@ class DocumentGenerationWorkflow:
                 )
             )
             raise PermissionError(budget_check.reason)
-        response = self.models.generate(
-            prompt=prompt,
-            actor_id=actor_id,
-            purpose="document_generation",
-            task_id=task.task_id,
-            cost_per_token=self.budget.policy.cost_per_token,
-        )
+        try:
+            response = self.models.generate(
+                prompt=prompt,
+                actor_id=actor_id,
+                purpose="document_generation",
+                task_id=task.task_id,
+                cost_per_token=self.budget.policy.cost_per_token,
+                max_output_tokens=self.budget.max_output_tokens(prompt),
+            )
+        except ModelProviderError as exc:
+            cost_log = self.budget.record_cost(
+                source_type="model_usage",
+                source_id="provider_failed",
+                actor_id=actor_id,
+                task_id=task.task_id,
+                tokens=budget_check.estimated_tokens,
+                amount=0,
+                result="failed",
+                reason=str(exc),
+            )
+            self.audit.append(
+                AuditEvent(
+                    event_type="model_failed",
+                    actor_id=actor_id,
+                    action="generate_document",
+                    task_id=task.task_id,
+                    risk_level=RiskLevel.MEDIUM,
+                    approval_status=ApprovalStatus.NOT_REQUIRED,
+                    result="provider request failed",
+                    error=str(exc),
+                )
+            )
+            self.incidents.report(
+                Incident(
+                    title="Model provider request failed",
+                    description=str(exc),
+                    source_type="model_usage",
+                    source_id=cost_log.record_id,
+                    risk_level=RiskLevel.MEDIUM,
+                    task_id=task.task_id,
+                    actor_id=actor_id,
+                    recommendation="Check provider credentials, endpoint health, and model configuration before retrying.",
+                )
+            )
+            raise
         self.budget.record_cost(
             source_type="model_usage",
             source_id=response.usage.record_id,

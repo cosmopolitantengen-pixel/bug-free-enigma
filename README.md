@@ -29,7 +29,7 @@ This repository currently contains:
 - Unit tests in `backend/tests/`
 - A Next.js and TypeScript operations console in `apps/web/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend and web containers, the Next.js operations console, and service-level CI coverage are also present. Embedding-provider wiring and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend and web containers, the Next.js operations console, configurable OpenAI model and embedding providers, and service-level CI coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -61,6 +61,8 @@ For the PostgreSQL/pgvector stack, create `.env` from `.env.example`, replace th
 docker compose --env-file .env up --build
 ```
 
+Live providers are opt-in. Set `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` in `.env` to enable Responses API generation plus 1536-dimensional pgvector Knowledge indexing and semantic search. Without those settings, deterministic generation and lexical Knowledge search remain fully available.
+
 ## Local Operations Console
 
 Start the API, then run the Next.js console:
@@ -86,5 +88,5 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 1. Keep the core rules deterministic and well tested.
 2. Add queue failure alerts and operational worker metrics.
 3. Expand browser-level end-to-end coverage for the Next.js console.
-4. Wire live embedding and model providers through the existing gateways.
+4. Add additional provider adapters through the existing model and embedding gateways.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.

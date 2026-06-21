@@ -21,6 +21,7 @@ class NextDashboardTests(unittest.TestCase):
             "/dashboard/summary", "/system/integrity", "/workflows/run", "/approvals",
             "/incidents", "/schedules", "/scheduler/executions", "/audit-logs",
             "/database/schema",
+            "/models/providers", "/knowledge/embeddings/status",
         ]:
             self.assertIn(endpoint, console)
         self.assertIn("Loading operations data", console)

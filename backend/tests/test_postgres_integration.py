@@ -33,6 +33,7 @@ class PostgresIntegrationTests(unittest.TestCase):
         try:
             store.save_knowledge(doc)
             store.upsert_knowledge_embedding(doc.doc_id, embedding, {"test": True})
+            self.assertIn(doc.doc_id, store.list_knowledge_embedding_doc_ids())
             matches = store.search_knowledge_embeddings(embedding, limit=1)
 
             self.assertEqual(store.schema_version(), POSTGRES_SCHEMA_VERSION)

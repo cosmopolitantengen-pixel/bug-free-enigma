@@ -131,6 +131,8 @@ The production adapter lives at `backend/app/persistence/postgres_store.py`. It 
 2. PostgreSQL append-only triggers for audit logs and domain events.
 3. The `vector` extension plus 1536-dimensional knowledge embeddings and an HNSW cosine index.
 
+When `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai`, every newly persisted Knowledge document is embedded after its `knowledge_docs` row exists and then upserted into `knowledge_embeddings`. Semantic query vectors use the same 1536-dimensional contract. Model usage, cost, Audit, and failure Incidents are persisted through the normal application state transaction path; lexical search remains the fallback.
+
 The application selects this backend when `AI_COMPANY_OS_DATABASE_URL` or `DATABASE_URL` contains a PostgreSQL URL. The SQLite path and PostgreSQL URL are mutually exclusive.
 
 Use this environment variable to enable SQLite for the API:

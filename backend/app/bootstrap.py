@@ -42,7 +42,7 @@ from app.goals.store import GoalStore
 from app.incidents.store import IncidentStore
 from app.knowledge_base.store import KnowledgeBase
 from app.memory.store import MemoryStore
-from app.models.gateway import ModelGateway
+from app.models.gateway import ModelGateway, create_model_gateway
 from app.permissions.engine import PermissionEngine
 from app.reviews.store import ReviewStore
 from app.safety.risk import RiskEngine
@@ -126,6 +126,7 @@ def build_company_os(
     domain_events: list[DomainEvent] | None = None,
     scheduled_jobs: list[ScheduledJob] | None = None,
     scheduled_executions: list[ScheduledExecution] | None = None,
+    model_gateway: ModelGateway | None = None,
 ) -> CompanyOS:
     agents = AgentRegistry()
     for agent in default_agents():
@@ -155,7 +156,7 @@ def build_company_os(
     memory = MemoryStore(memory_records)
     knowledge = KnowledgeBase(knowledge_docs)
     evaluation_store = EvaluationStore(evaluations)
-    model_gateway = ModelGateway(model_usage)
+    active_model_gateway = model_gateway or create_model_gateway(model_usage)
     budget_guard = BudgetGuard(budget_policy, cost_logs)
     incident_store = IncidentStore(incidents)
     traces = WorkflowTraceStore(workflow_runs, workflow_steps)
@@ -186,7 +187,7 @@ def build_company_os(
         memory=memory,
         knowledge=knowledge,
         evaluations=evaluation_store,
-        models=model_gateway,
+        models=active_model_gateway,
         budget=budget_guard,
         incidents=incident_store,
         traces=traces,
@@ -288,7 +289,7 @@ def build_company_os(
         memory=memory,
         knowledge=knowledge,
         evaluations=evaluation_store,
-        models=model_gateway,
+        models=active_model_gateway,
         budget=budget_guard,
         incidents=incident_store,
         traces=traces,

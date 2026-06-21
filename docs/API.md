@@ -295,7 +295,9 @@ Authentication now supports local user registration, PBKDF2 password verificatio
 
 `GET /evaluations` returns Agent, Skill, and Workflow evaluation records. Every native Workflow writes deterministic Workflow evaluations, while successful Skill Runtime calls write their own Skill evaluations.
 
-`POST /models/generate` checks the Budget Guard, then runs a deterministic local model gateway call if allowed. Allowed calls record `ModelUsageRecord`, `CostLog`, and a `model_called` audit event. Blocked calls record a blocked `CostLog` plus a `model_blocked` audit event. `GET /model-usage` returns usage records with provider, model, actor, task, purpose, token estimates, and estimated cost.
+`POST /models/generate` checks the Budget Guard, then dispatches through the configured local or OpenAI provider. Allowed calls record `ModelUsageRecord`, `CostLog`, and a `model_called` audit event. Blocked calls record `model_blocked`; sanitized provider failures record `model_failed` plus an Incident. `GET /models/providers` exposes configured provider names and defaults without secrets. `GET /model-usage` returns usage records with provider, model, actor, task, purpose, token counts, and estimated cost.
+
+`POST /knowledge/search` combines pgvector semantic matches with lexical matches when an embedding provider and vector-capable PostgreSQL store are active. `GET /knowledge/embeddings/status` reports provider, model, dimensions, indexed count, and failed count without secrets. `POST /knowledge/embeddings/reindex` is restricted to `human_root`. Disabled or failed embeddings fall back to lexical search.
 
 `GET /budget/summary` returns the active local budget policy and current usage. `POST /budget/policy` lets Human Root update the active model budget policy and writes a `budget_policy_updated` audit event. Non-root attempts are blocked, audited, and incidented. `GET /cost-logs` returns recorded and blocked cost log records.
 

@@ -32,6 +32,8 @@ type DataSet = {
   health: ApiRecord;
   integrity: ApiRecord;
   schema: ApiRecord;
+  providers: ApiRecord;
+  embeddings: ApiRecord;
   tasks: ApiRecord[];
   approvals: ApiRecord[];
   incidents: ApiRecord[];
@@ -46,7 +48,7 @@ type DataSet = {
 };
 
 const EMPTY_DATA: DataSet = {
-  summary: {}, health: {}, integrity: {}, schema: {}, tasks: [], approvals: [], incidents: [],
+  summary: {}, health: {}, integrity: {}, schema: {}, providers: {}, embeddings: {}, tasks: [], approvals: [], incidents: [],
   schedules: [], executions: [], agents: [], skills: [], tools: [], workflows: [], audit: [], events: [],
 };
 
@@ -55,6 +57,8 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
   health: "/health",
   integrity: "/system/integrity",
   schema: "/database/schema",
+  providers: "/models/providers",
+  embeddings: "/knowledge/embeddings/status",
   tasks: "/tasks",
   approvals: "/approvals",
   incidents: "/incidents",
@@ -321,7 +325,7 @@ function GovernanceView({ data, mutate, notify, fail }: { data: DataSet; mutate:
 
 function SystemView({ data, apiDraft, setApiDraft, saveApiBase }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void }) {
   const migrations = (data.schema.migrations as ApiRecord[] | undefined) ?? [];
-  return <div className="view-stack"><section className="two-column work-layout"><Panel title="API connection" meta={text(data.health.status)}><form className="form-grid" onSubmit={saveApiBase}><Field label="API Base"><input value={apiDraft} onChange={(e) => setApiDraft(e.target.value)} /></Field><button className="button"><SlidersHorizontal />Apply connection</button></form></Panel><Panel title="Persistence" meta={text(data.schema.backend)}><div className="system-facts"><Fact label="Backend" value={text(data.schema.backend)} /><Fact label="Schema version" value={text(data.schema.schema_version)} /><Fact label="Integrity" value={text(data.integrity.status)} /><Fact label="Migration count" value={String(migrations.length)} /></div></Panel></section><Panel title="Schema migrations" meta={`${migrations.length} applied`}><EntityList items={migrations} empty="No database migrations reported." render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} /></Panel><div className="legacy-note"><FileClock /><div><strong>Legacy console retained</strong><span>The dependency-free dashboard remains in <code>apps/web_dashboard</code> during migration.</span></div></div></div>;
+  return <div className="view-stack"><section className="two-column work-layout"><Panel title="API connection" meta={text(data.health.status)}><form className="form-grid" onSubmit={saveApiBase}><Field label="API Base"><input value={apiDraft} onChange={(e) => setApiDraft(e.target.value)} /></Field><button className="button"><SlidersHorizontal />Apply connection</button></form></Panel><Panel title="Persistence" meta={text(data.schema.backend)}><div className="system-facts"><Fact label="Backend" value={text(data.schema.backend)} /><Fact label="Schema version" value={text(data.schema.schema_version)} /><Fact label="Integrity" value={text(data.integrity.status)} /><Fact label="Migration count" value={String(migrations.length)} /></div></Panel></section><Panel title="AI providers" meta={text(data.providers.default_provider)}><div className="system-facts"><Fact label="Model provider" value={text(data.providers.default_provider)} /><Fact label="Default model" value={text(data.providers.default_model)} /><Fact label="Embeddings" value={data.embeddings.enabled ? "enabled" : "disabled"} /><Fact label="Embedding model" value={text(data.embeddings.default_model, "not configured")} /><Fact label="Vector dimensions" value={text(data.embeddings.dimensions)} /><Fact label="Indexed documents" value={text(data.embeddings.indexed_documents, "0")} /><Fact label="Failed documents" value={text(data.embeddings.failed_documents, "0")} /><Fact label="Vector store" value={data.embeddings.vector_store ? "connected" : "not connected"} /></div></Panel><Panel title="Schema migrations" meta={`${migrations.length} applied`}><EntityList items={migrations} empty="No database migrations reported." render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} /></Panel><div className="legacy-note"><FileClock /><div><strong>Legacy console retained</strong><span>The dependency-free dashboard remains available at <code>apps/web_dashboard</code>.</span></div></div></div>;
 }
 
 function Panel({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) { return <section className="panel"><div className="panel-heading"><div><h2>{title}</h2>{meta && <span>{meta}</span>}</div></div>{children}</section>; }

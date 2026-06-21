@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 class StateStore(Protocol):
@@ -60,3 +60,19 @@ class StateStore(Protocol):
         actor_id: str,
         safety_backup_id: str,
     ) -> dict[str, int]: ...
+
+
+@runtime_checkable
+class KnowledgeVectorStore(Protocol):
+    def list_knowledge_embedding_doc_ids(self) -> set[str]: ...
+
+    def upsert_knowledge_embedding(
+        self,
+        doc_id: str,
+        embedding: list[float],
+        metadata: dict[str, Any] | None = None,
+    ) -> None: ...
+
+    def search_knowledge_embeddings(
+        self, embedding: list[float], *, limit: int = 10
+    ) -> list[dict[str, Any]]: ...

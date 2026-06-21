@@ -126,8 +126,8 @@ class ModelGenerateRequest(BaseModel):
     actor_id: str
     purpose: str = "manual_generation"
     task_id: str | None = None
-    model_name: str = "deterministic_mock_v1"
-    provider: str = "local"
+    model_name: str | None = None
+    provider: str | None = None
 
 
 class IncidentUpdateRequest(BaseModel):
@@ -296,6 +296,16 @@ class KnowledgeWriteRequest(BaseModel):
     title: str
     content: str
     source_task_id: str | None = None
+
+
+class KnowledgeSearchRequest(BaseModel):
+    query: str
+    actor_id: str = "memory_agent_v1"
+    limit: int = Field(default=10, ge=1, le=100)
+
+
+class KnowledgeReindexRequest(BaseModel):
+    actor_id: str = "human_root"
 
 
 class SkillSearchRequest(BaseModel):

@@ -103,7 +103,7 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector knowledge storage, structured logs, Compose services, Redis/RQ scheduler workers, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
+Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 
@@ -151,7 +151,7 @@ Current interim implementation:
 - Current first Tool layer: task manager, knowledge base, audit read, external API, and code execution tool definitions.
 - Safe internal adapters exist for task manager, knowledge base, audit read, database read, and workspace-only filesystem read tools.
 - Dangerous tool adapters are disabled by default and only simulated in the first implementation.
-- Replace deterministic Model Gateway with real provider adapters only after budget, privacy, and approval gates are covered.
+- Add provider-specific pricing policies, streaming, and further model adapters without bypassing budget, privacy, or Audit controls.
 - Add file, document, GitHub, and database tools.
 - Add browser and computer-control adapters only behind strict permission and approval gates.
 - Expand GitHub absorber from metadata-only analysis toward connector-backed ingestion after license, security, sandbox, and human approval checks remain covered.

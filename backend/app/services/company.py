@@ -12,8 +12,10 @@ from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, 
 from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, SkillRunStatus, TaskStatus, ToolRunStatus
 from app.core.models import ActionRequest, AuditEvent, EvaluationRecord, KnowledgeDoc, MemoryRecord, RiskAssessment, Task, utc_now
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
+from app.knowledge_base.embeddings import EmbeddingGateway, EmbeddingProviderError, EmbeddingResult, create_embedding_gateway
+from app.models.providers import ModelProviderError
 from app.observability import build_structured_logs
-from app.persistence.store import StateStore
+from app.persistence.store import KnowledgeVectorStore, StateStore
 from app.services.serializers import to_plain
 from app.skills.runtime import SkillRuntimeContext, SkillRuntimeError, execute_skill_adapter
 from app.tools.adapters import ToolAdapterContext, ToolAdapterError, execute_tool_adapter
@@ -35,6 +37,7 @@ class CompanyApplicationService:
     company_os: CompanyOS = field(default_factory=build_company_os)
     tasks: dict[str, Task] = field(default_factory=dict)
     persistence: StateStore | None = None
+    embeddings: EmbeddingGateway = field(default_factory=create_embedding_gateway)
     auth: AuthService = field(default_factory=AuthService)
     skill_proposals: dict[str, SkillProposal] = field(default_factory=dict)
     agent_proposals: dict[str, AgentProposal] = field(default_factory=dict)
@@ -42,11 +45,15 @@ class CompanyApplicationService:
     github_absorptions: dict[str, GitHubAbsorption] = field(default_factory=dict)
     tool_runs: dict[str, ToolRun] = field(default_factory=dict)
     skill_runs: dict[str, SkillRun] = field(default_factory=dict)
+    _vector_store: KnowledgeVectorStore | None = field(default=None, init=False, repr=False)
+    _indexed_knowledge_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _failed_embedding_ids: set[str] = field(default_factory=set, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._bind_workflow_skill_runtime()
         if self.persistence is None:
             return
+        active_model_gateway = self.company_os.models
         loaded_users = self.persistence.load_users()
         loaded_tasks = self.persistence.load_tasks()
         loaded_approvals = self.persistence.load_approvals()
@@ -116,10 +123,19 @@ class CompanyApplicationService:
             domain_events=loaded_domain_events,
             scheduled_jobs=loaded_scheduled_jobs,
             scheduled_executions=loaded_scheduled_executions,
+            model_gateway=active_model_gateway.with_usage(loaded_model_usage),
         )
         self._bind_workflow_skill_runtime()
+        self._configure_knowledge_vectors()
 
     def sync(self) -> None:
+        if self.persistence is None:
+            return
+        self._sync_persistence_state()
+        if self._index_missing_knowledge():
+            self._sync_persistence_state()
+
+    def _sync_persistence_state(self) -> None:
         if self.persistence is None:
             return
         self.persistence.sync_state(
@@ -194,6 +210,8 @@ class CompanyApplicationService:
             self._incident_integrity_check(),
             self._approval_integrity_check(),
             self._budget_integrity_check(),
+            self._model_provider_integrity_check(),
+            self._embedding_provider_integrity_check(),
             self._scheduler_integrity_check(),
         ]
         issue_count = len([check for check in checks if check["status"] in {"warning", "critical"}])
@@ -723,6 +741,9 @@ class CompanyApplicationService:
 
     def list_model_usage(self) -> list[dict]:
         return [to_plain(record) for record in self.company_os.models.list_usage()]
+
+    def model_provider_status(self) -> dict:
+        return self.company_os.models.provider_status()
 
     def list_cost_logs(self) -> list[dict]:
         return [to_plain(record) for record in self.company_os.budget.list_cost_logs()]
@@ -1751,8 +1772,8 @@ class CompanyApplicationService:
         actor_id: str,
         purpose: str,
         task_id: str | None = None,
-        model_name: str = "deterministic_mock_v1",
-        provider: str = "local",
+        model_name: str | None = None,
+        provider: str | None = None,
     ) -> dict:
         self.company_os.agents.get(actor_id)
         budget_check = self.company_os.budget.check_model_call(prompt, purpose)
@@ -1797,15 +1818,53 @@ class CompanyApplicationService:
                 "incident": to_plain(incident),
                 "blocked": True,
             }
-        response = self.company_os.models.generate(
-            prompt=prompt,
-            actor_id=actor_id,
-            purpose=purpose,
-            task_id=task_id,
-            model_name=model_name,
-            provider=provider,
-            cost_per_token=self.company_os.budget.policy.cost_per_token,
-        )
+        try:
+            response = self.company_os.models.generate(
+                prompt=prompt,
+                actor_id=actor_id,
+                purpose=purpose,
+                task_id=task_id,
+                model_name=model_name,
+                provider=provider,
+                cost_per_token=self.company_os.budget.policy.cost_per_token,
+                max_output_tokens=self.company_os.budget.max_output_tokens(prompt),
+            )
+        except ModelProviderError as exc:
+            cost_log = self.company_os.budget.record_cost(
+                source_type="model_usage",
+                source_id="provider_failed",
+                actor_id=actor_id,
+                task_id=task_id,
+                tokens=budget_check.estimated_tokens,
+                amount=0,
+                result="failed",
+                reason=str(exc),
+            )
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type="model_failed",
+                    actor_id=actor_id,
+                    action=purpose,
+                    task_id=task_id,
+                    risk_level=RiskLevel.MEDIUM,
+                    approval_status=ApprovalStatus.NOT_REQUIRED,
+                    result="provider request failed",
+                    error=str(exc),
+                    model_name=model_name,
+                )
+            )
+            self._report_incident(
+                title="Model provider request failed",
+                description=str(exc),
+                source_type="model_usage",
+                source_id=cost_log.record_id,
+                risk_level=RiskLevel.MEDIUM,
+                task_id=task_id,
+                actor_id=actor_id,
+                recommendation="Check provider credentials, endpoint health, and model configuration before retrying.",
+            )
+            self.sync()
+            raise
         cost_log = self.company_os.budget.record_cost(
             source_type="model_usage",
             source_id=response.usage.record_id,
@@ -2477,6 +2536,34 @@ class CompanyApplicationService:
     def list_knowledge(self) -> list[dict]:
         return [to_plain(doc) for doc in self.company_os.knowledge.list()]
 
+    def embedding_status(self) -> dict:
+        return {
+            **self.embeddings.status(),
+            "vector_store": self._vector_store is not None,
+            "indexed_documents": len(self._indexed_knowledge_ids),
+            "failed_documents": len(self._failed_embedding_ids),
+        }
+
+    def search_knowledge(
+        self,
+        query: str,
+        actor_id: str = "memory_agent_v1",
+        limit: int = 10,
+    ) -> list[dict]:
+        clean_query = query.strip()
+        if not clean_query:
+            raise ValueError("knowledge query is required")
+        if limit < 1 or limit > 100:
+            raise ValueError("limit must be between 1 and 100")
+        if actor_id != "human_root":
+            self.company_os.agents.get(actor_id)
+        lexical = self.company_os.knowledge.lexical_search(clean_query)
+        semantic = self._semantic_knowledge_search(clean_query, actor_id, None, limit)
+        docs = self._merge_knowledge(semantic or [], lexical)[:limit]
+        if self.persistence is not None:
+            self._sync_persistence_state()
+        return [to_plain(doc) for doc in docs]
+
     def list_evaluations(self) -> list[dict]:
         return [to_plain(record) for record in self.company_os.evaluations.list()]
 
@@ -2484,6 +2571,16 @@ class CompanyApplicationService:
         doc = self.company_os.knowledge.write(KnowledgeDoc(title=title, content=content, source_task_id=source_task_id))
         self.sync()
         return to_plain(doc)
+
+    def reindex_knowledge(self, actor_id: str = "human_root") -> dict:
+        if actor_id != "human_root":
+            raise PermissionError("only human_root can rebuild knowledge embeddings")
+        self._failed_embedding_ids.clear()
+        self._indexed_knowledge_ids.clear()
+        changed = self._index_missing_knowledge()
+        if self.persistence is not None and changed:
+            self._sync_persistence_state()
+        return self.embedding_status()
 
     def list_task_reviews(self, task_id: str | None = None, reviewer_agent: str | None = None) -> list[dict]:
         return [to_plain(review) for review in self.company_os.reviews.list(task_id, reviewer_agent)]
@@ -3208,6 +3305,253 @@ class CompanyApplicationService:
             ],
         }
 
+    def _configure_knowledge_vectors(self) -> None:
+        if (
+            not self.embeddings.enabled
+            or self.persistence is None
+            or not isinstance(self.persistence, KnowledgeVectorStore)
+        ):
+            self.company_os.knowledge.configure_semantic_search(None)
+            return
+        self._vector_store = self.persistence
+        self._indexed_knowledge_ids = self._vector_store.list_knowledge_embedding_doc_ids()
+        self.company_os.knowledge.configure_semantic_search(
+            lambda query: self._semantic_knowledge_search(
+                query, "memory_agent_v1", None, 10
+            )
+        )
+
+    def _index_missing_knowledge(self) -> bool:
+        if self._vector_store is None or not self.embeddings.enabled:
+            return False
+        changed = False
+        for doc in self.company_os.knowledge.list():
+            if doc.doc_id in self._indexed_knowledge_ids or doc.doc_id in self._failed_embedding_ids:
+                continue
+            source = f"{doc.title}\n\n{doc.content}"
+            budget_check = self.company_os.budget.check_model_call(
+                source, "knowledge_embedding"
+            )
+            if not budget_check.allowed:
+                self._record_embedding_failure(
+                    event_type="embedding_blocked",
+                    actor_id="memory_agent_v1",
+                    task_id=doc.source_task_id,
+                    source_id=doc.doc_id,
+                    reason=budget_check.reason,
+                    tokens=budget_check.estimated_tokens,
+                    blocked=True,
+                )
+                self._failed_embedding_ids.add(doc.doc_id)
+                changed = True
+                continue
+            try:
+                result = self.embeddings.embed(source)
+                self._vector_store.upsert_knowledge_embedding(
+                    doc.doc_id,
+                    result.values,
+                    {
+                        "title": doc.title,
+                        "source_task_id": doc.source_task_id,
+                        "provider": result.provider,
+                        "model": result.model_name,
+                    },
+                )
+            except Exception as exc:
+                reason = self._provider_error(exc, "embedding index failed")
+                self._record_embedding_failure(
+                    event_type="embedding_failed",
+                    actor_id="knowledge_agent_v1",
+                    task_id=doc.source_task_id,
+                    source_id=doc.doc_id,
+                    reason=reason,
+                    tokens=budget_check.estimated_tokens,
+                    blocked=False,
+                )
+                self._failed_embedding_ids.add(doc.doc_id)
+                changed = True
+                continue
+            self._record_embedding_usage(
+                result,
+                actor_id="memory_agent_v1",
+                task_id=doc.source_task_id,
+                purpose="knowledge_embedding",
+                event_type="knowledge_embedding_indexed",
+                output_ref=doc.doc_id,
+            )
+            self._indexed_knowledge_ids.add(doc.doc_id)
+            changed = True
+        return changed
+
+    def _semantic_knowledge_search(
+        self,
+        query: str,
+        actor_id: str,
+        task_id: str | None,
+        limit: int,
+    ) -> list[KnowledgeDoc] | None:
+        if self._vector_store is None or not self.embeddings.enabled:
+            return None
+        budget_check = self.company_os.budget.check_model_call(
+            query, "knowledge_query_embedding"
+        )
+        if not budget_check.allowed:
+            self._record_embedding_failure(
+                event_type="embedding_blocked",
+                actor_id=actor_id,
+                task_id=task_id,
+                source_id="knowledge_query",
+                reason=budget_check.reason,
+                tokens=budget_check.estimated_tokens,
+                blocked=True,
+            )
+            return None
+        try:
+            result = self.embeddings.embed(query)
+            matches = self._vector_store.search_knowledge_embeddings(
+                result.values, limit=limit
+            )
+        except Exception as exc:
+            self._record_embedding_failure(
+                event_type="embedding_failed",
+                actor_id=actor_id,
+                task_id=task_id,
+                source_id="knowledge_query",
+                reason=self._provider_error(exc, "embedding query failed"),
+                tokens=budget_check.estimated_tokens,
+                blocked=False,
+            )
+            return None
+        doc_by_id = {doc.doc_id: doc for doc in self.company_os.knowledge.list()}
+        docs = [
+            doc_by_id[match["doc_id"]]
+            for match in matches
+            if float(match.get("score", 0)) >= 0.65 and match["doc_id"] in doc_by_id
+        ]
+        result_ids = ",".join(doc.doc_id for doc in docs)
+        self._record_embedding_usage(
+            result,
+            actor_id=actor_id,
+            task_id=task_id,
+            purpose="knowledge_query_embedding",
+            event_type="knowledge_embedding_searched",
+            output_ref=self.company_os.models.fingerprint(result_ids, "matches"),
+        )
+        return docs
+
+    def _record_embedding_usage(
+        self,
+        result: EmbeddingResult,
+        *,
+        actor_id: str,
+        task_id: str | None,
+        purpose: str,
+        event_type: str,
+        output_ref: str,
+    ) -> None:
+        usage = self.company_os.models.record_usage(
+            model_name=result.model_name,
+            provider=result.provider,
+            actor_id=actor_id,
+            task_id=task_id,
+            purpose=purpose,
+            prompt_tokens=result.input_tokens,
+            completion_tokens=0,
+            total_tokens=result.input_tokens,
+            cost_per_token=self.company_os.budget.policy.cost_per_token,
+            input_ref=result.input_ref,
+            output_ref=output_ref,
+        )
+        self.company_os.budget.record_cost(
+            source_type="model_usage",
+            source_id=usage.record_id,
+            actor_id=actor_id,
+            task_id=task_id,
+            tokens=usage.total_tokens,
+            amount=usage.estimated_cost,
+            result="recorded",
+            reason=purpose,
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type=event_type,
+                actor_id=actor_id,
+                action=purpose,
+                task_id=task_id,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result="embedding usage recorded",
+                input_ref=result.input_ref,
+                output_ref=output_ref,
+                model_name=result.model_name,
+            )
+        )
+
+    def _record_embedding_failure(
+        self,
+        *,
+        event_type: str,
+        actor_id: str,
+        task_id: str | None,
+        source_id: str,
+        reason: str,
+        tokens: int,
+        blocked: bool,
+    ) -> None:
+        cost_log = self.company_os.budget.record_cost(
+            source_type="model_usage",
+            source_id=source_id,
+            actor_id=actor_id,
+            task_id=task_id,
+            tokens=tokens,
+            amount=0,
+            result="blocked" if blocked else "failed",
+            reason=reason,
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type=event_type,
+                actor_id=actor_id,
+                action="knowledge_embedding",
+                task_id=task_id,
+                risk_level=RiskLevel.MEDIUM,
+                approval_status=(
+                    ApprovalStatus.BLOCKED if blocked else ApprovalStatus.NOT_REQUIRED
+                ),
+                result=reason,
+                input_ref=source_id,
+                error=None if blocked else reason,
+            )
+        )
+        self._report_incident(
+            title="Knowledge embedding was blocked" if blocked else "Knowledge embedding failed",
+            description=reason,
+            source_type="model_usage",
+            source_id=cost_log.record_id,
+            risk_level=RiskLevel.MEDIUM,
+            task_id=task_id,
+            actor_id=actor_id,
+            recommendation="Review provider health, embedding configuration, and budget policy; lexical search remains available.",
+        )
+
+    @staticmethod
+    def _provider_error(exc: Exception, fallback: str) -> str:
+        if isinstance(exc, EmbeddingProviderError):
+            return str(exc)
+        return f"{fallback}: {exc.__class__.__name__}"
+
+    @staticmethod
+    def _merge_knowledge(
+        primary: list[KnowledgeDoc], secondary: list[KnowledgeDoc]
+    ) -> list[KnowledgeDoc]:
+        merged: list[KnowledgeDoc] = []
+        seen: set[str] = set()
+        for doc in [*primary, *secondary]:
+            if doc.doc_id not in seen:
+                merged.append(doc)
+                seen.add(doc.doc_id)
+        return merged
+
     def _report_incident(
         self,
         title: str,
@@ -3724,6 +4068,41 @@ class CompanyApplicationService:
             "name": "budget_policy",
             "status": status,
             "message": message,
+        }
+
+    def _model_provider_integrity_check(self) -> dict:
+        status = self.company_os.models.provider_status()
+        provider = str(status["default_provider"])
+        return {
+            "name": "model_provider",
+            "status": "ok",
+            "message": (
+                "The deterministic local model provider is active."
+                if provider == "local"
+                else f"The {provider} model provider is configured."
+            ),
+            "details": status,
+        }
+
+    def _embedding_provider_integrity_check(self) -> dict:
+        status = self.embedding_status()
+        if not status["enabled"]:
+            check_status = "skipped"
+            message = "Semantic embeddings are disabled; Knowledge uses lexical search."
+        elif not status["vector_store"]:
+            check_status = "critical"
+            message = "An embedding provider is enabled without a vector-capable persistence backend."
+        elif status["failed_documents"]:
+            check_status = "warning"
+            message = f"{status['failed_documents']} Knowledge documents failed embedding."
+        else:
+            check_status = "ok"
+            message = f"Semantic embeddings are active with {status['indexed_documents']} indexed documents."
+        return {
+            "name": "embedding_provider",
+            "status": check_status,
+            "message": message,
+            "details": status,
         }
 
     def _scheduler_integrity_check(self) -> dict:

@@ -7,7 +7,7 @@ The deterministic core can run in memory or on SQLite. PostgreSQL/pgvector is th
 1. FastAPI backend
 2. SQLite local persistence
 3. PostgreSQL persistence (implemented)
-4. pgvector knowledge search (implemented at the persistence boundary)
+4. pgvector Knowledge indexing and semantic search (implemented)
 5. Docker Compose (implemented for web, backend, PostgreSQL, and Redis)
 6. Redis worker queue (implemented for scheduled execution)
 7. Next.js operations console (implemented)
@@ -35,6 +35,8 @@ docker compose --env-file .env up --build
 ```
 
 Create `.env` from `.env.example` and replace the default database password first. The operations console is exposed on `http://localhost:3000` and the API on `http://localhost:8000` by default. Compose also starts the scheduler dispatcher and RQ worker. Set `NEXT_PUBLIC_API_BASE` to the browser-reachable API origin before building for a remote deployment.
+
+Live provider calls remain disabled until `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` are configured. The same provider settings are passed to the API, scheduler dispatcher, and worker so scheduled Workflows use the same controlled gateways. Keep the API key in deployment secrets, never in the committed `.env.example` or image layers.
 
 The optional PostgreSQL integration test requires a dedicated database because it applies migrations and writes a knowledge fixture:
 

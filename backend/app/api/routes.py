@@ -21,6 +21,8 @@ from app.api.schemas import (
     ImprovementProposalCreateRequest,
     IncidentUpdateRequest,
     KnowledgeWriteRequest,
+    KnowledgeSearchRequest,
+    KnowledgeReindexRequest,
     LoginRequest,
     MemoryWriteRequest,
     ModelGenerateRequest,
@@ -47,6 +49,7 @@ from app.api.schemas import (
     WorkflowRunRequest,
 )
 from app.core.enums import ApprovalStatus
+from app.models.providers import ModelProviderError
 from app.services.company import CompanyApplicationService
 
 
@@ -663,6 +666,14 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="agent not found") from exc
+        except ModelProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/models/providers")
+    def model_provider_status() -> dict:
+        return service.model_provider_status()
 
     @router.post("/workflows/run")
     def run_workflow(payload: WorkflowRunRequest) -> dict:
@@ -858,6 +869,26 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     @router.post("/knowledge")
     def write_knowledge(payload: KnowledgeWriteRequest) -> dict:
         return service.write_knowledge(payload.title, payload.content, payload.source_task_id)
+
+    @router.post("/knowledge/search")
+    def search_knowledge(payload: KnowledgeSearchRequest) -> list[dict]:
+        try:
+            return service.search_knowledge(payload.query, payload.actor_id, payload.limit)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="agent not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.get("/knowledge/embeddings/status")
+    def embedding_status() -> dict:
+        return service.embedding_status()
+
+    @router.post("/knowledge/embeddings/reindex")
+    def reindex_knowledge(payload: KnowledgeReindexRequest) -> dict:
+        try:
+            return service.reindex_knowledge(payload.actor_id)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @router.get("/evaluations")
     def list_evaluations() -> list[dict]:
