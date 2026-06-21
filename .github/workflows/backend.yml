@@ -22,9 +22,19 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
 
     env:
       AI_COMPANY_OS_TEST_POSTGRES_URL: postgresql://ai_company_os:test-password@localhost:5432/ai_company_os_test
+      AI_COMPANY_OS_TEST_REDIS_URL: redis://localhost:6379/0
       PYTHONDONTWRITEBYTECODE: "1"
 
     steps:

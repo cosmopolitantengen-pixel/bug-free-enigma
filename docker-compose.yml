@@ -47,6 +47,37 @@ services:
       retries: 12
     restart: unless-stopped
 
+  scheduler-dispatcher:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.scheduler.dispatcher"]
+    environment:
+      AI_COMPANY_OS_DATABASE_URL: postgresql://${POSTGRES_USER:-ai_company_os}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ai_company_os}
+      AI_COMPANY_OS_REDIS_URL: redis://redis:6379/0
+      AI_COMPANY_OS_SCHEDULER_POLL_SECONDS: ${SCHEDULER_POLL_SECONDS:-5}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["rq", "worker", "--url", "redis://redis:6379/0", "ai-company-os-scheduler"]
+    environment:
+      AI_COMPANY_OS_DATABASE_URL: postgresql://${POSTGRES_USER:-ai_company_os}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-ai_company_os}
+      AI_COMPANY_OS_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   redis-data:

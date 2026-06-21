@@ -1502,6 +1502,24 @@ class CompanyApplicationService:
             for execution in self.company_os.scheduler.list_executions(schedule_id)
         ]
 
+    def list_due_scheduled_jobs(
+        self,
+        now: datetime | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        if limit <= 0 or limit > 100:
+            raise ValueError("scheduler due-job limit must be between 1 and 100")
+        tick_time = self._aware_utc(now or utc_now(), "now")
+        due_jobs = sorted(
+            (
+                job
+                for job in self.company_os.scheduler.list(status=ScheduleStatus.ACTIVE.value)
+                if job.next_run_at <= tick_time
+            ),
+            key=lambda item: (item.next_run_at, item.schedule_id),
+        )[:limit]
+        return [to_plain(job) for job in due_jobs]
+
     def create_scheduled_job(
         self,
         name: str,
@@ -1600,14 +1618,11 @@ class CompanyApplicationService:
         if limit <= 0 or limit > 100:
             raise ValueError("scheduler tick limit must be between 1 and 100")
         tick_time = self._aware_utc(now or utc_now(), "now")
-        due_jobs = sorted(
-            (
-                job
-                for job in self.company_os.scheduler.list(status=ScheduleStatus.ACTIVE.value)
-                if job.next_run_at <= tick_time
-            ),
-            key=lambda item: (item.next_run_at, item.schedule_id),
-        )[:limit]
+        due_job_ids = [
+            item["schedule_id"]
+            for item in self.list_due_scheduled_jobs(tick_time, limit)
+        ]
+        due_jobs = [self.company_os.scheduler.get(schedule_id) for schedule_id in due_job_ids]
         executions = [
             self._execute_scheduled_job(job, actor_id, tick_time)
             for job in due_jobs
@@ -1631,6 +1646,67 @@ class CompanyApplicationService:
             "due_count": len(due_jobs),
             "executed_count": len(executions),
             "executions": [to_plain(execution) for execution in executions],
+        }
+
+    def execute_queued_schedule(
+        self,
+        schedule_id: str,
+        expected_next_run_at: str,
+        actor_id: str = "human_root",
+        now: datetime | None = None,
+    ) -> dict:
+        if self.persistence is None:
+            raise ValueError("queued schedule execution requires durable persistence")
+        if actor_id != "human_root":
+            raise ValueError("only human_root can execute queued schedules")
+        expected = self._aware_utc(
+            datetime.fromisoformat(expected_next_run_at),
+            "expected_next_run_at",
+        )
+        execution_time = self._aware_utc(now or utc_now(), "now")
+        job = self.company_os.scheduler.get(schedule_id)
+        if job.status != ScheduleStatus.ACTIVE or job.next_run_at != expected:
+            return {
+                "schedule_id": schedule_id,
+                "status": "skipped",
+                "reason": "schedule state no longer matches the queued delivery",
+                "execution": None,
+            }
+        if job.next_run_at > execution_time:
+            return {
+                "schedule_id": schedule_id,
+                "status": "skipped",
+                "reason": "schedule is not due yet",
+                "execution": None,
+            }
+
+        execution_token = f"{schedule_id}:{expected.isoformat()}"
+        execution = self._execute_scheduled_job(
+            job,
+            actor_id,
+            execution_time,
+            execution_token=execution_token,
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="scheduler_worker_execution",
+                actor_id=actor_id,
+                action="execute_queued_schedule",
+                task_id=job.payload.get("task_id"),
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=execution.status.value,
+                input_ref=execution_token,
+                output_ref=execution.execution_id,
+                error=execution.error,
+            )
+        )
+        self.sync()
+        return {
+            "schedule_id": schedule_id,
+            "status": "executed",
+            "reason": None,
+            "execution": to_plain(execution),
         }
 
     def acknowledge_incident(self, incident_id: str, actor_id: str, note: str | None = None) -> dict:
@@ -1978,8 +2054,31 @@ class CompanyApplicationService:
             "incident": to_plain(incident) if incident else None,
         }
 
-    def create_task(self, title: str, description: str, user_id: str = "human_root") -> dict:
-        task = Task(title=title, description=description, user_id=user_id)
+    def create_task(
+        self,
+        title: str,
+        description: str,
+        user_id: str = "human_root",
+        task_id: str | None = None,
+    ) -> dict:
+        if task_id is not None and task_id in self.tasks:
+            existing = self.tasks[task_id]
+            if (
+                existing.title != title
+                or existing.description != description
+                or existing.user_id != user_id
+            ):
+                raise ValueError("task_id already exists with different task input")
+            return to_plain(existing)
+        if task_id is None:
+            task = Task(title=title, description=description, user_id=user_id)
+        else:
+            task = Task(
+                title=title,
+                description=description,
+                user_id=user_id,
+                task_id=task_id,
+            )
         self.tasks[task.task_id] = task
         self.sync()
         return to_plain(task)
@@ -3373,23 +3472,30 @@ class CompanyApplicationService:
         job: ScheduledJob,
         actor_id: str,
         now: datetime,
+        execution_token: str | None = None,
     ) -> ScheduledExecution:
         output_ref = None
         error = None
         status = ScheduleExecutionStatus.COMPLETED
         try:
             if job.action == ScheduleAction.CREATE_TASK:
+                deterministic_task_id = None
+                if execution_token is not None:
+                    digest = hashlib.sha256(execution_token.encode("utf-8")).hexdigest()[:20]
+                    deterministic_task_id = f"task_schedule_{digest}"
                 task = self.create_task(
                     job.payload["title"],
                     job.payload["description"],
                     user_id=job.created_by,
+                    task_id=deterministic_task_id,
                 )
                 output_ref = task["task_id"]
             elif job.action == ScheduleAction.RUN_TASK:
                 output_ref = job.payload["task_id"]
-                result = self.run_task(output_ref)
-                if result["blocked"]:
-                    raise ValueError(result["output"] or "scheduled task execution was blocked")
+                if execution_token is None or self.tasks[output_ref].status != TaskStatus.COMPLETED:
+                    result = self.run_task(output_ref)
+                    if result["blocked"]:
+                        raise ValueError(result["output"] or "scheduled task execution was blocked")
             else:
                 raise ValueError("unsupported schedule action")
         except Exception as exc:

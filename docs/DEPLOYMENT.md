@@ -2,14 +2,14 @@
 
 ## Local Development
 
-The deterministic core can run in memory or on SQLite. PostgreSQL/pgvector is the production persistence backend. Redis is provisioned for the worker stage but is not yet used by the in-process scheduler.
+The deterministic core can run in memory or on SQLite. PostgreSQL/pgvector is the production persistence backend. Redis/RQ carries production scheduler deliveries while PostgreSQL remains the source of truth.
 
 1. FastAPI backend
 2. SQLite local persistence
 3. PostgreSQL persistence (implemented)
 4. pgvector knowledge search (implemented at the persistence boundary)
 5. Docker Compose (implemented for backend, PostgreSQL, and Redis)
-6. Redis worker queue (pending)
+6. Redis worker queue (implemented for scheduled execution)
 7. Next.js dashboard (pending)
 
 Current local persistence can be enabled with:
@@ -34,7 +34,7 @@ To start the current production service foundation:
 docker compose --env-file .env up --build
 ```
 
-Create `.env` from `.env.example` and replace the default database password first. The API is then exposed on `http://localhost:8000` by default.
+Create `.env` from `.env.example` and replace the default database password first. The API is then exposed on `http://localhost:8000` by default. Compose also starts the scheduler dispatcher and RQ worker.
 
 The optional PostgreSQL integration test requires a dedicated database because it applies migrations and writes a knowledge fixture:
 

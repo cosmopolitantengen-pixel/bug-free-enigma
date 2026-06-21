@@ -103,7 +103,7 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector knowledge storage, structured logs, Compose foundation, and PostgreSQL CI job are complete. Redis workers and broader production operations remain.
+Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector knowledge storage, structured logs, Compose services, Redis/RQ scheduler workers, and service-level CI jobs are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 

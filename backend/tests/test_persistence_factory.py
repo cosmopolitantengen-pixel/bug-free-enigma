@@ -1,7 +1,13 @@
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+
+
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 from app.persistence.factory import _normalize_postgres_url, create_state_store
 from app.persistence.postgres_store import PostgresStateStore, _vector

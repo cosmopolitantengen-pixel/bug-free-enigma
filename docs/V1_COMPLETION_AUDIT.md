@@ -45,8 +45,8 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 147 tests pass, with the dedicated PostgreSQL integration test skipped when no test database URL is configured.
-- GitHub Actions provisions PostgreSQL with pgvector and runs the full suite with the integration test enabled.
+- Full local backend suite: 153 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - FastAPI application startup smoke check passes.
 - Dashboard JavaScript syntax check passes.
 - Git diff whitespace validation passes.
@@ -57,11 +57,10 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 These are not proven complete and must not be represented as delivered:
 
-1. Redis-backed workers and production scheduler execution.
-2. Next.js/TypeScript replacement for the dependency-free dashboard shell.
-3. Live embedding generation and retrieval wiring above the pgvector persistence boundary.
-4. Real model-provider adapters beyond the deterministic local gateway.
-5. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
-6. Production authentication/session hardening, secrets management, deployment automation, and browser-level end-to-end CI.
+1. Next.js/TypeScript replacement for the dependency-free dashboard shell.
+2. Live embedding generation and retrieval wiring above the pgvector persistence boundary.
+3. Real model-provider adapters beyond the deterministic local gateway.
+4. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
+5. Production authentication/session hardening, secrets management, queue failure alerting, deployment automation, and browser-level end-to-end CI.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

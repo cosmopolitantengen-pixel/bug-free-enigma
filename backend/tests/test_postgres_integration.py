@@ -1,6 +1,12 @@
 import os
+import sys
 import unittest
 import uuid
+
+
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
 
 from app.core.models import KnowledgeDoc
 from app.persistence.postgres_store import POSTGRES_SCHEMA_VERSION, PostgresStateStore

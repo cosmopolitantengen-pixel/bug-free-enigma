@@ -28,7 +28,7 @@ This repository currently contains:
 - A no-dependency Python core in `backend/app/`
 - Unit tests in `backend/tests/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, a backend container, a Redis service foundation, and PostgreSQL CI coverage are also present. Redis workers, a Next.js dashboard, embedding-provider wiring, and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend containers, and service-level CI coverage are also present. A Next.js dashboard, embedding-provider wiring, and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -73,7 +73,7 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 ## Next Production Direction
 
 1. Keep the core rules deterministic and well tested.
-2. Move scheduled execution onto Redis-backed workers.
+2. Add queue failure alerts and operational worker metrics.
 3. Replace the dashboard shell with Next.js and TypeScript.
 4. Wire live embedding and model providers through the existing gateways.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.
