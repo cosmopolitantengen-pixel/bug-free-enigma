@@ -42,6 +42,7 @@
 - Knowledge Base writes
 - API smoke tests
 - Frontend build checks
+- Next.js desktop and mobile browser acceptance checks
 
 ## Critical Safety Tests
 
@@ -67,6 +68,7 @@ The suite currently covers:
 - SQLite reload of tasks, audit logs, memory, and knowledge docs
 - Local auth registration, login, duplicate-user rejection, password hashing, and SQLite reload
 - Static dashboard mount points and backend dashboard data contract
+- Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
 - PostgreSQL migrations, append-only guards, and pgvector round trips when `AI_COMPANY_OS_TEST_POSTGRES_URL` is configured

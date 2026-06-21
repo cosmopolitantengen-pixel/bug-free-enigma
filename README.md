@@ -27,8 +27,9 @@ This repository currently contains:
 - Project planning docs in `docs/`
 - A no-dependency Python core in `backend/app/`
 - Unit tests in `backend/tests/`
+- A Next.js and TypeScript operations console in `apps/web/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend containers, and service-level CI coverage are also present. A Next.js dashboard, embedding-provider wiring, and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend and web containers, the Next.js operations console, and service-level CI coverage are also present. Embedding-provider wiring and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -60,9 +61,19 @@ For the PostgreSQL/pgvector stack, create `.env` from `.env.example`, replace th
 docker compose --env-file .env up --build
 ```
 
-## Local Dashboard
+## Local Operations Console
 
-A dependency-free dashboard shell is available at:
+Start the API, then run the Next.js console:
+
+```powershell
+cd apps/web
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:3000`. The console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere.
+
+The dependency-free dashboard is retained as a fallback at:
 
 ```text
 apps/web_dashboard/index.html
@@ -74,6 +85,6 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 
 1. Keep the core rules deterministic and well tested.
 2. Add queue failure alerts and operational worker metrics.
-3. Replace the dashboard shell with Next.js and TypeScript.
+3. Expand browser-level end-to-end coverage for the Next.js console.
 4. Wire live embedding and model providers through the existing gateways.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.

@@ -103,11 +103,11 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector knowledge storage, structured logs, Compose services, Redis/RQ scheduler workers, and service-level CI jobs are complete. Broader production operations remain.
+Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector knowledge storage, structured logs, Compose services, Redis/RQ scheduler workers, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 
-- Build a Next.js TypeScript dashboard.
+- Expand automated browser-level coverage for the Next.js TypeScript console.
 - Pages: Dashboard, Tasks, Agents, Skills, Workflows, Approvals, Risks, Audit Logs, Memory, Knowledge Base, Settings.
 - The first dashboard is operational, not decorative.
 
@@ -129,7 +129,7 @@ Current interim implementation:
 - Dashboard includes strategic goal creation, progress updates, and record linking
 - Dashboard lists and can run all 10 validated V1 Workflows from one selector
 
-The static shell satisfies the deterministic V1 operator loop. Next.js/TypeScript, browser-level E2E CI, and production session hardening remain.
+The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. Automated browser-level E2E CI and production session hardening remain.
 
 ## Phase 4: Controlled Evolution
 

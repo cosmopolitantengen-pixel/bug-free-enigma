@@ -1,4 +1,4 @@
-name: Backend CI
+name: CI
 
 on:
   push:
@@ -50,3 +50,22 @@ jobs:
         run: python -m compileall -q backend/app backend/tests
       - name: Run backend suite with PostgreSQL and pgvector
         run: python -m unittest discover -s backend/tests
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install web dependencies
+        run: npm ci
+      - name: Type-check web console
+        run: npm run typecheck
+      - name: Build web console
+        run: npm run build

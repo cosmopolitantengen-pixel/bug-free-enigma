@@ -20,7 +20,7 @@ The deterministic V1 operating baseline is implemented and verified. The broader
 | Risk and approval controls | Permission Engine, Risk Engine, Approval Center, resume guards | Complete |
 | Quality and retrospective | Native quality and retrospective Workflows | Complete |
 | Audit, Memory, and Knowledge | Append-only audit guards and persisted stores | Complete |
-| Human Root dashboard visibility | Operational static dashboard and summary/detail APIs | Complete for V1 shell |
+| Human Root dashboard visibility | Next.js operations console, static fallback, and summary/detail APIs | Complete |
 
 ## Workflow Catalog
 
@@ -45,10 +45,12 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 153 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 156 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
+- GitHub Actions installs, type-checks, and production-builds the Next.js console.
 - FastAPI application startup smoke check passes.
 - Dashboard JavaScript syntax check passes.
+- Next.js desktop and 390 px mobile browser acceptance checks cover loading, navigation, and a complete Workflow submission.
 - Git diff whitespace validation passes.
 - SQLite tests cover restart continuation for approval-gated native Workflows.
 - Safety tests cover forbidden Root actions, authorization boundaries, approval enforcement, external-content handling, blocked Tool/Skill Runs, and append-only audit behavior.
@@ -57,10 +59,9 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 These are not proven complete and must not be represented as delivered:
 
-1. Next.js/TypeScript replacement for the dependency-free dashboard shell.
-2. Live embedding generation and retrieval wiring above the pgvector persistence boundary.
-3. Real model-provider adapters beyond the deterministic local gateway.
-4. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
-5. Production authentication/session hardening, secrets management, queue failure alerting, deployment automation, and browser-level end-to-end CI.
+1. Live embedding generation and retrieval wiring above the pgvector persistence boundary.
+2. Real model-provider adapters beyond the deterministic local gateway.
+3. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
+4. Production authentication/session hardening, secrets management, queue failure alerting, deployment automation, and automated browser-level end-to-end CI.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

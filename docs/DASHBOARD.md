@@ -2,7 +2,15 @@
 
 ## Current Dashboard
 
-The first dashboard is a dependency-free static control panel:
+The primary Human Root console is a responsive Next.js and TypeScript app:
+
+```text
+apps/web/
+```
+
+Its six operational views cover overview metrics, Workflow execution and approvals, schedules, Agent/Skill/Tool/Workflow catalogs, Incidents and audit records, and persistence/integrity status. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
+
+The first dependency-free control panel remains available as a fallback:
 
 ```text
 apps/web_dashboard/index.html
@@ -129,11 +137,11 @@ POST /agents/proposals/{proposal_id}/register
 ## Local Use
 
 1. Start the FastAPI backend.
-2. Open `apps/web_dashboard/index.html` in a browser.
-3. Keep the API Base field pointed at `http://127.0.0.1:8000`.
+2. Run `npm install` and `npm run dev` from `apps/web`.
+3. Open `http://127.0.0.1:3000` and keep the API Base pointed at `http://127.0.0.1:8000`.
 
-The backend enables CORS for local development so the static page can call the API.
+The backend enables CORS for local development. For a dependency-free fallback, open `apps/web_dashboard/index.html` directly.
 
 ## Next Dashboard Step
 
-Move this shell into a Next.js TypeScript app once dependency installation and package management are set up. Keep the same operational data contract.
+Add automated browser-level end-to-end CI around high-risk operator workflows while keeping the existing operational data contract stable.
