@@ -103,6 +103,8 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
+Current implementation: the required FastAPI surface, SQLite schema/migrations, append-only audit guards, and structured logs are complete for the deterministic V1 baseline. PostgreSQL/pgvector and production migration tooling remain.
+
 ## Phase 3: Dashboard
 
 - Build a Next.js TypeScript dashboard.
@@ -126,6 +128,8 @@ Current interim implementation:
 - Dashboard includes review-driven improvement proposal controls
 - Dashboard includes strategic goal creation, progress updates, and record linking
 - Dashboard lists and can run all 10 validated V1 Workflows from one selector
+
+The static shell satisfies the deterministic V1 operator loop. Next.js/TypeScript, browser-level E2E CI, and production session hardening remain.
 
 ## Phase 4: Controlled Evolution
 

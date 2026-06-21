@@ -28,7 +28,7 @@ This repository currently contains:
 - A no-dependency Python core in `backend/app/`
 - Unit tests in `backend/tests/`
 
-The core remains framework-light so the safety model can be tested independently. A thin FastAPI layer now exposes the first API routes over that core; persistence, Next.js, PostgreSQL, Redis, and pgvector come later.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 API and persistence baseline. PostgreSQL/pgvector, Redis workers, a Next.js dashboard, and live provider/connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
