@@ -44,6 +44,7 @@ Current status:
 - Document generation Workflow runs to completion.
 - FastAPI route layer exposes the first required endpoints.
 - Local auth uses persisted users with PBKDF2 password hashes.
+- Optional production HTTP bearer auth protects the API when enabled.
 - Static dashboard shell exists and consumes the backend dashboard API.
 - Approval request flow exists for Permission + Risk + Approval + Audit.
 - Approval decisions are audited and can be made from the dashboard shell.
@@ -103,7 +104,7 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
+Current implementation: the required FastAPI surface, optional production HTTP bearer auth, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 
@@ -129,7 +130,7 @@ Current interim implementation:
 - Dashboard includes strategic goal creation, progress updates, and record linking
 - Dashboard lists and can run all 10 validated V1 Workflows from one selector
 
-The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. Automated browser-level E2E CI and production session hardening remain.
+The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls. Automated browser-level E2E CI, managed identity, and full production session hardening remain.
 
 ## Phase 4: Controlled Evolution
 

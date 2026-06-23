@@ -45,7 +45,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 168 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 171 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
 - FastAPI application startup smoke check passes.
@@ -60,7 +60,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 These are not proven complete and must not be represented as delivered:
 
 1. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
-2. Production authentication/session hardening and managed secrets integration.
+2. Managed secrets integration, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate.
 3. Queue failure alerting, deployment automation, automated browser-level end-to-end CI, and provider-specific pricing/streaming policy.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

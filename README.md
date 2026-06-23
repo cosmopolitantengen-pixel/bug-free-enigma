@@ -29,7 +29,7 @@ This repository currently contains:
 - Unit tests in `backend/tests/`
 - A Next.js and TypeScript operations console in `apps/web/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend and web containers, the Next.js operations console, configurable OpenAI model and embedding providers, and service-level CI coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, configurable OpenAI model and embedding providers, and service-level CI coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -53,7 +53,7 @@ $env:AI_COMPANY_OS_SQLITE_PATH='E:\1\data\company_os.db'
 ```
 
 The current SQLite adapter persists Agent and Skill catalogs, Skill Runs, tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, Tool Runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
-It also persists local users with PBKDF2 password hashes for the development auth flow.
+It also persists local users with PBKDF2 password hashes. For local development, HTTP auth is disabled by default. For a protected deployment, set `AI_COMPANY_OS_AUTH_REQUIRED=true` and provide `AI_COMPANY_OS_API_TOKEN` or `AI_COMPANY_OS_API_TOKEN_SHA256`; only `/health` and `/auth/login` stay public.
 
 For the PostgreSQL/pgvector stack, create `.env` from `.env.example`, replace the password, and run:
 
@@ -73,7 +73,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3000`. The console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere.
+Open `http://127.0.0.1:3000`. The console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. When API auth is enabled, enter the bearer token on the System page; it is stored in the browser and sent as an `Authorization` header.
 
 The dependency-free dashboard is retained as a fallback at:
 
@@ -86,7 +86,7 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 ## Next Production Direction
 
 1. Keep the core rules deterministic and well tested.
-2. Add queue failure alerts and operational worker metrics.
-3. Expand browser-level end-to-end coverage for the Next.js console.
-4. Add additional provider adapters through the existing model and embedding gateways.
+2. Add managed secret backends and production identity provider integration.
+3. Add queue failure alerts and operational worker metrics.
+4. Expand browser-level end-to-end coverage for the Next.js console.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.

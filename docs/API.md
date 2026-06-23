@@ -234,7 +234,9 @@ Current implemented routes include:
 - `POST /risks/assess`
 - `GET /dashboard/summary`
 
-Authentication now supports local user registration, PBKDF2 password verification, local bearer token sessions, duplicate-email rejection, and SQLite-backed user reload. It is still a development auth flow, not the final production auth layer.
+Authentication supports local user registration, PBKDF2 password verification, local bearer token sessions, duplicate-email rejection, and SQLite-backed user reload.
+
+HTTP authentication is disabled by default for local development. In protected deployments, set `AI_COMPANY_OS_AUTH_REQUIRED=true` and configure either `AI_COMPANY_OS_API_TOKEN` or `AI_COMPANY_OS_API_TOKEN_SHA256`. When enabled, only `GET /health` and `POST /auth/login` are public; every other API route requires `Authorization: Bearer <token>`. Valid bearer values are either the configured static API token or a session token returned by `POST /auth/login`. Startup fails if auth is required and neither a static API token nor a persisted user exists.
 
 `GET /database/schema` returns the active persistence backend. In memory mode it reports `backend=memory` with no schema version. In SQLite mode it reports `backend=sqlite`, the current `schema_version`, and the applied migration ledger from `schema_migrations`.
 

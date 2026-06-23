@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import hashlib
 
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -11,6 +12,7 @@ if BACKEND_DIR not in sys.path:
 
 from fastapi.testclient import TestClient
 
+from app.auth.http import AuthConfigurationError, HttpAuthSettings
 from app.auth.passwords import hash_password, verify_password
 from app.main import create_app
 from app.persistence.sqlite_store import SQLiteStateStore
@@ -80,6 +82,52 @@ class AuthTests(unittest.TestCase):
 
             self.assertEqual(login.status_code, 200)
             self.assertEqual(login.json()["user"]["email"], "persist@example.com")
+
+    def test_required_http_auth_blocks_requests_until_static_token_is_present(self):
+        client = TestClient(create_app(auth_settings=HttpAuthSettings(required=True, api_token="root-token")))
+
+        health = client.get("/health")
+        blocked = client.get("/agents")
+        allowed = client.get("/agents", headers={"Authorization": "Bearer root-token"})
+
+        self.assertEqual(health.status_code, 200)
+        self.assertEqual(blocked.status_code, 401)
+        self.assertEqual(blocked.json()["detail"], "authentication required")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(len(allowed.json()), 17)
+
+    def test_required_http_auth_accepts_sha256_static_token_and_session_tokens(self):
+        token_hash = hashlib.sha256("bootstrap-token".encode("utf-8")).hexdigest()
+        client = TestClient(
+            create_app(auth_settings=HttpAuthSettings(required=True, api_token_sha256=token_hash))
+        )
+
+        blocked_registration = client.post(
+            "/auth/register",
+            json={"email": "blocked@example.com", "password": "password123"},
+        )
+        registered = client.post(
+            "/auth/register",
+            json={"email": "root@example.com", "password": "password123"},
+            headers={"Authorization": "Bearer bootstrap-token"},
+        )
+        login = client.post(
+            "/auth/login",
+            json={"email": "root@example.com", "password": "password123"},
+        )
+        via_session = client.get(
+            "/agents",
+            headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+        )
+
+        self.assertEqual(blocked_registration.status_code, 401)
+        self.assertEqual(registered.status_code, 200)
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(via_session.status_code, 200)
+
+    def test_required_http_auth_rejects_locked_startup_configuration(self):
+        with self.assertRaises(AuthConfigurationError):
+            create_app(auth_settings=HttpAuthSettings(required=True))
 
 
 if __name__ == "__main__":

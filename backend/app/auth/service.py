@@ -41,6 +41,18 @@ class AuthService:
             self.sessions.pop(token, None)
         return {"status": "ok"}
 
+    def authenticate_session_token(self, token: str) -> User | None:
+        user_id = self.sessions.get(token)
+        if user_id is None:
+            return None
+        for user in self.users.values():
+            if user.user_id == user_id and user.enabled:
+                return user
+        return None
+
+    def has_users(self) -> bool:
+        return bool(self.users)
+
     def public_user(self, user: User) -> dict:
         payload = to_plain(user)
         payload.pop("password_hash", None)

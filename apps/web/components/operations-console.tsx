@@ -24,7 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { ApiRecord, apiRequest, formatDate, shortId, text } from "@/lib/api";
+import { ApiRecord, apiRequest, formatDate, getStoredApiToken, shortId, storeApiToken, text } from "@/lib/api";
 
 type View = "overview" | "work" | "scheduler" | "catalog" | "governance" | "system";
 type DataSet = {
@@ -88,6 +88,8 @@ export function OperationsConsole() {
     process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000",
   );
   const [apiDraft, setApiDraft] = useState(apiBase);
+  const [apiToken, setApiToken] = useState(process.env.NEXT_PUBLIC_API_BEARER_TOKEN ?? "");
+  const [apiTokenDraft, setApiTokenDraft] = useState(apiToken);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -99,6 +101,11 @@ export function OperationsConsole() {
       setApiBase(stored);
       setApiDraft(stored);
     }
+    const storedToken = getStoredApiToken();
+    if (storedToken) {
+      setApiToken(storedToken);
+      setApiTokenDraft(storedToken);
+    }
   }, []);
 
   const refresh = useCallback(async () => {
@@ -106,7 +113,7 @@ export function OperationsConsole() {
     setError(null);
     const entries = Object.entries(ENDPOINTS) as Array<[keyof DataSet, string]>;
     const results = await Promise.allSettled(
-      entries.map(([, path]) => apiRequest<ApiRecord | ApiRecord[]>(apiBase, path)),
+      entries.map(([, path]) => apiRequest<ApiRecord | ApiRecord[]>(apiBase, path, {}, apiToken)),
     );
     const next = { ...EMPTY_DATA };
     const failures: string[] = [];
@@ -121,7 +128,7 @@ export function OperationsConsole() {
     setData(next);
     if (failures.length) setError(failures.join(" | "));
     setLoading(false);
-  }, [apiBase]);
+  }, [apiBase, apiToken]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -131,10 +138,10 @@ export function OperationsConsole() {
     const result = await apiRequest<T>(apiBase, path, {
       method: "POST",
       body: body ? JSON.stringify(body) : undefined,
-    });
+    }, apiToken);
     await refresh();
     return result;
-  }, [apiBase, refresh]);
+  }, [apiBase, apiToken, refresh]);
 
   const saveApiBase = (event: FormEvent) => {
     event.preventDefault();
@@ -145,6 +152,14 @@ export function OperationsConsole() {
     }
     window.localStorage.setItem("ai-company-os-api-base", next);
     setApiBase(next);
+  };
+
+  const saveApiToken = (event: FormEvent) => {
+    event.preventDefault();
+    const next = apiTokenDraft.trim();
+    storeApiToken(next);
+    setApiToken(next);
+    setNotice(next ? "API bearer token saved for this browser." : "API bearer token cleared.");
   };
 
   const pendingApprovals = data.approvals.filter((item) => ["pending", "need_more_info"].includes(text(item.status, "")));
@@ -196,7 +211,7 @@ export function OperationsConsole() {
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "catalog" && <CatalogView data={data} />}
             {view === "governance" && <GovernanceView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
-            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} />}
+            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} />}
           </>
         )}
       </main>
@@ -323,9 +338,9 @@ function GovernanceView({ data, mutate, notify, fail }: { data: DataSet; mutate:
   return <div className="view-stack"><section className="two-column"><Panel title="Incidents" meta={`${data.incidents.length} total`}><EntityList items={data.incidents.slice().reverse()} empty="No incidents." render={(item) => <div className="action-row"><EntityRow title={text(item.title)} detail={`${shortId(item.incident_id)} / ${text(item.risk_level)}`} status={text(item.status)} />{text(item.status) !== "resolved" && <div className="inline-actions">{text(item.status) === "open" && <button className="small-button" onClick={() => void updateIncident(item.incident_id, "acknowledge")}>Acknowledge</button>}<button className="small-button" onClick={() => void updateIncident(item.incident_id, "resolve")}>Resolve</button></div>}</div>} /></Panel><Panel title="Integrity checks" meta={text(data.integrity.status)}><EntityList items={(data.integrity.checks as ApiRecord[] | undefined) ?? []} empty="No integrity checks." render={(item) => <EntityRow title={text(item.name)} detail={text(item.message)} status={text(item.status)} />} /></Panel></section><section className="two-column"><Panel title="Audit log" meta={`${data.audit.length} records`}><EntityList items={data.audit.slice(-30).reverse()} empty="No audit records." render={(item) => <EntityRow title={text(item.event_type)} detail={`${text(item.actor_id)} / ${formatDate(item.created_at)}`} status={text(item.risk_level)} />} /></Panel><Panel title="Domain events" meta={`${data.events.length} records`}><EntityList items={data.events.slice(-30).reverse()} empty="No domain events." render={(item) => <EntityRow title={text(item.event_type)} detail={`${text(item.source_type)} / ${shortId(item.source_id)}`} status={formatDate(item.created_at)} />} /></Panel></section></div>;
 }
 
-function SystemView({ data, apiDraft, setApiDraft, saveApiBase }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void }) {
+function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean }) {
   const migrations = (data.schema.migrations as ApiRecord[] | undefined) ?? [];
-  return <div className="view-stack"><section className="two-column work-layout"><Panel title="API connection" meta={text(data.health.status)}><form className="form-grid" onSubmit={saveApiBase}><Field label="API Base"><input value={apiDraft} onChange={(e) => setApiDraft(e.target.value)} /></Field><button className="button"><SlidersHorizontal />Apply connection</button></form></Panel><Panel title="Persistence" meta={text(data.schema.backend)}><div className="system-facts"><Fact label="Backend" value={text(data.schema.backend)} /><Fact label="Schema version" value={text(data.schema.schema_version)} /><Fact label="Integrity" value={text(data.integrity.status)} /><Fact label="Migration count" value={String(migrations.length)} /></div></Panel></section><Panel title="AI providers" meta={text(data.providers.default_provider)}><div className="system-facts"><Fact label="Model provider" value={text(data.providers.default_provider)} /><Fact label="Default model" value={text(data.providers.default_model)} /><Fact label="Embeddings" value={data.embeddings.enabled ? "enabled" : "disabled"} /><Fact label="Embedding model" value={text(data.embeddings.default_model, "not configured")} /><Fact label="Vector dimensions" value={text(data.embeddings.dimensions)} /><Fact label="Indexed documents" value={text(data.embeddings.indexed_documents, "0")} /><Fact label="Failed documents" value={text(data.embeddings.failed_documents, "0")} /><Fact label="Vector store" value={data.embeddings.vector_store ? "connected" : "not connected"} /></div></Panel><Panel title="Schema migrations" meta={`${migrations.length} applied`}><EntityList items={migrations} empty="No database migrations reported." render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} /></Panel><div className="legacy-note"><FileClock /><div><strong>Legacy console retained</strong><span>The dependency-free dashboard remains available at <code>apps/web_dashboard</code>.</span></div></div></div>;
+  return <div className="view-stack"><section className="two-column work-layout"><Panel title="API connection" meta={text(data.health.status)}><form className="form-grid" onSubmit={saveApiBase}><Field label="API Base"><input value={apiDraft} onChange={(e) => setApiDraft(e.target.value)} /></Field><button className="button"><SlidersHorizontal />Apply connection</button></form><form className="form-grid compact-form" onSubmit={saveApiToken}><Field label="Bearer token"><input type="password" value={apiTokenDraft} onChange={(e) => setApiTokenDraft(e.target.value)} placeholder="Required when API auth is enabled" /></Field><button className="button secondary"><ShieldCheck />{hasApiToken ? "Update token" : "Save token"}</button></form></Panel><Panel title="Persistence" meta={text(data.schema.backend)}><div className="system-facts"><Fact label="Backend" value={text(data.schema.backend)} /><Fact label="Schema version" value={text(data.schema.schema_version)} /><Fact label="Integrity" value={text(data.integrity.status)} /><Fact label="Migration count" value={String(migrations.length)} /></div></Panel></section><Panel title="AI providers" meta={text(data.providers.default_provider)}><div className="system-facts"><Fact label="Model provider" value={text(data.providers.default_provider)} /><Fact label="Default model" value={text(data.providers.default_model)} /><Fact label="Embeddings" value={data.embeddings.enabled ? "enabled" : "disabled"} /><Fact label="Embedding model" value={text(data.embeddings.default_model, "not configured")} /><Fact label="Vector dimensions" value={text(data.embeddings.dimensions)} /><Fact label="Indexed documents" value={text(data.embeddings.indexed_documents, "0")} /><Fact label="Failed documents" value={text(data.embeddings.failed_documents, "0")} /><Fact label="Vector store" value={data.embeddings.vector_store ? "connected" : "not connected"} /></div></Panel><Panel title="Schema migrations" meta={`${migrations.length} applied`}><EntityList items={migrations} empty="No database migrations reported." render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} /></Panel><div className="legacy-note"><FileClock /><div><strong>Legacy console retained</strong><span>The dependency-free dashboard remains available at <code>apps/web_dashboard</code>.</span></div></div></div>;
 }
 
 function Panel({ title, meta, children }: { title: string; meta?: string; children: ReactNode }) { return <section className="panel"><div className="panel-heading"><div><h2>{title}</h2>{meta && <span>{meta}</span>}</div></div>{children}</section>; }
