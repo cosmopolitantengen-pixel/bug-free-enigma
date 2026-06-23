@@ -17,6 +17,7 @@ POST /schedules/{id}/pause
 POST /schedules/{id}/resume
 POST /schedules/{id}/cancel
 GET /scheduler/executions
+GET /scheduler/queue-health
 POST /scheduler/tick
 
 GET /agents
@@ -127,7 +128,7 @@ GET /dashboard/summary
 
 API handlers should be thin. Permission, risk, approval, audit, Agent, Skill, and Workflow behavior belongs in core services first, then the API calls those services.
 
-The scheduler API persists one-time and recurring internal jobs, supports pause/resume/cancel controls, records every execution, and exposes an explicit Human Root tick. `GET /events` provides filtered append-only domain events by event type, source type, or task.
+The scheduler API persists one-time and recurring internal jobs, supports pause/resume/cancel controls, records every execution, and exposes an explicit Human Root tick. `GET /events` provides filtered append-only domain events by event type, source type, or task. `GET /scheduler/queue-health` reports Redis/RQ transport health, worker count, backlog counts, failed-job counts, and sample job IDs without exposing Redis credentials.
 
 ## Current Implementation
 
@@ -276,6 +277,7 @@ HTTP authentication is disabled by default for local development. In protected d
 - recent improvement proposals
 - recent GitHub absorptions
 - recent strategic goals
+- recent failed scheduled executions
 - memory, knowledge, and audit counts
 - structured log counts
 - integrity status and issue counts
@@ -285,6 +287,7 @@ HTTP authentication is disabled by default for local development. In protected d
 - model usage, token, and estimated cost counts
 - budget used/max token and cost counts
 - incident and open-incident counts
+- scheduler queue health and failed scheduled execution counts
 - backup counts
 - Agent message and meeting counts
 - task handoff counts

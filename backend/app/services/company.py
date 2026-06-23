@@ -3242,6 +3242,13 @@ class CompanyApplicationService:
                 [job for job in scheduled_jobs if job.status == ScheduleStatus.ACTIVE]
             ),
             "scheduled_execution_count": len(scheduled_executions),
+            "failed_scheduled_execution_count": len(
+                [
+                    execution
+                    for execution in scheduled_executions
+                    if execution.status == ScheduleExecutionStatus.FAILED
+                ]
+            ),
             "failed_scheduled_job_count": len(
                 [job for job in scheduled_jobs if job.status == ScheduleStatus.FAILED]
             ),
@@ -3302,6 +3309,14 @@ class CompanyApplicationService:
             "recent_scheduled_jobs": [to_plain(job) for job in scheduled_jobs[-10:]],
             "recent_scheduled_executions": [
                 to_plain(execution) for execution in scheduled_executions[-10:]
+            ],
+            "recent_failed_scheduled_executions": [
+                to_plain(execution)
+                for execution in [
+                    item
+                    for item in scheduled_executions
+                    if item.status == ScheduleExecutionStatus.FAILED
+                ][-10:]
             ],
         }
 

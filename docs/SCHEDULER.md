@@ -27,6 +27,17 @@ Local mode exposes an explicit deterministic tick endpoint. Production mode uses
 
 RQ retries infrastructure failures three times. Replayed deliveries are harmless: the schedule must still be active at the exact queued `next_run_at`, and scheduled task creation uses a deterministic task ID for that occurrence.
 
+## Queue Health
+
+`GET /scheduler/queue-health` reports Redis/RQ transport health without exposing the Redis URL or credentials. It returns whether Redis is configured, the queue name, Redis ping status, registered worker count, queued/started/deferred/scheduled/failed job counts, and a small sample of job IDs for follow-up.
+
+Health status is:
+
+- `disabled` when Redis is not configured.
+- `ok` when the queue is reachable and workers are registered.
+- `warning` when Redis is reachable but no workers are registered.
+- `critical` when the queue cannot be checked or failed jobs are present.
+
 ## API
 
 ```text
@@ -37,6 +48,7 @@ POST /schedules/{schedule_id}/pause
 POST /schedules/{schedule_id}/resume
 POST /schedules/{schedule_id}/cancel
 GET /scheduler/executions
+GET /scheduler/queue-health
 POST /scheduler/tick
 ```
 
@@ -45,6 +57,7 @@ POST /scheduler/tick
 - Schedule creation, state changes, ticks, and executions write audit events.
 - Schedule lifecycle and execution outcomes publish domain events.
 - Failed execution creates an incident for Human Root follow-up.
+- Queue health exposes worker/backlog/failure metrics for operations follow-up; PostgreSQL schedule state remains the execution source of truth.
 - Domain events are append-only at the SQLite and PostgreSQL layers.
 - Jobs, executions, and events survive SQLite or PostgreSQL reload.
 - Backups include scheduled job state. Restore preserves domain-event and execution history.

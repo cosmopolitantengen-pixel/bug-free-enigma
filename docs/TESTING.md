@@ -39,7 +39,7 @@
 - SQLite schema migration ledger, API exposure, and dashboard mount points
 - Audit log append-only behavior, including SQLite trigger guards against update and delete
 - System integrity API checks, dashboard summary fields, and dashboard mount points
-- One-time and recurring scheduler execution, pause/resume/cancel controls, failure incidents, domain-event filtering, append-only event guards, and SQLite reload
+- One-time and recurring scheduler execution, pause/resume/cancel controls, queue health reporting, failure incidents, domain-event filtering, append-only event guards, and SQLite reload
 - Memory writes
 - Knowledge Base writes
 - API smoke tests
@@ -74,7 +74,7 @@ The suite currently covers:
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
 - PostgreSQL migrations, append-only guards, and pgvector round trips when `AI_COMPANY_OS_TEST_POSTGRES_URL` is configured
-- Redis/RQ delivery deduplication and worker execution when both PostgreSQL and Redis test URLs are configured
+- Redis/RQ delivery deduplication, queue health reporting, and worker execution when both PostgreSQL and Redis test URLs are configured
 - Skill and Agent proposal persistence plus approval-gated registration
 - Complete 17-Agent/18-Skill V1 bootstrap catalogs, invalid reference rejection, audited formal registration, SQLite reload, and backup rollback
 - Skill and Agent proposal sandbox gating, audit events, dashboard controls, and SQLite reload
@@ -101,4 +101,4 @@ The suite currently covers:
 - Structured JSON log API routes, category/level filters, dashboard summary fields, and dashboard mount points
 - SQLite migration ledger through `0005_agent_skill_catalogs`, audit append-only trigger migration, `user_version`, `/database/schema`, and dashboard mount points
 - System integrity checks for memory mode warnings, SQLite audit guards, backup checksums, and dashboard exposure
-- Durable scheduler and event-bus API routes, one-time/recurring timing, controls, failure incidents, append-only event triggers, dashboard controls, and SQLite reload
+- Durable scheduler and event-bus API routes, one-time/recurring timing, controls, queue health reporting, failure incidents, append-only event triggers, dashboard controls, and SQLite reload

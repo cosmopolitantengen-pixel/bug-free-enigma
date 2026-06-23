@@ -78,7 +78,7 @@ Current status:
 - Backups include deterministic snapshot checksums and an auditable verification endpoint/dashboard action.
 - Backup restore requests require checksum verification; approved SQLite restores recheck integrity, create a pre-restore checkpoint, replace business state transactionally, and preserve control-plane history.
 - System integrity checks expose persistence, schema, audit guard, backup, incident, approval, and budget status through API and dashboard.
-- Durable one-time and recurring internal schedules can create or run tasks through an explicit Human Root tick, with lifecycle controls, execution history, incidents, audit events, and append-only domain events.
+- Durable one-time and recurring internal schedules can create or run tasks through an explicit Human Root tick, with lifecycle controls, execution history, Redis/RQ queue health, incidents, audit events, and append-only domain events.
 - The complete V1 catalog now boots with 17 scoped Agents and 18 registered Skills, with cross-catalog reference validation.
 - Formal Agent and Skill registrations are audited, persisted in SQLite, included in verified backups, and restored transactionally.
 - All 10 required V1 Workflows are registered as validated Agent/Skill step definitions with explicit operational entrypoints.
@@ -104,7 +104,7 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, optional production HTTP bearer auth, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
+Current implementation: the required FastAPI surface, optional production HTTP bearer auth, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers with queue health reporting, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 
@@ -129,8 +129,9 @@ Current interim implementation:
 - Dashboard includes review-driven improvement proposal controls
 - Dashboard includes strategic goal creation, progress updates, and record linking
 - Dashboard lists and can run all 10 validated V1 Workflows from one selector
+- Next.js Scheduler view includes Redis/RQ queue health, worker counts, backlog counts, failed queue jobs, and failed scheduled executions
 
-The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls. Automated browser-level E2E CI, managed identity, and full production session hardening remain.
+The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls. Automated browser-level E2E CI, external queue alert delivery, managed identity, and full production session hardening remain.
 
 ## Phase 4: Controlled Evolution
 

@@ -2032,6 +2032,7 @@ class ApiRouteTests(unittest.TestCase):
         )
         schedules = self.client.get("/schedules").json()
         executions = self.client.get("/scheduler/executions").json()
+        queue_health = self.client.get("/scheduler/queue-health").json()
         events = self.client.get("/events", params={"source_type": "schedule"}).json()
 
         self.assertEqual(one_time.status_code, 200)
@@ -2041,6 +2042,8 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(third_tick.json()["executed_count"], 0)
         self.assertEqual(len(self.client.get("/tasks").json()), 3)
         self.assertEqual(len(executions), 3)
+        self.assertEqual(queue_health["status"], "disabled")
+        self.assertFalse(queue_health["configured"])
         self.assertTrue(all(item["status"] == "completed" for item in executions))
         self.assertTrue(all(job["status"] == "completed" for job in schedules))
         self.assertEqual(
@@ -2194,6 +2197,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("active_scheduled_job_count", payload)
         self.assertIn("scheduled_execution_count", payload)
         self.assertIn("failed_scheduled_job_count", payload)
+        self.assertIn("failed_scheduled_execution_count", payload)
         self.assertIn("recent_agent_messages", payload)
         self.assertIn("recent_agent_meetings", payload)
         self.assertIn("recent_task_handoffs", payload)
@@ -2205,6 +2209,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("recent_domain_events", payload)
         self.assertIn("recent_scheduled_jobs", payload)
         self.assertIn("recent_scheduled_executions", payload)
+        self.assertIn("recent_failed_scheduled_executions", payload)
         self.assertEqual(payload["agent_status_counts"]["enabled"], payload["agent_count"])
 
 

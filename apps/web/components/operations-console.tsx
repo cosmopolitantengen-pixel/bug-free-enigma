@@ -39,6 +39,7 @@ type DataSet = {
   incidents: ApiRecord[];
   schedules: ApiRecord[];
   executions: ApiRecord[];
+  queueHealth: ApiRecord;
   agents: ApiRecord[];
   skills: ApiRecord[];
   tools: ApiRecord[];
@@ -49,7 +50,7 @@ type DataSet = {
 
 const EMPTY_DATA: DataSet = {
   summary: {}, health: {}, integrity: {}, schema: {}, providers: {}, embeddings: {}, tasks: [], approvals: [], incidents: [],
-  schedules: [], executions: [], agents: [], skills: [], tools: [], workflows: [], audit: [], events: [],
+  schedules: [], executions: [], queueHealth: {}, agents: [], skills: [], tools: [], workflows: [], audit: [], events: [],
 };
 
 const ENDPOINTS: Record<keyof DataSet, string> = {
@@ -64,6 +65,7 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
   incidents: "/incidents",
   schedules: "/schedules",
   executions: "/scheduler/executions",
+  queueHealth: "/scheduler/queue-health",
   agents: "/agents",
   skills: "/skills",
   tools: "/tools",
@@ -320,7 +322,44 @@ function SchedulerView({ data, mutate, notify, fail }: { data: DataSet; mutate: 
     try { await mutate(`/schedules/${text(id)}/${action}`, { actor_id: "human_root" }); notify(`Schedule ${resultLabel[action] ?? action}.`); }
     catch (error) { fail(error instanceof Error ? error.message : "Schedule update failed"); }
   };
-  return <div className="view-stack"><section className="two-column work-layout"><Panel title="Create schedule" meta="One-time task"><form className="form-grid" onSubmit={create}><Field label="Schedule name"><input value={name} onChange={(e) => setName(e.target.value)} required /></Field><Field label="Run at"><input type="datetime-local" value={nextRun} onChange={(e) => setNextRun(e.target.value)} required /></Field><Field label="Task title"><input value={title} onChange={(e) => setTitle(e.target.value)} required /></Field><Field label="Task description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} required /></Field><button className="button"><CalendarClock />Create schedule</button></form></Panel><Panel title="Execution history" meta={`${data.executions.length} runs`}><EntityList items={data.executions.slice(-12).reverse()} empty="No executions." render={(item) => <EntityRow title={text(item.action)} detail={`${shortId(item.schedule_id)} / ${formatDate(item.started_at)}`} status={text(item.status)} />} /></Panel></section><Panel title="Schedules" meta={`${data.schedules.length} total`}><EntityList items={data.schedules.slice().reverse()} empty="No schedules." render={(item) => <div className="action-row"><EntityRow title={text(item.name)} detail={`${formatDate(item.next_run_at)} / ${text(item.action)}`} status={text(item.status)} /><div className="inline-actions">{text(item.status) === "active" && <button className="small-button" onClick={() => void control(item.schedule_id, "pause")}>Pause</button>}{text(item.status) === "paused" && <button className="small-button" onClick={() => void control(item.schedule_id, "resume")}>Resume</button>}{["active", "paused"].includes(text(item.status)) && <button className="small-button danger-button" onClick={() => void control(item.schedule_id, "cancel")}>Cancel</button>}</div></div>} /></Panel></div>;
+  const queue = data.queueHealth;
+  return (
+    <div className="view-stack">
+      <section className="two-column work-layout">
+        <Panel title="Create schedule" meta="One-time task">
+          <form className="form-grid" onSubmit={create}>
+            <Field label="Schedule name"><input value={name} onChange={(e) => setName(e.target.value)} required /></Field>
+            <Field label="Run at"><input type="datetime-local" value={nextRun} onChange={(e) => setNextRun(e.target.value)} required /></Field>
+            <Field label="Task title"><input value={title} onChange={(e) => setTitle(e.target.value)} required /></Field>
+            <Field label="Task description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} required /></Field>
+            <button className="button"><CalendarClock />Create schedule</button>
+          </form>
+        </Panel>
+        <Panel title="Queue health" meta={text(queue.status)}>
+          <div className="system-facts">
+            <Fact label="Queue" value={text(queue.queue_name)} />
+            <Fact label="Workers" value={text(queue.worker_count, "0")} />
+            <Fact label="Queued" value={text(queue.queued_count, "0")} />
+            <Fact label="Started" value={text(queue.started_count, "0")} />
+            <Fact label="Deferred" value={text(queue.deferred_count, "0")} />
+            <Fact label="Failed" value={text(queue.failed_count, "0")} />
+          </div>
+          <div className="legacy-note"><Activity /><div><strong>{text(queue.message, "Queue health is not configured.")}</strong><span>Redis/RQ is transport only; PostgreSQL schedule state remains the source of truth.</span></div></div>
+        </Panel>
+      </section>
+      <section className="two-column">
+        <Panel title="Execution history" meta={`${data.executions.length} runs`}>
+          <EntityList items={data.executions.slice(-12).reverse()} empty="No executions." render={(item) => <EntityRow title={text(item.action)} detail={`${shortId(item.schedule_id)} / ${formatDate(item.started_at)}`} status={text(item.status)} />} />
+        </Panel>
+        <Panel title="Recent failed executions" meta={`${text(data.summary.failed_scheduled_execution_count, "0")} failed`}>
+          <EntityList items={((data.summary.recent_failed_scheduled_executions as ApiRecord[] | undefined) ?? []).slice().reverse()} empty="No failed scheduled executions." render={(item) => <EntityRow title={shortId(item.schedule_id)} detail={text(item.error, "No error")} status={text(item.status)} />} />
+        </Panel>
+      </section>
+      <Panel title="Schedules" meta={`${data.schedules.length} total`}>
+        <EntityList items={data.schedules.slice().reverse()} empty="No schedules." render={(item) => <div className="action-row"><EntityRow title={text(item.name)} detail={`${formatDate(item.next_run_at)} / ${text(item.action)}`} status={text(item.status)} /><div className="inline-actions">{text(item.status) === "active" && <button className="small-button" onClick={() => void control(item.schedule_id, "pause")}>Pause</button>}{text(item.status) === "paused" && <button className="small-button" onClick={() => void control(item.schedule_id, "resume")}>Resume</button>}{["active", "paused"].includes(text(item.status)) && <button className="small-button danger-button" onClick={() => void control(item.schedule_id, "cancel")}>Cancel</button>}</div></div>} />
+      </Panel>
+    </div>
+  );
 }
 
 function CatalogView({ data }: { data: DataSet }) {

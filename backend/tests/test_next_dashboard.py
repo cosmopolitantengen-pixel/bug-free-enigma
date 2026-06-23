@@ -20,7 +20,7 @@ class NextDashboardTests(unittest.TestCase):
         for endpoint in [
             "/dashboard/summary", "/system/integrity", "/workflows/run", "/approvals",
             "/incidents", "/schedules", "/scheduler/executions", "/audit-logs",
-            "/database/schema",
+            "/database/schema", "/scheduler/queue-health",
             "/models/providers", "/knowledge/embeddings/status",
         ]:
             self.assertIn(endpoint, console)

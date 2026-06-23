@@ -129,6 +129,63 @@ class SchedulerQueueTests(unittest.TestCase):
         self.assertEqual(second["enqueued_count"], 0)
         self.assertEqual(second["existing_count"], 1)
 
+    def test_queue_health_reports_disabled_without_redis_url(self):
+        with patch.dict(os.environ, {"AI_COMPANY_OS_REDIS_URL": ""}, clear=False):
+            health = redis_queue.scheduler_queue_health()
+
+        self.assertEqual(health["status"], "disabled")
+        self.assertFalse(health["configured"])
+        self.assertEqual(health["queue_name"], redis_queue.DEFAULT_QUEUE_NAME)
+
+    def test_queue_health_reports_worker_and_registry_counts(self):
+        class FakeRegistry:
+            def __init__(self, job_ids):
+                self._job_ids = job_ids
+
+            def get_job_ids(self):
+                return self._job_ids
+
+            @property
+            def count(self):
+                return len(self._job_ids)
+
+        class FakeRedisClient:
+            @classmethod
+            def from_url(cls, _url):
+                return cls()
+
+            def ping(self):
+                return True
+
+        class FakeRedisModule:
+            Redis = FakeRedisClient
+
+        class FakeQueue:
+            def __init__(self, *_args, **_kwargs):
+                self.job_ids = ["queued-1", "queued-2"]
+                self.failed_job_registry = FakeRegistry(["failed-1"])
+                self.started_job_registry = FakeRegistry(["started-1"])
+                self.deferred_job_registry = FakeRegistry([])
+                self.scheduled_job_registry = FakeRegistry(["scheduled-1"])
+
+        class FakeWorker:
+            @classmethod
+            def all(cls, **_kwargs):
+                return ["worker-1", "worker-2"]
+
+        with patch.object(
+            redis_queue,
+            "_load_queue_health_runtime",
+            return_value=(FakeRedisModule, FakeQueue, FakeWorker),
+        ):
+            health = redis_queue.scheduler_queue_health(redis_url="redis://test")
+
+        self.assertEqual(health["status"], "critical")
+        self.assertEqual(health["worker_count"], 2)
+        self.assertEqual(health["queued_count"], 2)
+        self.assertEqual(health["failed_count"], 1)
+        self.assertEqual(health["failed_job_ids"], ["failed-1"])
+
     def test_worker_service_rejects_non_postgres_persistence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             sqlite = SQLiteStateStore(os.path.join(tmpdir, "worker.db"))

@@ -50,6 +50,7 @@ from app.api.schemas import (
 )
 from app.core.enums import ApprovalStatus
 from app.models.providers import ModelProviderError
+from app.scheduler.redis_queue import scheduler_queue_health
 from app.services.company import CompanyApplicationService
 
 
@@ -131,6 +132,10 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     @router.get("/scheduler/executions")
     def list_scheduled_executions(schedule_id: str | None = None) -> list[dict]:
         return service.list_scheduled_executions(schedule_id)
+
+    @router.get("/scheduler/queue-health")
+    def scheduler_queue_health_status() -> dict:
+        return scheduler_queue_health()
 
     @router.post("/scheduler/tick")
     def tick_scheduler(payload: SchedulerTickRequest) -> dict:
