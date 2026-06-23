@@ -16,6 +16,7 @@ from app.knowledge_base.embeddings import EmbeddingGateway, EmbeddingProviderErr
 from app.models.providers import ModelProviderError
 from app.observability.alerts import AlertDispatcher
 from app.observability import build_structured_logs
+from app.observability.runbooks import RunbookCatalog
 from app.persistence.store import KnowledgeVectorStore, StateStore
 from app.services.serializers import to_plain
 from app.skills.runtime import SkillRuntimeContext, SkillRuntimeError, execute_skill_adapter
@@ -40,6 +41,7 @@ class CompanyApplicationService:
     persistence: StateStore | None = None
     embeddings: EmbeddingGateway = field(default_factory=create_embedding_gateway)
     alerts: AlertDispatcher = field(default_factory=AlertDispatcher)
+    runbooks: RunbookCatalog = field(default_factory=RunbookCatalog)
     auth: AuthService = field(default_factory=AuthService)
     skill_proposals: dict[str, SkillProposal] = field(default_factory=dict)
     agent_proposals: dict[str, AgentProposal] = field(default_factory=dict)
@@ -815,10 +817,17 @@ class CompanyApplicationService:
         return self.budget_summary()
 
     def list_incidents(self) -> list[dict]:
-        return [to_plain(incident) for incident in self.company_os.incidents.list()]
+        return [self._incident_with_runbook(incident) for incident in self.company_os.incidents.list()]
 
     def alert_status(self) -> dict:
         return self.alerts.status()
+
+    def list_runbooks(self) -> list[dict]:
+        return self.runbooks.list()
+
+    def incident_runbook(self, incident_id: str) -> dict:
+        incident = self.company_os.incidents.get(incident_id)
+        return self.runbooks.match_incident(incident)
 
     def list_backups(self) -> list[dict]:
         return [to_plain(backup) for backup in self.company_os.backups.list()]
@@ -3287,6 +3296,7 @@ class CompanyApplicationService:
             "model_usage_by_model": self._count_by_value(record.model_name for record in model_usage),
             "cost_log_result_counts": self._count_by_value(record.result for record in cost_logs),
             "incident_status_counts": self._count_by_value(incident.status.value for incident in incidents),
+            "runbook_count": len(self.runbooks.list()),
             "recent_tasks": [to_plain(task) for task in recent_tasks],
             "recent_approvals": [to_plain(approval) for approval in recent_approvals],
             "recent_risks": [to_plain(event) for event in risky_events[-10:]],
@@ -3299,7 +3309,7 @@ class CompanyApplicationService:
             "recent_workflow_steps": [to_plain(step) for step in workflow_steps[-10:]],
             "recent_model_usage": [to_plain(record) for record in model_usage[-10:]],
             "recent_cost_logs": [to_plain(record) for record in cost_logs[-10:]],
-            "recent_incidents": [to_plain(incident) for incident in incidents[-10:]],
+            "recent_incidents": [self._incident_with_runbook(incident) for incident in incidents[-10:]],
             "recent_backups": [to_plain(backup) for backup in backups[-10:]],
             "recent_agent_messages": [to_plain(message) for message in agent_messages[-10:]],
             "recent_agent_meetings": [to_plain(meeting) for meeting in agent_meetings[-10:]],
@@ -3324,6 +3334,14 @@ class CompanyApplicationService:
                 ][-10:]
             ],
         }
+
+    def _incident_with_runbook(self, incident: Incident) -> dict:
+        payload = to_plain(incident)
+        runbook = self.runbooks.match_incident(incident)
+        payload["runbook"] = runbook
+        payload["runbook_id"] = runbook["runbook_id"]
+        payload["runbook_title"] = runbook["title"]
+        return payload
 
     def _configure_knowledge_vectors(self) -> None:
         if (

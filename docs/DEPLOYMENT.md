@@ -55,6 +55,8 @@ AI_COMPANY_OS_ALERT_TIMEOUT_SECONDS=5
 
 Keep webhook URLs in deployment secrets. The API exposes only alert status and endpoint host through `GET /alerts/status`; delivery success and failure are written to Audit.
 
+Operational runbooks are available through `GET /runbooks` and are attached to Incident responses. Treat them as the first response checklist before retrying failed schedules, provider calls, blocked actions, or restore operations.
+
 Live provider calls remain disabled until `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` are configured. The same provider settings are passed to the API, scheduler dispatcher, and worker so scheduled Workflows use the same controlled gateways. Keep the API key in deployment secrets, never in the committed `.env.example` or image layers.
 
 The optional PostgreSQL integration test requires a dedicated database because it applies migrations and writes a knowledge fixture:

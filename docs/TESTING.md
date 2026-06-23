@@ -27,6 +27,7 @@
 - Root-managed Budget Policy updates and SQLite reload
 - Incident creation, acknowledgement, resolution, and persistence
 - Optional outbound Incident alert delivery, webhook configuration validation, audit success/failure records, and secret-safe status reporting
+- Incident runbook catalog exposure and source-based runbook matching
 - Backup creation, snapshot contents, checksum verification, restore approval requests, audit events, tamper detection, and persistence
 - Agent message and meeting creation, audit events, dashboard summary, and persistence
 - Task handoff permission/risk flow, linked handoff messages, audit events, dashboard summary, and persistence
@@ -91,6 +92,7 @@ The suite currently covers:
 - Budget Policy update auditing, non-root blocking, dashboard mount points, and SQLite reload
 - Incident creation from blocked actions, API acknowledge/resolve flow, dashboard summary counts, dashboard mount points, audit events, and SQLite reload
 - Optional Incident alert delivery through a mocked webhook transport, failed delivery audit records, configuration validation, and `/alerts/status`
+- Operational runbook matching for blocked safety controls and failed schedules, plus `/runbooks`
 - Backup creation, state snapshot contents, checksum verification, restore approval requests, approved transactional restore, pre-restore safety checkpoints, approval replay prevention, execution-time tamper detection, dashboard controls, audit events, and SQLite reload
 - Agent communication API routes, dashboard mount points, audit events, and SQLite reload
 - Task handoff API routes, linked messages, dashboard mount points, audit events, and SQLite reload

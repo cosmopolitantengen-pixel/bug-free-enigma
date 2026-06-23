@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents and audit records, and persistence/integrity status including alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
+Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and persistence/integrity status including alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -40,6 +40,7 @@ GET /budget/summary
 POST /budget/policy
 GET /cost-logs
 GET /incidents
+GET /runbooks
 GET /backups
 GET /agent-messages
 GET /agent-meetings
@@ -114,6 +115,7 @@ POST /agents/proposals/{proposal_id}/register
 - View budget usage and recent cost logs.
 - Update the active model budget policy from Settings as Human Root.
 - View, acknowledge, and resolve operational incidents.
+- See matched operational runbooks for open Incidents.
 - Create, view, verify checksum integrity, request Human Root restore approval, and apply an approved SQLite restore with an automatic safety checkpoint.
 - Send Agent messages and record Agent coordination meetings.
 - Record auditable task handoffs with linked Agent messages.

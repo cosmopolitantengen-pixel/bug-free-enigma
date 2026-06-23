@@ -102,6 +102,8 @@ input:focus, textarea:focus, select:focus { border-color: var(--accent); box-sha
 textarea { min-height: 76px; resize: vertical; }
 .code-input { font-family: Consolas, monospace; font-size: 12px; }
 .action-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.incident-detail { min-width: 0; display: grid; gap: 5px; }
+.muted-line { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
 .inline-actions { display: flex; gap: 5px; }
 .icon-button.approve { color: var(--accent); background: var(--accent-soft); }
 .icon-button.reject { color: var(--danger); background: var(--danger-soft); }

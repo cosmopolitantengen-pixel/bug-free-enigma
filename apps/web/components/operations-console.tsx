@@ -35,6 +35,7 @@ type DataSet = {
   providers: ApiRecord;
   embeddings: ApiRecord;
   alertStatus: ApiRecord;
+  runbooks: ApiRecord[];
   tasks: ApiRecord[];
   approvals: ApiRecord[];
   incidents: ApiRecord[];
@@ -50,7 +51,7 @@ type DataSet = {
 };
 
 const EMPTY_DATA: DataSet = {
-  summary: {}, health: {}, integrity: {}, schema: {}, providers: {}, embeddings: {}, alertStatus: {}, tasks: [], approvals: [], incidents: [],
+  summary: {}, health: {}, integrity: {}, schema: {}, providers: {}, embeddings: {}, alertStatus: {}, runbooks: [], tasks: [], approvals: [], incidents: [],
   schedules: [], executions: [], queueHealth: {}, agents: [], skills: [], tools: [], workflows: [], audit: [], events: [],
 };
 
@@ -62,6 +63,7 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
   providers: "/models/providers",
   embeddings: "/knowledge/embeddings/status",
   alertStatus: "/alerts/status",
+  runbooks: "/runbooks",
   tasks: "/tasks",
   approvals: "/approvals",
   incidents: "/incidents",
@@ -376,7 +378,13 @@ function GovernanceView({ data, mutate, notify, fail }: { data: DataSet; mutate:
     try { await mutate(`/incidents/${text(id)}/${action}`, { actor_id: "human_root", note: `${action}d from console` }); notify(`Incident ${action}d.`); }
     catch (error) { fail(error instanceof Error ? error.message : "Incident update failed"); }
   };
-  return <div className="view-stack"><section className="two-column"><Panel title="Incidents" meta={`${data.incidents.length} total`}><EntityList items={data.incidents.slice().reverse()} empty="No incidents." render={(item) => <div className="action-row"><EntityRow title={text(item.title)} detail={`${shortId(item.incident_id)} / ${text(item.risk_level)}`} status={text(item.status)} />{text(item.status) !== "resolved" && <div className="inline-actions">{text(item.status) === "open" && <button className="small-button" onClick={() => void updateIncident(item.incident_id, "acknowledge")}>Acknowledge</button>}<button className="small-button" onClick={() => void updateIncident(item.incident_id, "resolve")}>Resolve</button></div>}</div>} /></Panel><Panel title="Integrity checks" meta={text(data.integrity.status)}><EntityList items={(data.integrity.checks as ApiRecord[] | undefined) ?? []} empty="No integrity checks." render={(item) => <EntityRow title={text(item.name)} detail={text(item.message)} status={text(item.status)} />} /></Panel></section><section className="two-column"><Panel title="Audit log" meta={`${data.audit.length} records`}><EntityList items={data.audit.slice(-30).reverse()} empty="No audit records." render={(item) => <EntityRow title={text(item.event_type)} detail={`${text(item.actor_id)} / ${formatDate(item.created_at)}`} status={text(item.risk_level)} />} /></Panel><Panel title="Domain events" meta={`${data.events.length} records`}><EntityList items={data.events.slice(-30).reverse()} empty="No domain events." render={(item) => <EntityRow title={text(item.event_type)} detail={`${text(item.source_type)} / ${shortId(item.source_id)}`} status={formatDate(item.created_at)} />} /></Panel></section></div>;
+  return <div className="view-stack"><section className="two-column"><Panel title="Incidents" meta={`${data.incidents.length} total`}><EntityList items={data.incidents.slice().reverse()} empty="No incidents." render={(item) => <IncidentItem item={item} updateIncident={updateIncident} />} /></Panel><Panel title="Runbooks" meta={`${data.runbooks.length} ready`}><EntityList items={data.runbooks} empty="No runbooks." render={(item) => <EntityRow title={text(item.title)} detail={`${text(item.owner_agent)} / ${text(item.severity)}`} status={shortId(item.runbook_id)} />} /></Panel></section><section className="two-column"><Panel title="Integrity checks" meta={text(data.integrity.status)}><EntityList items={(data.integrity.checks as ApiRecord[] | undefined) ?? []} empty="No integrity checks." render={(item) => <EntityRow title={text(item.name)} detail={text(item.message)} status={text(item.status)} />} /></Panel><Panel title="Audit log" meta={`${data.audit.length} records`}><EntityList items={data.audit.slice(-30).reverse()} empty="No audit records." render={(item) => <EntityRow title={text(item.event_type)} detail={`${text(item.actor_id)} / ${formatDate(item.created_at)}`} status={text(item.risk_level)} />} /></Panel></section><Panel title="Domain events" meta={`${data.events.length} records`}><EntityList items={data.events.slice(-30).reverse()} empty="No domain events." render={(item) => <EntityRow title={text(item.event_type)} detail={`${text(item.source_type)} / ${shortId(item.source_id)}`} status={formatDate(item.created_at)} />} /></Panel></div>;
+}
+
+function IncidentItem({ item, updateIncident }: { item: ApiRecord; updateIncident: (id: unknown, action: "acknowledge" | "resolve") => Promise<void> }) {
+  const runbook = item.runbook as ApiRecord | undefined;
+  const actions = (runbook?.immediate_actions as string[] | undefined) ?? [];
+  return <div className="action-row"><div className="incident-detail"><EntityRow title={text(item.title)} detail={`${shortId(item.incident_id)} / ${text(item.risk_level)} / ${text(item.runbook_title, "No runbook")}`} status={text(item.status)} />{runbook && <span className="muted-line">{text(runbook.title)}: {actions[0] ?? text(runbook.description)}</span>}</div>{text(item.status) !== "resolved" && <div className="inline-actions">{text(item.status) === "open" && <button className="small-button" onClick={() => void updateIncident(item.incident_id, "acknowledge")}>Acknowledge</button>}<button className="small-button" onClick={() => void updateIncident(item.incident_id, "resolve")}>Resolve</button></div>}</div>;
 }
 
 function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean }) {
@@ -388,7 +396,7 @@ function Panel({ title, meta, children }: { title: string; meta?: string; childr
 function Metric({ label, value, icon }: { label: string; value: string; icon: ReactNode }) { return <div className="metric"><div className="metric-icon">{icon}</div><span>{label}</span><strong>{value}</strong></div>; }
 function Field({ label, children }: { label: string; children: ReactNode }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function Fact({ label, value }: { label: string; value: string }) { return <div className="fact"><span>{label}</span><strong>{value}</strong></div>; }
-function EntityList({ items, empty, render }: { items: ApiRecord[]; empty: string; render: (item: ApiRecord) => ReactNode }) { return items.length ? <div className="entity-list">{items.map((item, index) => <div className="entity-item" key={text(item.id ?? item.task_id ?? item.approval_id ?? item.schedule_id ?? item.event_id ?? index)}>{render(item)}</div>)}</div> : <EmptyState message={empty} />; }
+function EntityList({ items, empty, render }: { items: ApiRecord[]; empty: string; render: (item: ApiRecord) => ReactNode }) { return items.length ? <div className="entity-list">{items.map((item, index) => <div className="entity-item" key={text(item.id ?? item.task_id ?? item.approval_id ?? item.incident_id ?? item.runbook_id ?? item.schedule_id ?? item.event_id ?? index)}>{render(item)}</div>)}</div> : <EmptyState message={empty} />; }
 function EntityRow({ title, detail, status }: { title: string; detail: string; status: string }) { return <div className="entity-row"><div><strong>{title}</strong><span>{detail}</span></div><StatusPill value={status} /></div>; }
 function StatusPill({ value }: { value: string }) { const tone = useMemo(() => statusTone(value), [value]); return <span className={`status ${tone}`}>{value.replaceAll("_", " ")}</span>; }
 function EmptyState({ message }: { message: string }) { return <div className="empty-state"><Boxes /><span>{message}</span></div>; }

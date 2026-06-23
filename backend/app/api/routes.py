@@ -402,9 +402,20 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     def list_incidents() -> list[dict]:
         return service.list_incidents()
 
+    @router.get("/runbooks")
+    def list_runbooks() -> list[dict]:
+        return service.list_runbooks()
+
     @router.get("/alerts/status")
     def alert_status() -> dict:
         return service.alert_status()
+
+    @router.get("/incidents/{incident_id}/runbook")
+    def incident_runbook(incident_id: str) -> dict:
+        try:
+            return service.incident_runbook(incident_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="incident not found") from exc
 
     @router.get("/backups")
     def list_backups() -> list[dict]:
