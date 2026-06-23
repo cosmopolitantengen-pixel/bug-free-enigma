@@ -26,9 +26,12 @@ class ApiRouteTests(unittest.TestCase):
         skills = self.client.get("/skills")
         workflows = self.client.get("/workflows")
         tools = self.client.get("/tools")
+        alerts = self.client.get("/alerts/status")
 
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["status"], "ok")
+        self.assertEqual(alerts.status_code, 200)
+        self.assertFalse(alerts.json()["enabled"])
         self.assertEqual(integrity.status_code, 200)
         self.assertEqual(integrity.json()["status"], "warning")
         self.assertIn("persistence_backend", [check["name"] for check in integrity.json()["checks"]])

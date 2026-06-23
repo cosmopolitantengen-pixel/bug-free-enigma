@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents and audit records, and persistence/integrity status. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
+Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents and audit records, and persistence/integrity status including alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -50,6 +50,7 @@ GET /task-reviews
 GET /improvement-proposals
 GET /github/absorptions
 GET /logs/structured
+GET /alerts/status
 GET /memory
 GET /knowledge
 GET /evaluations
@@ -101,6 +102,7 @@ POST /agents/proposals/{proposal_id}/register
 - View system health and core counts.
 - Create, pause, resume, cancel, and tick durable schedules; inspect execution history, failed executions, Redis/RQ worker counts, queue backlog, failed queue jobs, and domain events.
 - View active persistence backend, schema version, and applied SQLite migrations.
+- View outbound alert delivery status without exposing the webhook URL.
 - View system integrity checks for persistence, schema, audit guards, backups, incidents, approvals, and budget policy.
 - View task status distribution.
 - Create strategic goals, update progress, and link tasks, reviews, and improvements.

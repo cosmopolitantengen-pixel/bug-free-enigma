@@ -88,6 +88,7 @@ GET /budget/summary
 POST /budget/policy
 
 GET /incidents
+GET /alerts/status
 POST /incidents/{id}/acknowledge
 POST /incidents/{id}/resolve
 
@@ -203,6 +204,7 @@ Current implemented routes include:
 - `GET /budget/summary`
 - `POST /budget/policy`
 - `GET /incidents`
+- `GET /alerts/status`
 - `POST /incidents/{incident_id}/acknowledge`
 - `POST /incidents/{incident_id}/resolve`
 - `GET /backups`
@@ -306,7 +308,7 @@ HTTP authentication is disabled by default for local development. In protected d
 
 `GET /budget/summary` returns the active local budget policy and current usage. `POST /budget/policy` lets Human Root update the active model budget policy and writes a `budget_policy_updated` audit event. Non-root attempts are blocked, audited, and incidented. `GET /cost-logs` returns recorded and blocked cost log records.
 
-`GET /incidents` returns blocked or operationally risky events that need follow-up. Blocked approval requests, blocked Tool Runs, blocked Workflow tasks, and over-budget model calls create incidents. `POST /incidents/{incident_id}/acknowledge` records who acknowledged the issue. `POST /incidents/{incident_id}/resolve` closes the incident with an optional resolution note. Incident updates are audited.
+`GET /incidents` returns blocked or operationally risky events that need follow-up. Blocked approval requests, blocked Tool Runs, blocked Workflow tasks, over-budget model calls, failed schedules, and provider failures create incidents. When outbound alerts are enabled, service-reported Incidents are posted to the configured webhook and delivery success or failure is audited without exposing the full webhook URL. `GET /alerts/status` reports whether alert delivery is enabled, configured, and which endpoint host is used. `POST /incidents/{incident_id}/acknowledge` records who acknowledged the issue. `POST /incidents/{incident_id}/resolve` closes the incident with an optional resolution note. Incident updates are audited.
 
 `POST /backups` creates a state snapshot, including formal Agent and Skill catalogs, with a controlled rollback plan and deterministic snapshot checksum, then writes a `backup_created` audit event. `GET /backups` lists stored backups. `POST /backups/{backup_id}/verify` recomputes the snapshot checksum, reports verified/mismatched/missing-checksum status, and writes a `backup_verified` audit event. `POST /backups/{backup_id}/restore-request` creates a high-risk restore approval only when checksum verification passes; failed integrity checks are blocked, audited, and incidented. `POST /backups/{backup_id}/restore` applies a verified snapshot to SQLite after a matching Human Root approval, creates a pre-restore safety checkpoint, rejects approval replay, and preserves users, approvals, append-only audit history, incidents, backups, and migrations.
 

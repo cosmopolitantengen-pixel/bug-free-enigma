@@ -14,6 +14,7 @@ from app.core.models import ActionRequest, AuditEvent, EvaluationRecord, Knowled
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.knowledge_base.embeddings import EmbeddingGateway, EmbeddingProviderError, EmbeddingResult, create_embedding_gateway
 from app.models.providers import ModelProviderError
+from app.observability.alerts import AlertDispatcher
 from app.observability import build_structured_logs
 from app.persistence.store import KnowledgeVectorStore, StateStore
 from app.services.serializers import to_plain
@@ -38,6 +39,7 @@ class CompanyApplicationService:
     tasks: dict[str, Task] = field(default_factory=dict)
     persistence: StateStore | None = None
     embeddings: EmbeddingGateway = field(default_factory=create_embedding_gateway)
+    alerts: AlertDispatcher = field(default_factory=AlertDispatcher)
     auth: AuthService = field(default_factory=AuthService)
     skill_proposals: dict[str, SkillProposal] = field(default_factory=dict)
     agent_proposals: dict[str, AgentProposal] = field(default_factory=dict)
@@ -814,6 +816,9 @@ class CompanyApplicationService:
 
     def list_incidents(self) -> list[dict]:
         return [to_plain(incident) for incident in self.company_os.incidents.list()]
+
+    def alert_status(self) -> dict:
+        return self.alerts.status()
 
     def list_backups(self) -> list[dict]:
         return [to_plain(backup) for backup in self.company_os.backups.list()]
@@ -3578,7 +3583,7 @@ class CompanyApplicationService:
         actor_id: str | None = None,
         recommendation: str = "Review the blocked action and decide whether policy, permissions, or task input should change.",
     ) -> Incident:
-        return self.company_os.incidents.report(
+        incident = self.company_os.incidents.report(
             Incident(
                 title=title,
                 description=description,
@@ -3590,6 +3595,27 @@ class CompanyApplicationService:
                 recommendation=recommendation,
             )
         )
+        delivery = self.alerts.send_incident(incident)
+        if delivery.status != "disabled":
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type=(
+                        "alert_delivery_sent"
+                        if delivery.status == "sent"
+                        else "alert_delivery_failed"
+                    ),
+                    actor_id=actor_id or "system",
+                    action="send_incident_alert",
+                    task_id=task_id,
+                    risk_level=risk_level,
+                    approval_status=ApprovalStatus.NOT_REQUIRED,
+                    result=delivery.status,
+                    input_ref=incident.incident_id,
+                    output_ref=delivery.destination,
+                    error=delivery.error,
+                )
+            )
+        return incident
 
     def _execute_tool_run(self, run: ToolRun, tool: Tool) -> None:
         try:

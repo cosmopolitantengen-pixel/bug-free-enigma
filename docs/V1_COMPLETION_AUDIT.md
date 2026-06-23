@@ -41,11 +41,11 @@ Every native process writes task-linked Workflow Runs and Steps. Relevant proces
 
 ## Required API Surface
 
-The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, Approvals, Audit, Memory, Knowledge, Risks, and dashboard summary. The repository also exposes Tool/Skill Runs, Incidents, Evaluations, backups, schedules, scheduler queue health, structured logs, communication, reviews, goals, GitHub absorption, model usage, and budget controls.
+The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, Approvals, Audit, Memory, Knowledge, Risks, and dashboard summary. The repository also exposes Tool/Skill Runs, Incidents, optional alert delivery, Evaluations, backups, schedules, scheduler queue health, structured logs, communication, reviews, goals, GitHub absorption, model usage, and budget controls.
 
 ## Verification Evidence
 
-- Full local backend suite: 173 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 178 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
 - FastAPI application startup smoke check passes.
@@ -61,6 +61,6 @@ These are not proven complete and must not be represented as delivered:
 
 1. Connector-backed GitHub ingestion and real external/browser/computer Tool adapters.
 2. Managed secrets integration, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate.
-3. External alert delivery/runbooks for queue failures, deployment automation, automated browser-level end-to-end CI, and provider-specific pricing/streaming policy.
+3. Managed alert routing/runbooks, deployment automation, automated browser-level end-to-end CI, and provider-specific pricing/streaming policy.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

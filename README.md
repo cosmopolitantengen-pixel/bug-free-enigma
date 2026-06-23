@@ -10,7 +10,7 @@ The first version focuses on the operating foundation:
 - Tools are registered before use and run through Agent permission, risk, approval, and audit checks.
 - Model calls go through a gateway that records usage and audit events.
 - Budget guardrails check model calls before usage and cost are recorded.
-- Blocked and high-risk operational failures create incidents for human follow-up.
+- Blocked and high-risk operational failures create incidents for human follow-up, with optional outbound alert delivery.
 - Human Root can create verified state backups and apply approval-gated durable restores with automatic pre-restore checkpoints.
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
@@ -29,7 +29,7 @@ This repository currently contains:
 - Unit tests in `backend/tests/`
 - A Next.js and TypeScript operations console in `apps/web/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers with queue health reporting, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, configurable OpenAI model and embedding providers, and service-level CI coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers with queue health reporting, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, optional Incident alert webhooks, configurable OpenAI model and embedding providers, and service-level CI coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -87,6 +87,6 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 
 1. Keep the core rules deterministic and well tested.
 2. Add managed secret backends and production identity provider integration.
-3. Add external alert delivery and runbooks for queue/worker failures.
+3. Add managed alert routing and runbooks for queue/worker failures.
 4. Expand browser-level end-to-end coverage for the Next.js console.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.

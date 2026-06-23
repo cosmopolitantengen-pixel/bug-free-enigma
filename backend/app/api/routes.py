@@ -402,6 +402,10 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     def list_incidents() -> list[dict]:
         return service.list_incidents()
 
+    @router.get("/alerts/status")
+    def alert_status() -> dict:
+        return service.alert_status()
+
     @router.get("/backups")
     def list_backups() -> list[dict]:
         return service.list_backups()

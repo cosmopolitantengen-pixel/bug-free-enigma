@@ -45,6 +45,16 @@ AI_COMPANY_OS_API_TOKEN_SHA256=<sha256 hex digest of your operator token>
 
 `AI_COMPANY_OS_API_TOKEN` is also supported for secret-manager backed environments, but the SHA-256 digest form avoids storing the raw token in application config. When auth is required, only `GET /health` and `POST /auth/login` are public; all other API calls require `Authorization: Bearer <token>`. Operators can enter the token in the Next.js console System page. Do not put API tokens in `NEXT_PUBLIC_*` build variables because those are visible to the browser.
 
+Optional outbound alert delivery can be enabled for service-reported Incidents:
+
+```text
+AI_COMPANY_OS_ALERTS_ENABLED=true
+AI_COMPANY_OS_ALERT_WEBHOOK_URL=https://alerts.example/webhook
+AI_COMPANY_OS_ALERT_TIMEOUT_SECONDS=5
+```
+
+Keep webhook URLs in deployment secrets. The API exposes only alert status and endpoint host through `GET /alerts/status`; delivery success and failure are written to Audit.
+
 Live provider calls remain disabled until `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` are configured. The same provider settings are passed to the API, scheduler dispatcher, and worker so scheduled Workflows use the same controlled gateways. Keep the API key in deployment secrets, never in the committed `.env.example` or image layers.
 
 The optional PostgreSQL integration test requires a dedicated database because it applies migrations and writes a knowledge fixture:
@@ -59,6 +69,7 @@ python -m unittest backend.tests.test_postgres_integration
 - Production requires append-only audit storage.
 - Secrets must not be stored in source code.
 - API auth must be enabled before exposing the backend outside a trusted local network.
+- Alert webhook URLs must be supplied through deployment secrets, never committed files.
 - Model and tool credentials require Root-managed configuration.
 - Risk and approval services must start before any high-risk tool adapter is enabled.
 - Dangerous tool adapters are disabled by default.
