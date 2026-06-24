@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.auth.service import AuthService
 from app.bootstrap import CompanyOS, build_company_os
+from app.connectors.github import GitHubConnector
 from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
 from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, SkillRun, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
 from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, SkillRunStatus, TaskStatus, ToolRunStatus
@@ -42,6 +43,7 @@ class CompanyApplicationService:
     embeddings: EmbeddingGateway = field(default_factory=create_embedding_gateway)
     alerts: AlertDispatcher = field(default_factory=AlertDispatcher)
     runbooks: RunbookCatalog = field(default_factory=RunbookCatalog)
+    github_connector: GitHubConnector = field(default_factory=GitHubConnector)
     auth: AuthService = field(default_factory=AuthService)
     skill_proposals: dict[str, SkillProposal] = field(default_factory=dict)
     agent_proposals: dict[str, AgentProposal] = field(default_factory=dict)
@@ -2804,6 +2806,39 @@ class CompanyApplicationService:
     def list_improvement_proposals(self) -> list[dict]:
         self._refresh_proposal_statuses()
         return [to_plain(proposal) for proposal in self.improvement_proposals.values()]
+
+    def import_github_absorption(
+        self,
+        repo_url: str,
+        requested_by_agent: str = "ceo_agent_v1",
+    ) -> dict:
+        self.company_os.agents.get(requested_by_agent)
+        metadata = self.github_connector.fetch_repository(repo_url)
+        proposal = self.analyze_github_absorption(
+            repo_url=metadata.repo_url,
+            requested_by_agent=requested_by_agent,
+            readme=metadata.readme,
+            license_name=metadata.license_name,
+            maintenance_signal=metadata.maintenance_signal,
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="github_absorption_imported",
+                actor_id=requested_by_agent,
+                action="import_github_repository_metadata",
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=proposal["proposal_id"],
+                input_ref=metadata.repo_url,
+                output_ref=proposal["proposal_id"],
+            )
+        )
+        self.sync()
+        return {
+            "proposal": proposal,
+            "metadata": metadata.safe_summary(),
+        }
 
     def analyze_github_absorption(
         self,

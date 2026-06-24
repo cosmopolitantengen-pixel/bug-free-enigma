@@ -1918,6 +1918,14 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(dashboard.json()["github_absorption_count"], 1)
         self.assertIn("github_absorption_registered", [event["event_type"] for event in audit.json()])
 
+    def test_github_absorption_import_route_handles_connector_failure(self):
+        response = self.client.post(
+            "/github/absorptions/import",
+            json={"repo_url": "https://github.com/example/missing", "requested_by_agent": "unknown_agent"},
+        )
+
+        self.assertEqual(response.status_code, 404)
+
     def test_github_absorption_sandbox_blocks_unsafe_repository_signals(self):
         analyzed = self.client.post(
             "/github/absorptions/analyze",

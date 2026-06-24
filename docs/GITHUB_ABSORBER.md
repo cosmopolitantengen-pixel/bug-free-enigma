@@ -2,9 +2,9 @@
 
 ## Purpose
 
-GitHub Absorber is the controlled path for learning from open-source projects. The first implementation is metadata-only: Human Root or an Agent supplies repository URL, README text, license name, and maintenance signal.
+GitHub Absorber is the controlled path for learning from open-source projects. Operators can supply repository metadata manually, or use the controlled GitHub connector to import repository metadata and README text from the GitHub API.
 
-It does not fetch repositories, execute code, install dependencies, enable Tools, create Skills, or mutate Workflows.
+It does not clone repositories, execute code, install dependencies, enable Tools, create Skills, or mutate Workflows.
 
 ## Current Flow
 
@@ -25,6 +25,7 @@ The lower-level API remains available for operators that need to inspect and adv
 
 ```text
 POST /github/absorptions/analyze
+or POST /github/absorptions/import
 -> approval request
 -> POST /github/absorptions/{proposal_id}/sandbox
 -> Human Root approval
@@ -35,8 +36,10 @@ POST /github/absorptions/analyze
 ## Safety Checks
 
 - GitHub URL shape must be accepted.
+- Connector imports accept only HTTPS `github.com/{owner}/{repo}` repository-root URLs.
 - Requested Agent must exist.
 - README is treated as untrusted external content.
+- Optional `GITHUB_TOKEN` is used only as an outbound Authorization header and is never returned in API, Audit, or Knowledge records.
 - Prompt-injection-like content is flagged as source data, not instructions.
 - Unknown, proprietary, or missing licenses fail sandbox.
 - Copyleft licenses are treated as medium risk.

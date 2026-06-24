@@ -37,6 +37,7 @@
 - Task review recording, review memory, review knowledge docs, audit events, dashboard summary, and persistence
 - Review-driven improvement proposal approval, sandbox, knowledge registration, dashboard summary, and persistence
 - GitHub absorption approval, sandbox, knowledge registration, dashboard summary, and persistence
+- GitHub connector URL validation, README decoding, secret-safe metadata, and import routing
 - Strategic goal creation, progress tracking, task/review/improvement linking, dashboard summary, and persistence
 - Structured JSON log export, filtering, dashboard summary, and dashboard mount points
 - SQLite schema migration ledger, API exposure, and dashboard mount points
@@ -103,6 +104,7 @@ The suite currently covers:
 - Task review API routes, review memory/knowledge generation, dashboard mount points, audit events, and SQLite reload
 - Improvement proposal API routes, approval gating, sandbox gating, dashboard mount points, knowledge registration, audit events, and SQLite reload
 - GitHub absorption API routes, approval gating, sandbox gating, dashboard mount points, knowledge registration, audit events, unsafe repository rejection, and SQLite reload
+- Controlled GitHub connector URL validation, README decoding, secret-safe metadata, and import API routing through existing absorption controls
 - Strategic goal API routes, progress auto-completion, dashboard mount points, audit events, and SQLite reload
 - Structured JSON log API routes, category/level filters, dashboard summary fields, and dashboard mount points
 - SQLite migration ledger through `0005_agent_skill_catalogs`, audit append-only trigger migration, `user_version`, `/database/schema`, and dashboard mount points

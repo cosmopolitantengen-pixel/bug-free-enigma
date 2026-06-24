@@ -18,6 +18,7 @@ from app.api.schemas import (
     BackupVerifyRequest,
     BudgetPolicyUpdateRequest,
     GitHubAbsorptionAnalyzeRequest,
+    GitHubAbsorptionImportRequest,
     ImprovementProposalCreateRequest,
     IncidentUpdateRequest,
     KnowledgeWriteRequest,
@@ -50,6 +51,7 @@ from app.api.schemas import (
 )
 from app.core.enums import ApprovalStatus
 from app.models.providers import ModelProviderError
+from app.connectors.github import GitHubConnectorError
 from app.observability.readiness import deployment_readiness
 from app.scheduler.redis_queue import scheduler_queue_health
 from app.services.company import CompanyApplicationService
@@ -649,6 +651,20 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             raise HTTPException(status_code=404, detail="agent not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/github/absorptions/import")
+    def import_github_absorption(payload: GitHubAbsorptionImportRequest) -> dict:
+        try:
+            return service.import_github_absorption(
+                repo_url=payload.repo_url,
+                requested_by_agent=payload.requested_by_agent,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="agent not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except GitHubConnectorError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @router.post("/github/absorptions/{proposal_id}/sandbox")
     def sandbox_github_absorption(proposal_id: str) -> dict:

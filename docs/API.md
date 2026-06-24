@@ -120,6 +120,7 @@ POST /improvement-proposals/{id}/sandbox
 POST /improvement-proposals/{id}/register
 GET /github/absorptions
 POST /github/absorptions/analyze
+POST /github/absorptions/import
 POST /github/absorptions/{id}/sandbox
 POST /github/absorptions/{id}/register
 
@@ -239,6 +240,7 @@ Current implemented routes include:
 - `POST /improvement-proposals/{proposal_id}/register`
 - `GET /github/absorptions`
 - `POST /github/absorptions/analyze`
+- `POST /github/absorptions/import`
 - `POST /github/absorptions/{proposal_id}/sandbox`
 - `POST /github/absorptions/{proposal_id}/register`
 - `GET /risks`
@@ -334,7 +336,7 @@ HTTP authentication is disabled by default for local development. In protected d
 
 `POST /task-reviews/{review_id}/improvements` creates a controlled improvement proposal grounded in a review's lessons and follow-up actions. The proposal receives an approval request before it can be registered. `POST /improvement-proposals/{proposal_id}/sandbox` runs deterministic checks for target type, review linkage, risk boundary, and evidence. `POST /improvement-proposals/{proposal_id}/register` requires approved approval plus passed sandbox, then records the improvement as a knowledge document and writes an `improvement_registered_from_proposal` audit event.
 
-`POST /github/absorptions/analyze` accepts user-supplied repository metadata, README text, license name, and maintenance signal. It does not fetch from GitHub or execute repository code. The analysis applies external-content inspection, license checks, security-signal checks, and capability extraction, then creates an approval-linked absorption proposal. `POST /github/absorptions/{proposal_id}/sandbox` validates GitHub URL shape, Agent reference, license risk, and security findings. `POST /github/absorptions/{proposal_id}/register` requires approved approval plus passed sandbox, then registers the analysis as a Knowledge document only.
+`POST /github/absorptions/analyze` accepts user-supplied repository metadata, README text, license name, and maintenance signal. `POST /github/absorptions/import` uses the controlled GitHub connector to fetch repository metadata and README content from the GitHub API, then routes the result through the same analysis, approval, sandbox, and Knowledge-only registration path. Neither endpoint executes repository code. The analysis applies external-content inspection, license checks, security-signal checks, and capability extraction, then creates an approval-linked absorption proposal. `POST /github/absorptions/{proposal_id}/sandbox` validates GitHub URL shape, Agent reference, license risk, and security findings. `POST /github/absorptions/{proposal_id}/register` requires approved approval plus passed sandbox, then registers the analysis as a Knowledge document only.
 
 `POST /workflows/run` with `github_project_analysis_v1` provides the end-to-end form of the same controls. One task-linked Human Root decision authorizes only the registered GitHub Analysis Skill within that Workflow. Approval, resumed Skill Runs, proposal, sandbox evidence, Knowledge document, Workflow traces, Evaluation, Audit, and Incidents all retain the same task linkage and persist across SQLite restart.
 

@@ -268,6 +268,11 @@ class GitHubAbsorptionAnalyzeRequest(BaseModel):
     maintenance_signal: str = "unknown"
 
 
+class GitHubAbsorptionImportRequest(BaseModel):
+    repo_url: str
+    requested_by_agent: str = "ceo_agent_v1"
+
+
 class ApprovalDecisionRequest(BaseModel):
     status: ApprovalStatus | None = None
     decided_by: str = "human_root"

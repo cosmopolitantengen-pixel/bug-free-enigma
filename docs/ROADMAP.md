@@ -71,7 +71,7 @@ Current status:
 - Strategic goals persist to SQLite, track progress, link tasks/reviews/improvements, audit changes, and appear in the dashboard.
 - Low-risk internal Tool Runs now execute deterministic adapters for task state, knowledge docs, audit reads, aggregate database state, and safe workspace file reads instead of returning only simulated text.
 - Workspace file reads include deterministic external-content inspection so prompt-injection-like text is flagged as untrusted source data.
-- GitHub absorption analysis accepts user-supplied repo metadata, applies external-content/license/security checks, requires approval and sandbox, and registers safe analyses as Knowledge only.
+- GitHub absorption analysis accepts user-supplied repo metadata or controlled GitHub connector metadata import, applies external-content/license/security checks, requires approval and sandbox, and registers safe analyses as Knowledge only.
 - Structured JSON operational logs are exposed as a read-only view over audit, workflow, tool, model, cost, and incident records.
 - SQLite now records a baseline schema migration ledger and exposes database schema status through API and dashboard.
 - SQLite audit logs are guarded by append-only triggers that reject direct update and delete attempts.
@@ -104,7 +104,7 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, optional production HTTP bearer auth, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers with queue health reporting, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
+Current implementation: the required FastAPI surface, optional production HTTP bearer auth, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub connector metadata import, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers with queue health reporting, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 
@@ -159,7 +159,7 @@ Current interim implementation:
 - Add provider-specific pricing policies, streaming, and further model adapters without bypassing budget, privacy, or Audit controls.
 - Add file, document, GitHub, and database tools.
 - Add browser and computer-control adapters only behind strict permission and approval gates.
-- Expand GitHub absorber from metadata-only analysis toward connector-backed ingestion after license, security, sandbox, and human approval checks remain covered.
+- Expand GitHub absorber beyond metadata/README import only after license, security, sandbox, and human approval checks remain covered.
 
 ## Non-Goals for V1
 
