@@ -35,6 +35,7 @@ The core remains framework-light so the safety model can be tested independently
 
 ```powershell
 & 'C:\Users\weiis\AppData\Local\Python\pythoncore-3.14-64\python.exe' -m unittest discover -s backend/tests
+& 'C:\Users\weiis\AppData\Local\Python\pythoncore-3.14-64\python.exe' scripts\release_gate.py
 ```
 
 ## Local API

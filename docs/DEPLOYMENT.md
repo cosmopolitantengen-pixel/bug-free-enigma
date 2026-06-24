@@ -74,6 +74,7 @@ python -m unittest backend.tests.test_postgres_integration
 - Secrets must not be stored in source code.
 - API auth must be enabled before exposing the backend outside a trusted local network.
 - `GET /deployment/readiness` must be reviewed before a production cutover.
+- `python scripts/release_gate.py` must pass before tagging or deploying a release.
 - Alert webhook URLs must be supplied through deployment secrets, never committed files.
 - Model and tool credentials require Root-managed configuration.
 - Risk and approval services must start before any high-risk tool adapter is enabled.

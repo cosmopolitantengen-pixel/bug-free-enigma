@@ -50,6 +50,8 @@ jobs:
         run: python -m compileall -q backend/app backend/tests
       - name: Run backend suite with PostgreSQL and pgvector
         run: python -m unittest discover -s backend/tests
+      - name: Run release gate
+        run: python scripts/release_gate.py
 
   web:
     runs-on: ubuntu-latest

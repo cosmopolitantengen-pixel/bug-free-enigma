@@ -43,6 +43,7 @@
 - SQLite schema migration ledger, API exposure, and dashboard mount points
 - Audit log append-only behavior, including SQLite trigger guards against update and delete
 - System integrity API checks, dashboard summary fields, and dashboard mount points
+- Release gate checks for required API paths, readiness secret redaction, core Workflow execution, console endpoint wiring, and secret-like committed values
 - One-time and recurring scheduler execution, pause/resume/cancel controls, queue health reporting, failure incidents, domain-event filtering, append-only event guards, and SQLite reload
 - Memory writes
 - Knowledge Base writes
@@ -109,4 +110,5 @@ The suite currently covers:
 - Structured JSON log API routes, category/level filters, dashboard summary fields, and dashboard mount points
 - SQLite migration ledger through `0005_agent_skill_catalogs`, audit append-only trigger migration, `user_version`, `/database/schema`, and dashboard mount points
 - System integrity checks for memory mode warnings, SQLite audit guards, backup checksums, and dashboard exposure
+- Release gate script and CI wiring for API contract, readiness, core Workflow, console contract, and secret scan
 - Durable scheduler and event-bus API routes, one-time/recurring timing, controls, queue health reporting, failure incidents, append-only event triggers, dashboard controls, and SQLite reload
