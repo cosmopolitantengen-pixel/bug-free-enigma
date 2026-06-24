@@ -41,11 +41,11 @@ Every native process writes task-linked Workflow Runs and Steps. Relevant proces
 
 ## Required API Surface
 
-The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, Approvals, Audit, Memory, Knowledge, Risks, and dashboard summary. The repository also exposes Tool/Skill Runs, Incidents, optional alert delivery, operational runbooks, deployment readiness checks, controlled GitHub connector import, Evaluations, backups, schedules, scheduler queue health, structured logs, communication, reviews, goals, GitHub absorption, model usage, and budget controls.
+The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, Approvals, Audit, Memory, Knowledge, Risks, and dashboard summary. The repository also exposes Tool/Skill Runs, Incidents, optional alert delivery, operational runbooks, deployment readiness checks, controlled GitHub connector import, Docker/Kubernetes-style secret file loading, Evaluations, backups, schedules, scheduler queue health, structured logs, communication, reviews, goals, GitHub absorption, model usage, and budget controls.
 
 ## Verification Evidence
 
-- Full local backend suite: 191 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 198 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions runs the release gate for API contract, readiness redaction, core Workflow smoke, console endpoint wiring, and secret-like committed values.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
@@ -61,7 +61,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 These are not proven complete and must not be represented as delivered:
 
 1. Broader connector-backed ingestion beyond GitHub metadata/README import and real external/browser/computer Tool adapters.
-2. Managed secrets integration, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate.
+2. External secret-manager adapters beyond file-mounted secrets, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate.
 3. Managed alert routing/escalation, deployment promotion automation, automated browser-level end-to-end CI, and provider-specific pricing/streaming policy.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

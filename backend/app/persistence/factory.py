@@ -5,6 +5,7 @@ import os
 from app.persistence.postgres_store import PostgresStateStore
 from app.persistence.sqlite_store import SQLiteStateStore
 from app.persistence.store import StateStore
+from app.secrets import read_secret
 
 
 def create_state_store(
@@ -18,7 +19,7 @@ def create_state_store(
         selected_database_url = database_url
     else:
         selected_sqlite_path = os.getenv("AI_COMPANY_OS_SQLITE_PATH")
-        selected_database_url = os.getenv("AI_COMPANY_OS_DATABASE_URL") or os.getenv("DATABASE_URL")
+        selected_database_url = read_secret("AI_COMPANY_OS_DATABASE_URL") or read_secret("DATABASE_URL")
 
     if selected_sqlite_path and selected_database_url:
         raise ValueError(

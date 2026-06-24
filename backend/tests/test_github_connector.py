@@ -2,7 +2,9 @@ import base64
 import json
 import os
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -59,6 +61,19 @@ class GitHubConnectorTests(unittest.TestCase):
         self.assertEqual(metadata.maintenance_signal, "active")
         self.assertEqual(fake_transport.calls[0][1]["Authorization"], "Bearer test-token")
         self.assertNotIn("test-token", json.dumps(metadata.safe_summary()))
+
+    def test_connector_accepts_token_from_secret_file(self):
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
+            handle.write("file-github-token\n")
+            secret_path = handle.name
+        try:
+            with patch.dict(os.environ, {"GITHUB_TOKEN_FILE": secret_path}, clear=True):
+                connector = GitHubConnector(timeout_seconds=5, transport=fake_transport)
+                connector.fetch_repository("https://github.com/example/safe-docs")
+
+            self.assertEqual(fake_transport.calls[0][1]["Authorization"], "Bearer file-github-token")
+        finally:
+            os.unlink(secret_path)
 
     def test_connector_rejects_non_root_or_non_github_urls(self):
         connector = GitHubConnector(timeout_seconds=5, transport=fake_transport)

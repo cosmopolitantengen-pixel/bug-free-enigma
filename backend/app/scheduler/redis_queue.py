@@ -7,6 +7,7 @@ from typing import Any
 
 from app.bootstrap import build_company_os
 from app.persistence.factory import create_state_store
+from app.secrets import read_secret
 from app.services.company import CompanyApplicationService
 
 
@@ -21,7 +22,7 @@ def dispatch_once(
     limit: int = 100,
 ) -> dict[str, Any]:
     redis_module, queue_class, retry_class = _load_queue_runtime()
-    selected_redis_url = redis_url or os.getenv("AI_COMPANY_OS_REDIS_URL")
+    selected_redis_url = redis_url or read_secret("AI_COMPANY_OS_REDIS_URL")
     if not selected_redis_url:
         raise RuntimeError("AI_COMPANY_OS_REDIS_URL is required for scheduler dispatch")
     service = _build_worker_service()
@@ -95,7 +96,7 @@ def scheduler_queue_job_id(schedule_id: str, expected_next_run_at: str) -> str:
 
 
 def scheduler_queue_health(redis_url: str | None = None) -> dict[str, Any]:
-    selected_redis_url = redis_url or os.getenv("AI_COMPANY_OS_REDIS_URL")
+    selected_redis_url = redis_url or read_secret("AI_COMPANY_OS_REDIS_URL")
     queue_name = os.getenv("AI_COMPANY_OS_SCHEDULER_QUEUE", DEFAULT_QUEUE_NAME)
     if not selected_redis_url:
         return {

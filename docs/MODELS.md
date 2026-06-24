@@ -13,7 +13,7 @@ The default remains offline and deterministic:
 - `AI_COMPANY_OS_EMBEDDING_PROVIDER=disabled`
 - lexical Knowledge search remains active
 
-The `openai` adapters use the OpenAI Responses and Embeddings APIs. Requests set `store=false` for generated responses, embedding requests explicitly ask for 1536 float dimensions, and API keys are read only from `OPENAI_API_KEY`. The implementation follows the official [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create) and [Embeddings API](https://developers.openai.com/api/reference/resources/embeddings/methods/create) references.
+The `openai` adapters use the OpenAI Responses and Embeddings APIs. Requests set `store=false` for generated responses, embedding requests explicitly ask for 1536 float dimensions, and API keys are read from `OPENAI_API_KEY` or `OPENAI_API_KEY_FILE`. The implementation follows the official [Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create) and [Embeddings API](https://developers.openai.com/api/reference/resources/embeddings/methods/create) references.
 
 ```text
 AI_COMPANY_OS_MODEL_PROVIDER=openai

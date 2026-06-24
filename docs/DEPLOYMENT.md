@@ -45,6 +45,18 @@ AI_COMPANY_OS_API_TOKEN_SHA256=<sha256 hex digest of your operator token>
 
 `AI_COMPANY_OS_API_TOKEN` is also supported for secret-manager backed environments, but the SHA-256 digest form avoids storing the raw token in application config. When auth is required, only `GET /health` and `POST /auth/login` are public; all other API calls require `Authorization: Bearer <token>`. Operators can enter the token in the Next.js console System page. Do not put API tokens in `NEXT_PUBLIC_*` build variables because those are visible to the browser.
 
+Secrets can be supplied directly or through Docker/Kubernetes-style file variables. Do not set both forms for the same secret:
+
+```text
+AI_COMPANY_OS_API_TOKEN_FILE=/run/secrets/ai_company_os_api_token
+AI_COMPANY_OS_API_TOKEN_SHA256_FILE=/run/secrets/ai_company_os_api_token_sha256
+AI_COMPANY_OS_DATABASE_URL_FILE=/run/secrets/ai_company_os_database_url
+AI_COMPANY_OS_REDIS_URL_FILE=/run/secrets/ai_company_os_redis_url
+OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+GITHUB_TOKEN_FILE=/run/secrets/github_token
+AI_COMPANY_OS_ALERT_WEBHOOK_URL_FILE=/run/secrets/incident_alert_webhook
+```
+
 Optional outbound alert delivery can be enabled for service-reported Incidents:
 
 ```text

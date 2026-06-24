@@ -9,6 +9,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from app.secrets import read_secret
+
 
 GitHubTransport = Callable[[str, dict[str, str], float], dict[str, Any]]
 
@@ -49,7 +51,7 @@ class GitHubConnector:
         timeout_seconds: float | None = None,
         transport: GitHubTransport | None = None,
     ) -> None:
-        self._token = (token if token is not None else os.getenv("GITHUB_TOKEN", "")).strip()
+        self._token = (token if token is not None else read_secret("GITHUB_TOKEN", "") or "").strip()
         self._timeout_seconds = timeout_seconds or _timeout_seconds()
         self._transport = transport or _get_json
 

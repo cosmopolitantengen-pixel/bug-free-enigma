@@ -39,7 +39,7 @@ or POST /github/absorptions/import
 - Connector imports accept only HTTPS `github.com/{owner}/{repo}` repository-root URLs.
 - Requested Agent must exist.
 - README is treated as untrusted external content.
-- Optional `GITHUB_TOKEN` is used only as an outbound Authorization header and is never returned in API, Audit, or Knowledge records.
+- Optional `GITHUB_TOKEN` or `GITHUB_TOKEN_FILE` is used only as an outbound Authorization header and is never returned in API, Audit, or Knowledge records.
 - Prompt-injection-like content is flagged as source data, not instructions.
 - Unknown, proprietary, or missing licenses fail sandbox.
 - Copyleft licenses are treated as medium risk.

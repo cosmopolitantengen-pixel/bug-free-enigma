@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.secrets import read_secret
+
 
 EMBEDDING_DIMENSIONS = 1536
 
@@ -160,7 +162,7 @@ class EmbeddingGateway:
 
 def create_embedding_gateway() -> EmbeddingGateway:
     providers: dict[str, EmbeddingProvider] = {}
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = (read_secret("OPENAI_API_KEY", "") or "").strip()
     if api_key:
         providers["openai"] = OpenAIEmbeddingProvider(
             api_key,

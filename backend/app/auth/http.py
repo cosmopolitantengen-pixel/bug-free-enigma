@@ -9,6 +9,7 @@ from collections.abc import Callable, Awaitable
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.secrets import read_secret
 from app.services.company import CompanyApplicationService
 
 
@@ -26,8 +27,8 @@ class HttpAuthSettings:
     def from_env(cls) -> "HttpAuthSettings":
         return cls(
             required=_truthy(os.environ.get("AI_COMPANY_OS_AUTH_REQUIRED")),
-            api_token=_blank_to_none(os.environ.get("AI_COMPANY_OS_API_TOKEN")),
-            api_token_sha256=_normalize_sha256(os.environ.get("AI_COMPANY_OS_API_TOKEN_SHA256")),
+            api_token=read_secret("AI_COMPANY_OS_API_TOKEN"),
+            api_token_sha256=_normalize_sha256(read_secret("AI_COMPANY_OS_API_TOKEN_SHA256")),
         )
 
     @property

@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from app.secrets import secret_configured
+
 
 def deployment_readiness(service: Any, scheduler_queue: dict[str, Any]) -> dict[str, Any]:
     checks = [
@@ -38,10 +40,7 @@ def deployment_readiness(service: Any, scheduler_queue: dict[str, Any]) -> dict[
 
 def _auth_check(service: Any) -> dict[str, Any]:
     required = _truthy(os.environ.get("AI_COMPANY_OS_AUTH_REQUIRED"))
-    has_static_token = bool(
-        _blank_to_none(os.environ.get("AI_COMPANY_OS_API_TOKEN"))
-        or _blank_to_none(os.environ.get("AI_COMPANY_OS_API_TOKEN_SHA256"))
-    )
+    has_static_token = secret_configured("AI_COMPANY_OS_API_TOKEN") or secret_configured("AI_COMPANY_OS_API_TOKEN_SHA256")
     has_users = bool(getattr(service.auth, "has_users")())
     configured = has_static_token or has_users
     if required and configured:

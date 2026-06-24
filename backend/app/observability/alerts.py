@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.core.models import Incident
+from app.secrets import read_secret
 from app.services.serializers import to_plain
 
 
@@ -30,7 +31,7 @@ class AlertSettings:
         timeout = float(os.environ.get("AI_COMPANY_OS_ALERT_TIMEOUT_SECONDS", "5"))
         return cls(
             enabled=_truthy(os.environ.get("AI_COMPANY_OS_ALERTS_ENABLED")),
-            webhook_url=_blank_to_none(os.environ.get("AI_COMPANY_OS_ALERT_WEBHOOK_URL")),
+            webhook_url=read_secret("AI_COMPANY_OS_ALERT_WEBHOOK_URL"),
             timeout_seconds=timeout,
         )
 

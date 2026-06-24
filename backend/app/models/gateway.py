@@ -11,6 +11,7 @@ from app.models.providers import (
     ModelProviderConfigurationError,
     OpenAIResponsesProvider,
 )
+from app.secrets import read_secret
 
 
 @dataclass(frozen=True)
@@ -146,7 +147,7 @@ def create_model_gateway(
     usage_records: list[ModelUsageRecord] | None = None,
 ) -> ModelGateway:
     providers: dict[str, ModelProvider] = {"local": DeterministicModelProvider()}
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key = (read_secret("OPENAI_API_KEY", "") or "").strip()
     if api_key:
         providers["openai"] = OpenAIResponsesProvider(
             api_key,
