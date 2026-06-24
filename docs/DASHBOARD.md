@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and persistence/integrity status including alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
+Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -24,6 +24,7 @@ It connects to the FastAPI backend through:
 GET /dashboard/summary
 GET /database/schema
 GET /system/integrity
+GET /deployment/readiness
 GET /events
 GET /schedules
 GET /scheduler/executions
@@ -103,6 +104,7 @@ POST /agents/proposals/{proposal_id}/register
 - View system health and core counts.
 - Create, pause, resume, cancel, and tick durable schedules; inspect execution history, failed executions, Redis/RQ worker counts, queue backlog, failed queue jobs, and domain events.
 - View active persistence backend, schema version, and applied SQLite migrations.
+- View production readiness checks for auth, persistence, queue, alerts, providers, embeddings, runbooks, and operator backlog.
 - View outbound alert delivery status without exposing the webhook URL.
 - View system integrity checks for persistence, schema, audit guards, backups, incidents, approvals, and budget policy.
 - View task status distribution.

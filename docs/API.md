@@ -9,6 +9,7 @@ POST /auth/logout
 
 GET /database/schema
 GET /system/integrity
+GET /deployment/readiness
 GET /events
 
 GET /schedules
@@ -133,6 +134,8 @@ API handlers should be thin. Permission, risk, approval, audit, Agent, Skill, an
 
 The scheduler API persists one-time and recurring internal jobs, supports pause/resume/cancel controls, records every execution, and exposes an explicit Human Root tick. `GET /events` provides filtered append-only domain events by event type, source type, or task. `GET /scheduler/queue-health` reports Redis/RQ transport health, worker count, backlog counts, failed-job counts, and sample job IDs without exposing Redis credentials.
 
+`GET /deployment/readiness` is stricter than `/health`. It reports whether production-facing requirements are satisfied, including HTTP auth, durable persistence, schema state, audit append-only guards, Redis/RQ scheduler queue configuration, alert delivery metadata, model provider mode, embeddings/vector store status, runbooks, and operator backlog. It exposes booleans, hostnames, counts, and statuses only; raw API tokens, provider keys, Redis URLs, database URLs, and full webhook URLs are not returned.
+
 ## Current Implementation
 
 The first FastAPI route layer is implemented in:
@@ -151,6 +154,7 @@ Current implemented routes include:
 - `POST /auth/logout`
 - `GET /database/schema`
 - `GET /system/integrity`
+- `GET /deployment/readiness`
 - `GET /agents`
 - `POST /agents`
 - `GET /agents/{agent_id}`

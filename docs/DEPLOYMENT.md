@@ -57,6 +57,8 @@ Keep webhook URLs in deployment secrets. The API exposes only alert status and e
 
 Operational runbooks are available through `GET /runbooks` and are attached to Incident responses. Treat them as the first response checklist before retrying failed schedules, provider calls, blocked actions, or restore operations.
 
+Before exposing the service, check `GET /deployment/readiness` from an authenticated operator session. It is stricter than `/health`: local memory state, disabled API auth, missing Redis/RQ queue configuration, missing audit guards, or embedding/vector-store mismatches are reported as readiness blockers or warnings without exposing secret values.
+
 Live provider calls remain disabled until `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` are configured. The same provider settings are passed to the API, scheduler dispatcher, and worker so scheduled Workflows use the same controlled gateways. Keep the API key in deployment secrets, never in the committed `.env.example` or image layers.
 
 The optional PostgreSQL integration test requires a dedicated database because it applies migrations and writes a knowledge fixture:
@@ -71,6 +73,7 @@ python -m unittest backend.tests.test_postgres_integration
 - Production requires append-only audit storage.
 - Secrets must not be stored in source code.
 - API auth must be enabled before exposing the backend outside a trusted local network.
+- `GET /deployment/readiness` must be reviewed before a production cutover.
 - Alert webhook URLs must be supplied through deployment secrets, never committed files.
 - Model and tool credentials require Root-managed configuration.
 - Risk and approval services must start before any high-risk tool adapter is enabled.

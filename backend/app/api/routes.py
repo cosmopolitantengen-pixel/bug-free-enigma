@@ -50,6 +50,7 @@ from app.api.schemas import (
 )
 from app.core.enums import ApprovalStatus
 from app.models.providers import ModelProviderError
+from app.observability.readiness import deployment_readiness
 from app.scheduler.redis_queue import scheduler_queue_health
 from app.services.company import CompanyApplicationService
 
@@ -68,6 +69,10 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
     @router.get("/system/integrity")
     def system_integrity() -> dict:
         return service.system_integrity()
+
+    @router.get("/deployment/readiness")
+    def deployment_readiness_status() -> dict:
+        return deployment_readiness(service, scheduler_queue_health())
 
     @router.get("/events")
     def list_domain_events(

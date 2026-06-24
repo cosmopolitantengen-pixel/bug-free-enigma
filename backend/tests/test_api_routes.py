@@ -22,6 +22,7 @@ class ApiRouteTests(unittest.TestCase):
     def test_health_and_foundation_lists(self):
         health = self.client.get("/health")
         integrity = self.client.get("/system/integrity")
+        readiness = self.client.get("/deployment/readiness")
         agents = self.client.get("/agents")
         skills = self.client.get("/skills")
         workflows = self.client.get("/workflows")
@@ -31,6 +32,8 @@ class ApiRouteTests(unittest.TestCase):
 
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json()["status"], "ok")
+        self.assertEqual(readiness.status_code, 200)
+        self.assertEqual(readiness.json()["status"], "not_ready")
         self.assertEqual(alerts.status_code, 200)
         self.assertFalse(alerts.json()["enabled"])
         self.assertEqual(runbooks.status_code, 200)

@@ -18,7 +18,7 @@ class NextDashboardTests(unittest.TestCase):
         for label in ["Overview", "Work queue", "Scheduler", "Catalog", "Governance", "System"]:
             self.assertIn(label, console)
         for endpoint in [
-            "/dashboard/summary", "/system/integrity", "/workflows/run", "/approvals",
+            "/dashboard/summary", "/system/integrity", "/deployment/readiness", "/workflows/run", "/approvals",
             "/incidents", "/schedules", "/scheduler/executions", "/audit-logs",
             "/database/schema", "/scheduler/queue-health",
             "/models/providers", "/knowledge/embeddings/status", "/alerts/status", "/runbooks",
