@@ -29,7 +29,7 @@ This repository currently contains:
 - Unit tests in `backend/tests/`
 - A Next.js and TypeScript operations console in `apps/web/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers with queue health reporting, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub metadata import, configurable OpenAI model and embedding providers, and service-level CI coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers with queue health reporting, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub metadata import, configurable OpenAI model and embedding providers, service-level CI coverage, and browser E2E console smoke coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -74,7 +74,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3000`. The console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. When API auth is enabled, enter the bearer token on the System page; it is stored in the browser and sent as an `Authorization` header.
+Open `http://127.0.0.1:3000`. The console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. When API auth is enabled, enter the bearer token on the System page; it is stored in the browser and sent as an `Authorization` header. CI runs Playwright browser E2E for the console after type-check and production build. Locally, run `npm run e2e` from `apps/web` after installing the Playwright Chromium browser.
 
 The dependency-free dashboard is retained as a fallback at:
 
@@ -89,5 +89,5 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 1. Keep the core rules deterministic and well tested.
 2. Add managed secret backends and production identity provider integration.
 3. Add managed alert routing and escalation for queue/worker failures.
-4. Expand browser-level end-to-end coverage and release automation for the Next.js console.
+4. Broaden browser-level end-to-end coverage and release automation for the Next.js console.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.

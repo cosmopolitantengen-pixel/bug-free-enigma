@@ -36,12 +36,17 @@ class NextDashboardTests(unittest.TestCase):
         self.assertEqual(package["dependencies"]["next"], "16.2.9")
         self.assertEqual(package["dependencies"]["react"], "19.2.7")
         self.assertIn("typecheck", package["scripts"])
+        self.assertEqual(package["scripts"]["e2e"], "node scripts/run-e2e.mjs")
+        self.assertIn("@playwright/test", package["devDependencies"])
 
     def test_frontend_is_wired_into_production_packaging_and_ci(self):
         paths = {
             "dockerfile": os.path.join(ROOT_DIR, "apps", "web", "Dockerfile"),
             "compose": os.path.join(ROOT_DIR, "docker-compose.yml"),
             "workflow": os.path.join(ROOT_DIR, ".github", "workflows", "backend.yml"),
+            "playwright": os.path.join(ROOT_DIR, "apps", "web", "playwright.config.ts"),
+            "e2e": os.path.join(ROOT_DIR, "apps", "web", "e2e", "operations-console.spec.ts"),
+            "e2e_runner": os.path.join(ROOT_DIR, "apps", "web", "scripts", "run-e2e.mjs"),
         }
         contents = {}
         for name, path in paths.items():
@@ -54,6 +59,13 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("context: apps/web", contents["compose"])
         self.assertIn("npm run typecheck", contents["workflow"])
         self.assertIn("npm run build", contents["workflow"])
+        self.assertIn("npx playwright install --with-deps chromium", contents["workflow"])
+        self.assertIn("npm run e2e", contents["workflow"])
+        self.assertIn("desktop-chromium", contents["playwright"])
+        self.assertIn("mobile-chromium", contents["playwright"])
+        self.assertIn("Workflow accepted:", contents["e2e"])
+        self.assertIn("taskkill", contents["e2e_runner"])
+        self.assertIn("@playwright/test/cli.js", contents["e2e_runner"])
 
 
 if __name__ == "__main__":

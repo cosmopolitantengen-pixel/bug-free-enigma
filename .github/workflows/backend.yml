@@ -67,7 +67,11 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - name: Install web dependencies
         run: npm ci
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
       - name: Type-check web console
         run: npm run typecheck
       - name: Build web console
         run: npm run build
+      - name: Run web browser E2E
+        run: npm run e2e

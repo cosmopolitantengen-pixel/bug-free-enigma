@@ -104,11 +104,11 @@ Current status:
 - Add append-only audit storage.
 - Add structured JSON logs.
 
-Current implementation: the required FastAPI surface, optional production HTTP bearer auth, Docker/Kubernetes-style secret file loading, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub connector metadata import, release gate checks, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers with queue health reporting, the Next.js operations console, and service-level CI jobs are complete. Broader production operations remain.
+Current implementation: the required FastAPI surface, optional production HTTP bearer auth, Docker/Kubernetes-style secret file loading, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub connector metadata import, release gate checks, SQLite and PostgreSQL schema migrations, append-only audit guards, pgvector Knowledge indexing/search, configurable model and embedding providers, structured logs, Compose services, Redis/RQ scheduler workers with queue health reporting, the Next.js operations console, and service-level CI jobs with browser E2E smoke coverage are complete. Broader production operations remain.
 
 ## Phase 3: Dashboard
 
-- Expand automated browser-level coverage for the Next.js TypeScript console.
+- Expand automated browser-level coverage for approval decisions, schedule controls, and incident response in the Next.js TypeScript console.
 - Pages: Dashboard, Tasks, Agents, Skills, Workflows, Approvals, Risks, Audit Logs, Memory, Knowledge Base, Settings.
 - The first dashboard is operational, not decorative.
 
@@ -134,7 +134,7 @@ Current interim implementation:
 - Next.js System view includes production readiness checks without exposing secret values
 - Next.js Governance view includes Incident runbook guidance and runbook catalog visibility
 
-The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls. Automated browser-level E2E CI, deployment promotion automation, managed alert routing/escalation, external secret-manager adapters beyond file-mounted secrets, managed identity, and full production session hardening remain.
+The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls and now has CI browser E2E smoke coverage for desktop and mobile. Broader browser coverage, deployment promotion automation, managed alert routing/escalation, external secret-manager adapters beyond file-mounted secrets, managed identity, and full production session hardening remain.
 
 ## Phase 4: Controlled Evolution
 

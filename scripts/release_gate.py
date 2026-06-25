@@ -47,7 +47,7 @@ PLACEHOLDER_ALLOWLIST = {
     "AI_COMPANY_OS_ALERT_WEBHOOK_URL=https://alerts.example/webhook",
 }
 
-SKIPPED_DIRS = {".git", ".next", "__pycache__", "node_modules"}
+SKIPPED_DIRS = {".git", ".next", "__pycache__", "node_modules", "playwright-report", "test-results"}
 
 
 def main() -> int:
