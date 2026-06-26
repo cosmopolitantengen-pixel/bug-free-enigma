@@ -108,7 +108,7 @@ Current implementation: the required FastAPI surface, optional production HTTP b
 
 ## Phase 3: Dashboard
 
-- Expand automated browser-level coverage for failure states, invalid form inputs, approval rejection, schedule resume/cancel paths, and auth-required API degradation in the Next.js TypeScript console.
+- Expand automated browser-level coverage for provider failure states, destructive restore approval flows, and cross-session auth behavior in the Next.js TypeScript console.
 - Pages: Dashboard, Tasks, Agents, Skills, Workflows, Approvals, Risks, Audit Logs, Memory, Knowledge Base, Settings.
 - The first dashboard is operational, not decorative.
 
@@ -134,7 +134,7 @@ Current interim implementation:
 - Next.js System view includes production readiness checks without exposing secret values
 - Next.js Governance view includes Incident runbook guidance and runbook catalog visibility
 
-The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls and now has CI browser E2E coverage for desktop/mobile navigation, Workflow submission, approval decisions, schedule creation/control, and Incident response. Deeper browser failure-path coverage, deployment promotion automation, managed alert routing/escalation, external secret-manager adapters beyond file-mounted secrets, managed identity, and full production session hardening remain.
+The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls and now has CI browser E2E coverage for desktop/mobile navigation, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation. Deeper browser coverage for provider failures, destructive restore approval, and cross-session auth behavior remains alongside deployment promotion automation, managed alert routing/escalation, external secret-manager adapters beyond file-mounted secrets, managed identity, and full production session hardening.
 
 ## Phase 4: Controlled Evolution
 

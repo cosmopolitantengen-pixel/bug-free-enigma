@@ -15,7 +15,13 @@ type MutatingRequest = {
   body?: Record<string, unknown>;
 };
 
-function fixtureFor(pathname: string): unknown {
+type MockApiOptions = {
+  failReads?: boolean;
+  schedules?: Array<Record<string, unknown>>;
+};
+
+function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
+  if (options.schedules && pathname === "/schedules") return options.schedules;
   const fixtures: Record<string, unknown> = {
     "/dashboard/summary": {
       task_count: 1,
@@ -82,7 +88,7 @@ function fixtureFor(pathname: string): unknown {
   return fixtures[pathname] ?? {};
 }
 
-async function mockApi(page: Page) {
+async function mockApi(page: Page, options: MockApiOptions = {}) {
   const state: { authHeaders: string[]; workflowRequest?: WorkflowRequest; actions: MutatingRequest[] } = { authHeaders: [], actions: [] };
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
@@ -113,9 +119,18 @@ async function mockApi(page: Page) {
       return;
     }
 
+    if (options.failReads && request.method() === "GET" && url.pathname !== "/health") {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Not authenticated" }),
+      });
+      return;
+    }
+
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify(fixtureFor(url.pathname)),
+      body: JSON.stringify(fixtureFor(url.pathname, options)),
     });
   });
   return state;
@@ -190,6 +205,37 @@ test.describe("AI Company OS operations console", () => {
     ]));
   });
 
+  test("rejects approvals and controls paused schedules", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Reject/resume/cancel smoke runs only on the desktop project.");
+    const api = await mockApi(page, {
+      schedules: [{
+        schedule_id: "schedule-paused",
+        name: "Paused readiness check",
+        action: "create_task",
+        status: "paused",
+        next_run_at: "2026-06-26T08:00:00.000Z",
+      }],
+    });
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /Work queue/ }).click();
+    await page.getByTitle("Reject").click();
+    await expect(page.getByText("Approval rejected.")).toBeVisible();
+
+    await page.getByRole("button", { name: /Scheduler/ }).click();
+    await expect(page.getByText("Paused readiness check")).toBeVisible();
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByText("Schedule resumed.")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByText("Schedule cancelled.")).toBeVisible();
+
+    expect(api.actions.map((item) => item.path)).toEqual(expect.arrayContaining([
+      "/approvals/approval-1/reject",
+      "/schedules/schedule-paused/resume",
+      "/schedules/schedule-paused/cancel",
+    ]));
+  });
+
   test("creates and pauses schedules from the scheduler view", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Schedule mutation smoke runs only on the desktop project.");
     const api = await mockApi(page);
@@ -218,6 +264,20 @@ test.describe("AI Company OS operations console", () => {
         description: "Check deployment readiness from the operator console.",
       },
     });
+  });
+
+  test("shows safe errors for invalid input and auth-required API degradation", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Failure-path smoke runs only on the desktop project.");
+    await mockApi(page, { failReads: true });
+    await page.goto("/");
+
+    await expect(page.getByText("API degraded")).toBeVisible();
+    await expect(page.getByText(/readiness: Not authenticated/)).toBeVisible();
+
+    await page.getByRole("button", { name: /System/ }).click();
+    await page.getByLabel("API Base").fill("localhost:8000");
+    await page.getByRole("button", { name: "Apply connection" }).click();
+    await expect(page.getByText("API Base must start with http:// or https://")).toBeVisible();
   });
 
   test("uses the mobile navigation drawer at 390 px", async ({ page }, testInfo) => {

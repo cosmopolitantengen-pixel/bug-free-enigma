@@ -65,8 +65,13 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("mobile-chromium", contents["playwright"])
         self.assertIn("Workflow accepted:", contents["e2e"])
         self.assertIn("/approvals/approval-1/approve", contents["e2e"])
+        self.assertIn("/approvals/approval-1/reject", contents["e2e"])
         self.assertIn("/schedules/schedule-1/pause", contents["e2e"])
+        self.assertIn("/schedules/schedule-paused/resume", contents["e2e"])
+        self.assertIn("/schedules/schedule-paused/cancel", contents["e2e"])
         self.assertIn("/incidents/incident-1/resolve", contents["e2e"])
+        self.assertIn("API Base must start with http:// or https://", contents["e2e"])
+        self.assertIn("Not authenticated", contents["e2e"])
         self.assertIn("taskkill", contents["e2e_runner"])
         self.assertIn("@playwright/test/cli.js", contents["e2e_runner"])
 

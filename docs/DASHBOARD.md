@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage now runs in CI against mocked API responses for desktop and 390 px mobile viewports, including readiness visibility, navigation, bearer-token storage, Workflow submission, approval decisions, schedule creation/control, and Incident response.
+Its six operational views cover overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage now runs in CI against mocked API responses for desktop and 390 px mobile viewports, including readiness visibility, navigation, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -151,4 +151,4 @@ The backend enables CORS for local development. For a dependency-free fallback, 
 
 ## Next Dashboard Step
 
-Expand browser-level E2E coverage into failure states, invalid form inputs, approval rejection, schedule resume/cancel paths, and auth-required API degradation while keeping the existing operational data contract stable.
+Expand browser-level E2E coverage into deeper provider failure states, destructive restore approval flows, and cross-session auth behavior while keeping the existing operational data contract stable.
