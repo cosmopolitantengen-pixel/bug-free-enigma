@@ -51,7 +51,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
 - FastAPI application startup smoke check passes.
 - Dashboard JavaScript syntax check passes.
-- Next.js desktop and 390 px mobile Playwright browser acceptance checks cover loading, navigation, bearer-token storage, production readiness visibility, and a complete Workflow submission in CI.
+- Next.js desktop and 390 px mobile Playwright browser acceptance checks cover loading, navigation, bearer-token storage, production readiness visibility, Workflow submission, approval decisions, schedule creation/control, and Incident response in CI.
 - Git diff whitespace validation passes.
 - SQLite tests cover restart continuation for approval-gated native Workflows.
 - Safety tests cover forbidden Root actions, authorization boundaries, approval enforcement, external-content handling, blocked Tool/Skill Runs, and append-only audit behavior.
@@ -62,6 +62,6 @@ These are not proven complete and must not be represented as delivered:
 
 1. Broader connector-backed ingestion beyond GitHub metadata/README import and real external/browser/computer Tool adapters.
 2. External secret-manager adapters beyond file-mounted secrets, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate.
-3. Managed alert routing/escalation, deployment promotion automation, broader browser-level end-to-end coverage beyond the current console smoke flows, and provider-specific pricing/streaming policy.
+3. Managed alert routing/escalation, deployment promotion automation, deeper browser-level failure-path coverage beyond the current console operator flows, and provider-specific pricing/streaming policy.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

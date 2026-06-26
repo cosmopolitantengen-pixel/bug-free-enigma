@@ -89,5 +89,5 @@ Start the backend, open that file in a browser, and keep the API Base field poin
 1. Keep the core rules deterministic and well tested.
 2. Add managed secret backends and production identity provider integration.
 3. Add managed alert routing and escalation for queue/worker failures.
-4. Broaden browser-level end-to-end coverage and release automation for the Next.js console.
+4. Broaden browser-level failure-path coverage and release automation for the Next.js console.
 5. Add real connectors only through the existing audit, risk, approval, and permission gates.

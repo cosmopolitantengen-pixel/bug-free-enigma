@@ -9,6 +9,12 @@ type WorkflowRequest = {
   input?: Record<string, unknown>;
 };
 
+type MutatingRequest = {
+  method: string;
+  path: string;
+  body?: Record<string, unknown>;
+};
+
 function fixtureFor(pathname: string): unknown {
   const fixtures: Record<string, unknown> = {
     "/dashboard/summary": {
@@ -40,9 +46,30 @@ function fixtureFor(pathname: string): unknown {
     "/alerts/status": { enabled: false, configured: false, destination: "none", endpoint_host: null, timeout_seconds: 5 },
     "/runbooks": [],
     "/tasks": [{ task_id: "task-1", title: "Initial task", status: "planned", risk_level: "low", result: null }],
-    "/approvals": [],
-    "/incidents": [],
-    "/schedules": [],
+    "/approvals": [{
+      approval_id: "approval-1",
+      status: "pending",
+      request: { action: "restore_backup", actor_id: "human_root" },
+    }],
+    "/incidents": [{
+      incident_id: "incident-1",
+      title: "Queue worker failure",
+      status: "open",
+      risk_level: "high",
+      runbook_title: "Scheduler queue recovery",
+      runbook: {
+        title: "Scheduler queue recovery",
+        description: "Recover queue workers.",
+        immediate_actions: ["Restart the failed worker pool."],
+      },
+    }],
+    "/schedules": [{
+      schedule_id: "schedule-1",
+      name: "Daily readiness check",
+      action: "create_task",
+      status: "active",
+      next_run_at: "2026-06-26T08:00:00.000Z",
+    }],
     "/scheduler/executions": [],
     "/scheduler/queue-health": { status: "not_configured", queue_name: "default", worker_count: 0, queued_count: 0, started_count: 0, deferred_count: 0, failed_count: 0 },
     "/agents": [{ agent_id: "human_root", name: "Human Root", department: "root", enabled: true }],
@@ -56,7 +83,7 @@ function fixtureFor(pathname: string): unknown {
 }
 
 async function mockApi(page: Page) {
-  const state: { authHeaders: string[]; workflowRequest?: WorkflowRequest } = { authHeaders: [] };
+  const state: { authHeaders: string[]; workflowRequest?: WorkflowRequest; actions: MutatingRequest[] } = { authHeaders: [], actions: [] };
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -65,12 +92,23 @@ async function mockApi(page: Page) {
 
     if (request.method() === "POST" && url.pathname === "/workflows/run") {
       state.workflowRequest = request.postDataJSON() as WorkflowRequest;
+      state.actions.push({ method: request.method(), path: url.pathname, body: state.workflowRequest });
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
           task: { task_id: "task-created-123456", status: "planned" },
           blocked: false,
         }),
+      });
+      return;
+    }
+
+    if (request.method() === "POST") {
+      const body = request.postDataJSON() as Record<string, unknown> | undefined;
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
       });
       return;
     }
@@ -126,6 +164,59 @@ test.describe("AI Company OS operations console", () => {
       title: "Browser E2E workflow",
       description: "Exercise the operator workflow submission path.",
       input: { source: "playwright" },
+    });
+  });
+
+  test("approves work and resolves incidents from operator views", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Operator mutation smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /Work queue/ }).click();
+    await page.getByTitle("Approve").click();
+    await expect(page.getByText("Approval approved.")).toBeVisible();
+
+    await page.getByRole("button", { name: /Governance/ }).click();
+    await expect(page.getByText("Restart the failed worker pool.")).toBeVisible();
+    await page.getByRole("button", { name: "Acknowledge" }).click();
+    await expect(page.getByText("Incident acknowledged.")).toBeVisible();
+    await page.getByRole("button", { name: "Resolve" }).click();
+    await expect(page.getByText("Incident resolved.")).toBeVisible();
+
+    expect(api.actions.map((item) => item.path)).toEqual(expect.arrayContaining([
+      "/approvals/approval-1/approve",
+      "/incidents/incident-1/acknowledge",
+      "/incidents/incident-1/resolve",
+    ]));
+  });
+
+  test("creates and pauses schedules from the scheduler view", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Schedule mutation smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /Scheduler/ }).click();
+    await page.getByLabel("Schedule name").fill("Playwright readiness check");
+    await page.getByLabel("Task title").fill("Verify production readiness");
+    await page.getByLabel("Task description").fill("Check deployment readiness from the operator console.");
+    await page.getByRole("button", { name: "Create schedule" }).click();
+    await expect(page.getByText("Schedule created.")).toBeVisible();
+
+    await expect(page.getByText("Daily readiness check")).toBeVisible();
+    await page.getByRole("button", { name: "Pause" }).click();
+    await expect(page.getByText("Schedule paused.")).toBeVisible();
+
+    expect(api.actions.map((item) => item.path)).toEqual(expect.arrayContaining([
+      "/schedules",
+      "/schedules/schedule-1/pause",
+    ]));
+    expect(api.actions.find((item) => item.path === "/schedules")?.body).toMatchObject({
+      name: "Playwright readiness check",
+      action: "create_task",
+      payload: {
+        title: "Verify production readiness",
+        description: "Check deployment readiness from the operator console.",
+      },
     });
   });
 

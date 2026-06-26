@@ -64,6 +64,9 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("desktop-chromium", contents["playwright"])
         self.assertIn("mobile-chromium", contents["playwright"])
         self.assertIn("Workflow accepted:", contents["e2e"])
+        self.assertIn("/approvals/approval-1/approve", contents["e2e"])
+        self.assertIn("/schedules/schedule-1/pause", contents["e2e"])
+        self.assertIn("/incidents/incident-1/resolve", contents["e2e"])
         self.assertIn("taskkill", contents["e2e_runner"])
         self.assertIn("@playwright/test/cli.js", contents["e2e_runner"])
 

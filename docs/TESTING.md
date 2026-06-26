@@ -77,7 +77,7 @@ The suite currently covers:
 - Local auth registration, login, duplicate-user rejection, password hashing, and SQLite reload
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
-- Next.js Playwright browser E2E for desktop and 390 px mobile navigation, production readiness visibility, bearer-token storage, and Workflow submission with mocked API responses
+- Next.js Playwright browser E2E for desktop and 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval decisions, schedule creation/pause, and Incident acknowledge/resolve with mocked API responses
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
 - PostgreSQL migrations, append-only guards, and pgvector round trips when `AI_COMPANY_OS_TEST_POSTGRES_URL` is configured
