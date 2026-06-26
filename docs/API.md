@@ -247,9 +247,9 @@ Current implemented routes include:
 - `POST /risks/assess`
 - `GET /dashboard/summary`
 
-Authentication supports local user registration, PBKDF2 password verification, local bearer token sessions, duplicate-email rejection, and SQLite-backed user reload.
+Authentication supports local user registration, PBKDF2 password verification, expiring local bearer token sessions, duplicate-email rejection, and SQLite-backed user reload.
 
-HTTP authentication is disabled by default for local development. In protected deployments, set `AI_COMPANY_OS_AUTH_REQUIRED=true` and configure either `AI_COMPANY_OS_API_TOKEN` or `AI_COMPANY_OS_API_TOKEN_SHA256`. When enabled, only `GET /health` and `POST /auth/login` are public; every other API route requires `Authorization: Bearer <token>`. Valid bearer values are either the configured static API token or a session token returned by `POST /auth/login`. Startup fails if auth is required and neither a static API token nor a persisted user exists.
+HTTP authentication is disabled by default for local development. In protected deployments, set `AI_COMPANY_OS_AUTH_REQUIRED=true` and configure either `AI_COMPANY_OS_API_TOKEN` or `AI_COMPANY_OS_API_TOKEN_SHA256`. When enabled, only `GET /health` and `POST /auth/login` are public; every other API route requires `Authorization: Bearer <token>`. Valid bearer values are either the configured static API token or a session token returned by `POST /auth/login`. Login responses include `expires_at` and `expires_in_seconds`; `AI_COMPANY_OS_SESSION_TTL_SECONDS` controls the local session TTL and defaults to 28800 seconds. Startup fails if auth is required and neither a static API token nor a persisted user exists.
 
 `GET /database/schema` returns the active persistence backend. In memory mode it reports `backend=memory` with no schema version. In SQLite mode it reports `backend=sqlite`, the current `schema_version`, and the applied migration ledger from `schema_migrations`.
 

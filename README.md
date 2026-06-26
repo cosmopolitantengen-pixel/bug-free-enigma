@@ -54,7 +54,7 @@ $env:AI_COMPANY_OS_SQLITE_PATH='E:\1\data\company_os.db'
 ```
 
 The current SQLite adapter persists Agent and Skill catalogs, Skill Runs, tasks, approvals, audit logs, memory records, knowledge docs, evaluations, tools, Tool Runs, workflow traces, model usage, cost logs, incidents, backups, and capability proposals.
-It also persists local users with PBKDF2 password hashes. For local development, HTTP auth is disabled by default. For a protected deployment, set `AI_COMPANY_OS_AUTH_REQUIRED=true` and provide `AI_COMPANY_OS_API_TOKEN` or `AI_COMPANY_OS_API_TOKEN_SHA256`; only `/health` and `/auth/login` stay public.
+It also persists local users with PBKDF2 password hashes and expiring bearer sessions. For local development, HTTP auth is disabled by default. For a protected deployment, set `AI_COMPANY_OS_AUTH_REQUIRED=true` and provide `AI_COMPANY_OS_API_TOKEN` or `AI_COMPANY_OS_API_TOKEN_SHA256`; only `/health` and `/auth/login` stay public.
 
 For the PostgreSQL/pgvector stack, create `.env` from `.env.example`, replace the password, and run:
 

@@ -44,7 +44,7 @@ class CompanyApplicationService:
     alerts: AlertDispatcher = field(default_factory=AlertDispatcher)
     runbooks: RunbookCatalog = field(default_factory=RunbookCatalog)
     github_connector: GitHubConnector = field(default_factory=GitHubConnector)
-    auth: AuthService = field(default_factory=AuthService)
+    auth: AuthService = field(default_factory=AuthService.from_env)
     skill_proposals: dict[str, SkillProposal] = field(default_factory=dict)
     agent_proposals: dict[str, AgentProposal] = field(default_factory=dict)
     improvement_proposals: dict[str, ImprovementProposal] = field(default_factory=dict)
@@ -93,7 +93,7 @@ class CompanyApplicationService:
         loaded_domain_events = self.persistence.load_domain_events()
         loaded_scheduled_jobs = self.persistence.load_scheduled_jobs()
         loaded_scheduled_executions = self.persistence.load_scheduled_executions()
-        self.auth = AuthService(users={user.email: user for user in loaded_users})
+        self.auth = AuthService.from_env(users={user.email: user for user in loaded_users})
         self.tasks = {task.task_id: task for task in loaded_tasks}
         self.skill_proposals = {proposal.proposal_id: proposal for proposal in loaded_skill_proposals}
         self.agent_proposals = {proposal.proposal_id: proposal for proposal in loaded_agent_proposals}

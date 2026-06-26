@@ -3,6 +3,8 @@ import sys
 import tempfile
 import unittest
 import hashlib
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -14,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.http import AuthConfigurationError, HttpAuthSettings
 from app.auth.passwords import hash_password, verify_password
+from app.auth.service import AuthError, AuthService
 from app.main import create_app
 from app.persistence.sqlite_store import SQLiteStateStore
 
@@ -58,6 +61,8 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(bad_login.status_code, 401)
         self.assertEqual(login.status_code, 200)
         self.assertEqual(login.json()["token_type"], "bearer")
+        self.assertIn("expires_at", login.json())
+        self.assertEqual(login.json()["expires_in_seconds"], 8 * 60 * 60)
         self.assertEqual(logout.json()["status"], "ok")
 
     def test_registered_user_persists_and_can_login_after_app_recreation(self):
@@ -124,6 +129,31 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(registered.status_code, 200)
         self.assertEqual(login.status_code, 200)
         self.assertEqual(via_session.status_code, 200)
+
+    def test_session_tokens_expire_and_are_pruned(self):
+        now = datetime(2026, 6, 26, 8, 0, tzinfo=timezone.utc)
+        service = AuthService(session_ttl_seconds=60, clock=lambda: now)
+        service.register("root@example.com", "password123")
+
+        login = service.login("root@example.com", "password123")
+        token = login["access_token"]
+
+        self.assertEqual(login["expires_in_seconds"], 60)
+        self.assertEqual(login["expires_at"], (now + timedelta(seconds=60)).isoformat())
+        self.assertIsNotNone(service.authenticate_session_token(token))
+
+        service.clock = lambda: now + timedelta(seconds=61)
+
+        self.assertIsNone(service.authenticate_session_token(token))
+        self.assertNotIn(token, service.sessions)
+
+    def test_session_ttl_env_must_be_positive_integer(self):
+        with self.assertRaises(AuthError):
+            with patch.dict(os.environ, {"AI_COMPANY_OS_SESSION_TTL_SECONDS": "0"}):
+                AuthService.from_env()
+
+        with patch.dict(os.environ, {"AI_COMPANY_OS_SESSION_TTL_SECONDS": "120"}):
+            self.assertEqual(AuthService.from_env().session_ttl_seconds, 120)
 
     def test_required_http_auth_rejects_locked_startup_configuration(self):
         with self.assertRaises(AuthConfigurationError):

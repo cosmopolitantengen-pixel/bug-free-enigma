@@ -12,7 +12,7 @@ The deterministic V1 operating baseline is implemented and verified. The broader
 
 | Requirement | Evidence | Status |
 | --- | --- | --- |
-| User register, login, logout | Auth routes, password hashing, auth tests | Complete |
+| User register, login, logout | Auth routes, password hashing, expiring session tokens, auth tests | Complete |
 | Create, inspect, pause, cancel, and run tasks | Task API, state history, SQLite persistence | Complete |
 | CEO planning and Project Manager assignment | Native document and task-planning Workflows | Complete |
 | Agent and Skill execution | 17 default Agents, 18 runtime-backed Skills | Complete |
@@ -61,7 +61,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 These are not proven complete and must not be represented as delivered:
 
 1. Broader connector-backed ingestion beyond GitHub metadata/README import and real external/browser/computer Tool adapters.
-2. External secret-manager adapters beyond file-mounted secrets, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate.
+2. External secret-manager adapters beyond file-mounted secrets, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate and expiring local sessions.
 3. Managed alert routing/escalation, deployment promotion automation, deeper browser coverage for provider failures and destructive restore approval flows, and provider-specific pricing/streaming policy.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

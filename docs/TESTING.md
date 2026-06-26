@@ -74,7 +74,7 @@ The suite currently covers:
 - Core safety invariants
 - FastAPI route contracts
 - SQLite reload of tasks, audit logs, memory, and knowledge docs
-- Local auth registration, login, duplicate-user rejection, password hashing, and SQLite reload
+- Local auth registration, login, duplicate-user rejection, password hashing, expiring session tokens, TTL validation, and SQLite reload
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
 - Next.js Playwright browser E2E for desktop and 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses

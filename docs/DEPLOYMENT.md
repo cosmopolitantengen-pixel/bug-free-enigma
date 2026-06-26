@@ -45,6 +45,12 @@ AI_COMPANY_OS_API_TOKEN_SHA256=<sha256 hex digest of your operator token>
 
 `AI_COMPANY_OS_API_TOKEN` is also supported for secret-manager backed environments, but the SHA-256 digest form avoids storing the raw token in application config. When auth is required, only `GET /health` and `POST /auth/login` are public; all other API calls require `Authorization: Bearer <token>`. Operators can enter the token in the Next.js console System page. Do not put API tokens in `NEXT_PUBLIC_*` build variables because those are visible to the browser.
 
+Local user logins issue expiring bearer sessions. The default session TTL is eight hours; adjust it explicitly for your environment:
+
+```text
+AI_COMPANY_OS_SESSION_TTL_SECONDS=28800
+```
+
 Secrets can be supplied directly or through Docker/Kubernetes-style file variables. Do not set both forms for the same secret:
 
 ```text
