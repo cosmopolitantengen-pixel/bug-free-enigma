@@ -15,7 +15,7 @@ class NextDashboardTests(unittest.TestCase):
         with open(styles_path, "r", encoding="utf-8") as handle:
             styles = handle.read()
 
-        for label in ["Overview", "Work queue", "Scheduler", "Catalog", "Governance", "System"]:
+        for label in ["总览", "工作台", "计划任务", "能力目录", "治理中心", "系统设置"]:
             self.assertIn(label, console)
         for endpoint in [
             "/dashboard/summary", "/system/integrity", "/deployment/readiness", "/workflows/run", "/approvals",
@@ -24,8 +24,8 @@ class NextDashboardTests(unittest.TestCase):
             "/models/providers", "/knowledge/embeddings/status", "/alerts/status", "/runbooks",
         ]:
             self.assertIn(endpoint, console)
-        self.assertIn("Loading operations data", console)
-        self.assertIn("No tasks", console)
+        self.assertIn("正在加载运营数据", console)
+        self.assertIn("暂无任务", console)
         self.assertIn("@media (max-width: 760px)", styles)
 
     def test_frontend_dependencies_are_pinned(self):
@@ -63,14 +63,14 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("npm run e2e", contents["workflow"])
         self.assertIn("desktop-chromium", contents["playwright"])
         self.assertIn("mobile-chromium", contents["playwright"])
-        self.assertIn("Workflow accepted:", contents["e2e"])
+        self.assertIn("工作流已受理：", contents["e2e"])
         self.assertIn("/approvals/approval-1/approve", contents["e2e"])
         self.assertIn("/approvals/approval-1/reject", contents["e2e"])
         self.assertIn("/schedules/schedule-1/pause", contents["e2e"])
         self.assertIn("/schedules/schedule-paused/resume", contents["e2e"])
         self.assertIn("/schedules/schedule-paused/cancel", contents["e2e"])
         self.assertIn("/incidents/incident-1/resolve", contents["e2e"])
-        self.assertIn("API Base must start with http:// or https://", contents["e2e"])
+        self.assertIn("API 地址必须以 http:// 或 https:// 开头", contents["e2e"])
         self.assertIn("Not authenticated", contents["e2e"])
         self.assertIn("taskkill", contents["e2e_runner"])
         self.assertIn("@playwright/test/cli.js", contents["e2e_runner"])

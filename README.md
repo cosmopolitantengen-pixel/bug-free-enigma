@@ -44,7 +44,7 @@ The FastAPI app is exposed as `app.main:app`.
 
 ```powershell
 cd backend
-& 'C:\Users\weiis\AppData\Local\Python\pythoncore-3.14-64\python.exe' -m app.main
+& 'C:\Users\weiis\AppData\Local\Python\pythoncore-3.14-64\python.exe' -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 To enable local SQLite persistence for the API, set:
@@ -74,7 +74,7 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:3000`. The console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. When API auth is enabled, enter the bearer token on the System page; it is stored in the browser and sent as an `Authorization` header. CI runs Playwright browser E2E for the console after type-check and production build. Locally, run `npm run e2e` from `apps/web` after installing the Playwright Chromium browser.
+Open `http://localhost:3000`. The Chinese console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. When API auth is enabled, enter the bearer token on the System page; it is stored in the browser and sent as an `Authorization` header. CI runs Playwright browser E2E for the console after type-check and production build. Locally, run `npm run e2e` from `apps/web` after installing the Playwright Chromium browser.
 
 The dependency-free dashboard is retained as a fallback at:
 

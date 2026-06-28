@@ -142,18 +142,18 @@ test.describe("AI Company OS operations console", () => {
     await mockApi(page);
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-    await expect(page.getByText("Tasks")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
+    await expect(page.getByText("任务")).toBeVisible();
     await expect(page.getByText("Initial task")).toBeVisible();
 
-    await page.getByRole("button", { name: /System/ }).click();
-    await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
-    await expect(page.getByText("Production readiness")).toBeVisible();
+    await page.getByRole("button", { name: /系统设置/ }).click();
+    await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
+    await expect(page.getByText("生产就绪检查")).toBeVisible();
     await expect(page.getByText("http_auth_gate")).toBeVisible();
 
-    await page.getByRole("button", { name: /Catalog/ }).click();
-    await expect(page.getByRole("heading", { name: "Catalog" })).toBeVisible();
-    await expect(page.getByPlaceholder("Search agents, skills, tools, and workflows")).toBeVisible();
+    await page.getByRole("button", { name: /能力目录/ }).click();
+    await expect(page.getByRole("heading", { name: "能力目录" })).toBeVisible();
+    await expect(page.getByPlaceholder("搜索智能体、技能、工具和工作流")).toBeVisible();
   });
 
   test("persists bearer token and submits a controlled workflow", async ({ page }, testInfo) => {
@@ -161,19 +161,19 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /System/ }).click();
-    await page.getByLabel("Bearer token").fill("local-token");
-    await page.getByRole("button", { name: "Save token" }).click();
-    await expect(page.getByText("API bearer token saved for this browser.")).toBeVisible();
+    await page.getByRole("button", { name: /系统设置/ }).click();
+    await page.getByLabel("访问令牌").fill("local-token");
+    await page.getByRole("button", { name: "保存令牌" }).click();
+    await expect(page.getByText("API 访问令牌已保存到当前浏览器。")).toBeVisible();
     await expect.poll(() => api.authHeaders).toContain("Bearer local-token");
 
-    await page.getByRole("button", { name: /Work queue/ }).click();
-    await page.getByLabel("Title").fill("Browser E2E workflow");
-    await page.getByLabel("Description").fill("Exercise the operator workflow submission path.");
-    await page.getByLabel("Workflow input (JSON)").fill("{\"source\":\"playwright\"}");
-    await page.getByRole("button", { name: "Create and run" }).click();
+    await page.getByRole("button", { name: /工作台/ }).click();
+    await page.getByLabel("标题").fill("Browser E2E workflow");
+    await page.getByLabel("说明").fill("Exercise the operator workflow submission path.");
+    await page.getByLabel("工作流输入（JSON）").fill("{\"source\":\"playwright\"}");
+    await page.getByRole("button", { name: "创建并运行" }).click();
 
-    await expect(page.getByText(/Workflow accepted:/)).toBeVisible();
+    await expect(page.getByText(/工作流已受理：/)).toBeVisible();
     expect(api.workflowRequest).toMatchObject({
       workflow_id: "document_generation_v1",
       title: "Browser E2E workflow",
@@ -187,16 +187,16 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /Work queue/ }).click();
-    await page.getByTitle("Approve").click();
-    await expect(page.getByText("Approval approved.")).toBeVisible();
+    await page.getByRole("button", { name: /工作台/ }).click();
+    await page.getByTitle("批准").click();
+    await expect(page.getByText("审批已批准。")).toBeVisible();
 
-    await page.getByRole("button", { name: /Governance/ }).click();
+    await page.getByRole("button", { name: /治理中心/ }).click();
     await expect(page.getByText("Restart the failed worker pool.")).toBeVisible();
-    await page.getByRole("button", { name: "Acknowledge" }).click();
-    await expect(page.getByText("Incident acknowledged.")).toBeVisible();
-    await page.getByRole("button", { name: "Resolve" }).click();
-    await expect(page.getByText("Incident resolved.")).toBeVisible();
+    await page.getByRole("button", { name: "确认" }).click();
+    await expect(page.getByText("事件已确认。")).toBeVisible();
+    await page.getByRole("button", { name: "解决" }).click();
+    await expect(page.getByText("事件已解决。")).toBeVisible();
 
     expect(api.actions.map((item) => item.path)).toEqual(expect.arrayContaining([
       "/approvals/approval-1/approve",
@@ -218,16 +218,16 @@ test.describe("AI Company OS operations console", () => {
     });
     await page.goto("/");
 
-    await page.getByRole("button", { name: /Work queue/ }).click();
-    await page.getByTitle("Reject").click();
-    await expect(page.getByText("Approval rejected.")).toBeVisible();
+    await page.getByRole("button", { name: /工作台/ }).click();
+    await page.getByTitle("拒绝").click();
+    await expect(page.getByText("审批已拒绝。")).toBeVisible();
 
-    await page.getByRole("button", { name: /Scheduler/ }).click();
+    await page.getByRole("button", { name: /计划任务/ }).click();
     await expect(page.getByText("Paused readiness check")).toBeVisible();
-    await page.getByRole("button", { name: "Resume" }).click();
-    await expect(page.getByText("Schedule resumed.")).toBeVisible();
-    await page.getByRole("button", { name: "Cancel" }).click();
-    await expect(page.getByText("Schedule cancelled.")).toBeVisible();
+    await page.getByRole("button", { name: "恢复" }).click();
+    await expect(page.getByText("计划任务已恢复。")).toBeVisible();
+    await page.getByRole("button", { name: "取消" }).click();
+    await expect(page.getByText("计划任务已取消。")).toBeVisible();
 
     expect(api.actions.map((item) => item.path)).toEqual(expect.arrayContaining([
       "/approvals/approval-1/reject",
@@ -241,16 +241,16 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /Scheduler/ }).click();
-    await page.getByLabel("Schedule name").fill("Playwright readiness check");
-    await page.getByLabel("Task title").fill("Verify production readiness");
-    await page.getByLabel("Task description").fill("Check deployment readiness from the operator console.");
-    await page.getByRole("button", { name: "Create schedule" }).click();
-    await expect(page.getByText("Schedule created.")).toBeVisible();
+    await page.getByRole("button", { name: /计划任务/ }).click();
+    await page.getByLabel("计划名称").fill("Playwright readiness check");
+    await page.getByLabel("任务标题").fill("Verify production readiness");
+    await page.getByLabel("任务说明").fill("Check deployment readiness from the operator console.");
+    await page.getByRole("button", { name: "创建计划任务" }).click();
+    await expect(page.getByText("计划任务已创建。")).toBeVisible();
 
     await expect(page.getByText("Daily readiness check")).toBeVisible();
-    await page.getByRole("button", { name: "Pause" }).click();
-    await expect(page.getByText("Schedule paused.")).toBeVisible();
+    await page.getByRole("button", { name: "暂停" }).click();
+    await expect(page.getByText("计划任务已暂停。")).toBeVisible();
 
     expect(api.actions.map((item) => item.path)).toEqual(expect.arrayContaining([
       "/schedules",
@@ -271,13 +271,13 @@ test.describe("AI Company OS operations console", () => {
     await mockApi(page, { failReads: true });
     await page.goto("/");
 
-    await expect(page.getByText("API degraded")).toBeVisible();
-    await expect(page.getByText(/readiness: Not authenticated/)).toBeVisible();
+    await expect(page.getByText("API 部分异常")).toBeVisible();
+    await expect(page.getByText(/生产就绪：Not authenticated/)).toBeVisible();
 
-    await page.getByRole("button", { name: /System/ }).click();
-    await page.getByLabel("API Base").fill("localhost:8000");
-    await page.getByRole("button", { name: "Apply connection" }).click();
-    await expect(page.getByText("API Base must start with http:// or https://")).toBeVisible();
+    await page.getByRole("button", { name: /系统设置/ }).click();
+    await page.getByLabel("API 地址").fill("localhost:8000");
+    await page.getByRole("button", { name: "应用连接" }).click();
+    await expect(page.getByText("API 地址必须以 http:// 或 https:// 开头")).toBeVisible();
   });
 
   test("uses the mobile navigation drawer at 390 px", async ({ page }, testInfo) => {
@@ -285,9 +285,9 @@ test.describe("AI Company OS operations console", () => {
     await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: "Open navigation" }).click();
-    await page.getByRole("button", { name: /Scheduler/ }).click();
-    await expect(page.getByRole("heading", { name: "Scheduler" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Queue health" })).toBeVisible();
+    await page.getByRole("button", { name: "打开导航" }).click();
+    await page.getByRole("button", { name: /计划任务/ }).click();
+    await expect(page.getByRole("heading", { name: "计划任务", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "队列健康" })).toBeVisible();
   });
 });
