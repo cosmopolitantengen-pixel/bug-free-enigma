@@ -14,9 +14,32 @@ class BudgetGuard:
         self.policy = policy or BudgetPolicy()
         self._cost_logs: list[CostLog] = list(cost_logs or [])
 
-    def check_model_call(self, prompt: str, purpose: str) -> BudgetCheck:
-        estimated_tokens = self._estimate_tokens(prompt) + self._estimate_tokens(self._mock_response(prompt, purpose))
-        estimated_cost = self.estimate_cost(estimated_tokens)
+    def check_model_call(
+        self,
+        prompt: str,
+        purpose: str,
+        *,
+        input_cost_per_token: float | None = None,
+        output_cost_per_token: float | None = None,
+    ) -> BudgetCheck:
+        prompt_tokens = self._estimate_tokens(prompt)
+        completion_tokens = self._estimate_tokens(
+            self._mock_response(prompt, purpose)
+        )
+        estimated_tokens = prompt_tokens + completion_tokens
+        input_rate = (
+            self.policy.cost_per_token
+            if input_cost_per_token is None
+            else input_cost_per_token
+        )
+        output_rate = (
+            self.policy.cost_per_token
+            if output_cost_per_token is None
+            else output_cost_per_token
+        )
+        estimated_cost = round(
+            prompt_tokens * input_rate + completion_tokens * output_rate, 9
+        )
         spent_tokens = sum(log.tokens for log in self._cost_logs if log.result == "recorded")
         spent_cost = sum(log.amount for log in self._cost_logs if log.result == "recorded")
 
@@ -31,9 +54,15 @@ class BudgetGuard:
         return BudgetCheck(True, "budget allowed", estimated_tokens, estimated_cost, self.policy.policy_id)
 
     def estimate_cost(self, tokens: int) -> float:
-        return round(tokens * self.policy.cost_per_token, 6)
+        return round(tokens * self.policy.cost_per_token, 9)
 
-    def max_output_tokens(self, prompt: str) -> int:
+    def max_output_tokens(
+        self,
+        prompt: str,
+        *,
+        input_cost_per_token: float | None = None,
+        output_cost_per_token: float | None = None,
+    ) -> int:
         prompt_tokens = self._estimate_tokens(prompt)
         if not self.policy.enabled:
             return max(1, self.policy.max_tokens_per_call - prompt_tokens)
@@ -43,12 +72,24 @@ class BudgetGuard:
             self.policy.max_tokens_per_call - prompt_tokens,
             self.policy.max_total_tokens - spent_tokens - prompt_tokens,
         ]
-        if self.policy.cost_per_token > 0:
-            remaining_cost_tokens = int(
-                max(0, self.policy.max_estimated_cost - spent_cost)
-                / self.policy.cost_per_token
+        input_rate = (
+            self.policy.cost_per_token
+            if input_cost_per_token is None
+            else input_cost_per_token
+        )
+        output_rate = (
+            self.policy.cost_per_token
+            if output_cost_per_token is None
+            else output_cost_per_token
+        )
+        if output_rate > 0:
+            remaining_output_cost = max(
+                0,
+                self.policy.max_estimated_cost
+                - spent_cost
+                - prompt_tokens * input_rate,
             )
-            limits.append(remaining_cost_tokens - prompt_tokens)
+            limits.append(int(remaining_output_cost / output_rate))
         return max(1, min(limits))
 
     def record_cost(
@@ -127,7 +168,7 @@ class BudgetGuard:
             "max_estimated_cost": self.policy.max_estimated_cost,
             "currency": self.policy.currency,
             "used_tokens": sum(log.tokens for log in recorded),
-            "used_cost": round(sum(log.amount for log in recorded), 6),
+            "used_cost": round(sum(log.amount for log in recorded), 9),
             "cost_log_count": len(self._cost_logs),
         }
 

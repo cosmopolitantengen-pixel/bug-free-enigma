@@ -137,6 +137,8 @@ The scheduler API persists one-time and recurring internal jobs, supports pause/
 
 `GET /deployment/readiness` is stricter than `/health`. It reports whether production-facing requirements are satisfied, including HTTP auth, durable persistence, schema state, audit append-only guards, Redis/RQ scheduler queue configuration, alert delivery metadata, model provider mode, embeddings/vector store status, runbooks, and operator backlog. It exposes booleans, hostnames, counts, and statuses only; raw API tokens, provider keys, Redis URLs, database URLs, and full webhook URLs are not returned.
 
+`GET /models/providers` lists configured provider names, each provider's default and allowlisted models, the explicit fallback order, and non-secret per-million-token pricing metadata. `POST /models/generate` accepts optional `provider` and `model_name` selections. Successful responses include routing metadata for requested, attempted, and actual providers plus a `fallback_used` flag; usage and CostLog records always identify the provider and model that actually completed the request.
+
 ## Current Implementation
 
 The first FastAPI route layer is implemented in:

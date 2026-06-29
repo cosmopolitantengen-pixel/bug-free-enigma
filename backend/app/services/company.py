@@ -1792,7 +1792,17 @@ class CompanyApplicationService:
         provider: str | None = None,
     ) -> dict:
         self.company_os.agents.get(actor_id)
-        budget_check = self.company_os.budget.check_model_call(prompt, purpose)
+        input_rate, output_rate = self.company_os.models.budget_rates(
+            provider,
+            model_name,
+            self.company_os.budget.policy.cost_per_token,
+        )
+        budget_check = self.company_os.budget.check_model_call(
+            prompt,
+            purpose,
+            input_cost_per_token=input_rate,
+            output_cost_per_token=output_rate,
+        )
         if not budget_check.allowed:
             cost_log = self.company_os.budget.record_cost(
                 source_type="model_usage",
@@ -1843,7 +1853,11 @@ class CompanyApplicationService:
                 model_name=model_name,
                 provider=provider,
                 cost_per_token=self.company_os.budget.policy.cost_per_token,
-                max_output_tokens=self.company_os.budget.max_output_tokens(prompt),
+                max_output_tokens=self.company_os.budget.max_output_tokens(
+                    prompt,
+                    input_cost_per_token=input_rate,
+                    output_cost_per_token=output_rate,
+                ),
             )
         except ModelProviderError as exc:
             cost_log = self.company_os.budget.record_cost(
@@ -1899,7 +1913,11 @@ class CompanyApplicationService:
                 task_id=task_id,
                 risk_level=RiskLevel.LOW,
                 approval_status=ApprovalStatus.NOT_REQUIRED,
-                result="model usage recorded",
+                result=(
+                    "model fallback used"
+                    if response.fallback_used
+                    else "model usage recorded"
+                ),
                 input_ref=response.usage.input_ref,
                 output_ref=response.usage.output_ref,
                 model_name=response.usage.model_name,
@@ -1913,6 +1931,12 @@ class CompanyApplicationService:
             "cost_log": to_plain(cost_log),
             "incident": None,
             "blocked": False,
+            "routing": {
+                "requested_provider": response.requested_provider,
+                "actual_provider": response.usage.provider,
+                "attempted_providers": list(response.attempted_providers),
+                "fallback_used": response.fallback_used,
+            },
         }
 
     def request_skill_run(
@@ -3267,7 +3291,7 @@ class CompanyApplicationService:
             "registered_workflow_count": len(workflows),
             "model_usage_count": len(model_usage),
             "model_token_count": sum(record.total_tokens for record in model_usage),
-            "model_estimated_cost": round(sum(record.estimated_cost for record in model_usage), 6),
+            "model_estimated_cost": round(sum(record.estimated_cost for record in model_usage), 9),
             "cost_log_count": len(cost_logs),
             "incident_count": len(incidents),
             "open_incident_count": len([incident for incident in incidents if incident.status.value != "resolved"]),

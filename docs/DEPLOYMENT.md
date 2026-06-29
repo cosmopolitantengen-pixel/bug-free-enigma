@@ -59,6 +59,7 @@ AI_COMPANY_OS_API_TOKEN_SHA256_FILE=/run/secrets/ai_company_os_api_token_sha256
 AI_COMPANY_OS_DATABASE_URL_FILE=/run/secrets/ai_company_os_database_url
 AI_COMPANY_OS_REDIS_URL_FILE=/run/secrets/ai_company_os_redis_url
 OPENAI_API_KEY_FILE=/run/secrets/openai_api_key
+DEEPSEEK_API_KEY_FILE=/run/secrets/deepseek_api_key
 GITHUB_TOKEN_FILE=/run/secrets/github_token
 AI_COMPANY_OS_ALERT_WEBHOOK_URL_FILE=/run/secrets/incident_alert_webhook
 ```
@@ -77,7 +78,7 @@ Operational runbooks are available through `GET /runbooks` and are attached to I
 
 Before exposing the service, check `GET /deployment/readiness` from an authenticated operator session. It is stricter than `/health`: local memory state, disabled API auth, missing Redis/RQ queue configuration, missing audit guards, or embedding/vector-store mismatches are reported as readiness blockers or warnings without exposing secret values.
 
-Live provider calls remain disabled until `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` are configured. The same provider settings are passed to the API, scheduler dispatcher, and worker so scheduled Workflows use the same controlled gateways. Keep the API key in deployment secrets, never in the committed `.env.example` or image layers.
+Live provider calls remain disabled until a provider credential and matching `AI_COMPANY_OS_MODEL_PROVIDER` are configured. Use `DEEPSEEK_API_KEY` with `deepseek`, or `OPENAI_API_KEY` with `openai`; OpenAI remains separately configurable for embeddings. `AI_COMPANY_OS_MODEL_FALLBACKS` may name only providers whose credentials are present. The same provider, fallback, model, and pricing settings are passed to the API, scheduler dispatcher, and worker so scheduled Workflows use the same controlled gateways. Keep API keys in deployment secrets, never in the committed `.env.example` or image layers.
 
 The optional PostgreSQL integration test requires a dedicated database because it applies migrations and writes a knowledge fixture:
 

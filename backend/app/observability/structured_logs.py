@@ -128,7 +128,7 @@ def _model_usage_log(record: ModelUsageRecord) -> StructuredLog:
         risk_level=None,
         approval_status=None,
         status="recorded",
-        result=f"{record.total_tokens} tokens / {record.estimated_cost:.6f}",
+        result=f"{record.total_tokens} tokens / {record.estimated_cost:.9f}",
         message=f"{record.model_name} used for {record.purpose}",
         payload=payload,
     )

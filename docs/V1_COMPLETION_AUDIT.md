@@ -45,7 +45,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 198 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 207 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions runs the release gate for API contract, readiness redaction, core Workflow smoke, console endpoint wiring, and secret-like committed values.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
@@ -62,6 +62,6 @@ These are not proven complete and must not be represented as delivered:
 
 1. Broader connector-backed ingestion beyond GitHub metadata/README import and real external/browser/computer Tool adapters.
 2. External secret-manager adapters beyond file-mounted secrets, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate and expiring local sessions.
-3. Managed alert routing/escalation, deployment promotion automation, deeper browser coverage for provider failures and destructive restore approval flows, and provider-specific pricing/streaming policy.
+3. Managed alert routing/escalation, deployment promotion automation, deeper browser coverage for provider failures and destructive restore approval flows, and streaming policy. DeepSeek V4 generation now has provider-specific input/output pricing and explicit multi-provider fallback routing.
 
 The safety boundary remains unchanged: future adapters must enter through existing Permission, Risk, Approval, Audit, budget, sandbox, and Incident controls.

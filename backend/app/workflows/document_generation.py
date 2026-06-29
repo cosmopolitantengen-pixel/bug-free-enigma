@@ -397,7 +397,17 @@ class DocumentGenerationWorkflow:
             "## Safety Note\n\n"
             "This output is internal by default and must enter approval before any external publication."
         )
-        budget_check = self.budget.check_model_call(prompt, "document_generation")
+        input_rate, output_rate = self.models.budget_rates(
+            None,
+            None,
+            self.budget.policy.cost_per_token,
+        )
+        budget_check = self.budget.check_model_call(
+            prompt,
+            "document_generation",
+            input_cost_per_token=input_rate,
+            output_cost_per_token=output_rate,
+        )
         if not budget_check.allowed:
             self.budget.record_cost(
                 source_type="model_usage",
@@ -440,7 +450,11 @@ class DocumentGenerationWorkflow:
                 purpose="document_generation",
                 task_id=task.task_id,
                 cost_per_token=self.budget.policy.cost_per_token,
-                max_output_tokens=self.budget.max_output_tokens(prompt),
+                max_output_tokens=self.budget.max_output_tokens(
+                    prompt,
+                    input_cost_per_token=input_rate,
+                    output_cost_per_token=output_rate,
+                ),
             )
         except ModelProviderError as exc:
             cost_log = self.budget.record_cost(
@@ -496,7 +510,11 @@ class DocumentGenerationWorkflow:
                 task_id=task.task_id,
                 risk_level=RiskLevel.LOW,
                 approval_status=ApprovalStatus.NOT_REQUIRED,
-                result="model usage recorded",
+                result=(
+                    "model fallback used"
+                    if response.fallback_used
+                    else "model usage recorded"
+                ),
                 input_ref=response.usage.input_ref,
                 output_ref=response.usage.output_ref,
                 model_name=response.usage.model_name,

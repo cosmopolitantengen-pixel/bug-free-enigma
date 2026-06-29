@@ -156,7 +156,7 @@ Current interim implementation:
 - Current first Tool layer: task manager, knowledge base, audit read, external API, and code execution tool definitions.
 - Safe internal adapters exist for task manager, knowledge base, audit read, database read, and workspace-only filesystem read tools.
 - Dangerous tool adapters are disabled by default and only simulated in the first implementation.
-- Add provider-specific pricing policies, streaming, and further model adapters without bypassing budget, privacy, or Audit controls.
+- Add streaming and further model adapters without bypassing provider-specific pricing, budget, privacy, or Audit controls. Native OpenAI Responses and DeepSeek Chat Completions adapters now share explicit fallback routing and actual-provider usage records.
 - Add file, document, GitHub, and database tools.
 - Add browser and computer-control adapters only behind strict permission and approval gates.
 - Expand GitHub absorber beyond metadata/README import only after license, security, sandbox, and human approval checks remain covered.

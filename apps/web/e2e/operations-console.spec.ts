@@ -40,7 +40,31 @@ function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
     },
     "/system/integrity": { status: "ok", checks: [] },
     "/database/schema": { backend: "sqlite", schema_version: 1, migrations: [] },
-    "/models/providers": { default_provider: "local", default_model: "deterministic" },
+    "/models/providers": {
+      default_provider: "deepseek",
+      default_model: "deepseek-v4-flash",
+      providers: ["deepseek", "local"],
+      fallback_order: ["local"],
+      allowed_models: {
+        deepseek: ["deepseek-v4-flash", "deepseek-v4-pro"],
+        local: ["deterministic_mock_v1"],
+      },
+      provider_details: {
+        deepseek: {
+          default_model: "deepseek-v4-flash",
+          allowed_models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+          pricing_usd_per_million: {
+            "deepseek-v4-flash": { input: 0.14, output: 0.28 },
+            "deepseek-v4-pro": { input: 0.435, output: 0.87 },
+          },
+        },
+        local: {
+          default_model: "deterministic_mock_v1",
+          allowed_models: ["deterministic_mock_v1"],
+          pricing_usd_per_million: {},
+        },
+      },
+    },
     "/knowledge/embeddings/status": {
       enabled: false,
       default_model: null,
@@ -109,6 +133,27 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       return;
     }
 
+    if (request.method() === "POST" && url.pathname === "/models/generate") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          output: "DeepSeek generated result",
+          usage: { provider: "deepseek", model_name: body.model_name, total_tokens: 42 },
+          cost_log: { amount: 0.000021 },
+          routing: {
+            requested_provider: body.provider,
+            actual_provider: "deepseek",
+            attempted_providers: ["deepseek"],
+            fallback_used: false,
+          },
+          blocked: false,
+        }),
+      });
+      return;
+    }
+
     if (request.method() === "POST") {
       const body = request.postDataJSON() as Record<string, unknown> | undefined;
       state.actions.push({ method: request.method(), path: url.pathname, body });
@@ -150,6 +195,8 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.getByRole("heading", { name: "系统设置" })).toBeVisible();
     await expect(page.getByText("生产就绪检查")).toBeVisible();
     await expect(page.getByText("http_auth_gate")).toBeVisible();
+    await expect(page.getByText("模型路由与价格")).toBeVisible();
+    await expect(page.getByText(/deepseek-v4-pro：输入 \$0.435/)).toBeVisible();
 
     await page.getByRole("button", { name: /能力目录/ }).click();
     await expect(page.getByRole("heading", { name: "能力目录" })).toBeVisible();
@@ -179,6 +226,28 @@ test.describe("AI Company OS operations console", () => {
       title: "Browser E2E workflow",
       description: "Exercise the operator workflow submission path.",
       input: { source: "playwright" },
+    });
+  });
+
+  test("selects a provider and model for controlled generation", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Model routing smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByRole("button", { name: /工作台/ }).click();
+    await page.getByLabel("模型服务商").selectOption("deepseek");
+    await page.getByRole("combobox", { name: "模型", exact: true }).selectOption("deepseek-v4-pro");
+    await page.getByLabel("提示词").fill("请生成一份多模型路由测试结果。");
+    await page.getByRole("button", { name: "调用模型" }).click();
+
+    await expect(page.getByText("模型调用已完成。")).toBeVisible();
+    await expect(page.getByText("DeepSeek generated result")).toBeVisible();
+    await expect(page.getByText("降级发生")).toBeVisible();
+    expect(api.actions.find((item) => item.path === "/models/generate")?.body).toMatchObject({
+      provider: "deepseek",
+      model_name: "deepseek-v4-pro",
+      actor_id: "document_agent_v1",
+      purpose: "console_generation",
     });
   });
 

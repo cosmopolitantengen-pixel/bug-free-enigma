@@ -21,11 +21,13 @@ class NextDashboardTests(unittest.TestCase):
             "/dashboard/summary", "/system/integrity", "/deployment/readiness", "/workflows/run", "/approvals",
             "/incidents", "/schedules", "/scheduler/executions", "/audit-logs",
             "/database/schema", "/scheduler/queue-health",
-            "/models/providers", "/knowledge/embeddings/status", "/alerts/status", "/runbooks",
+            "/models/providers", "/models/generate", "/knowledge/embeddings/status", "/alerts/status", "/runbooks",
         ]:
             self.assertIn(endpoint, console)
         self.assertIn("正在加载运营数据", console)
         self.assertIn("暂无任务", console)
+        self.assertIn("模型服务商", console)
+        self.assertIn("模型路由与价格", console)
         self.assertIn("@media (max-width: 760px)", styles)
 
     def test_frontend_dependencies_are_pinned(self):

@@ -93,6 +93,7 @@ const VALUE_LABELS: Record<string, string> = {
   create_task: "创建任务",
   critical: "严重",
   data: "数据",
+  deepseek: "DeepSeek",
   deferred: "已延后",
   deterministic: "确定性本地模型",
   disabled: "已禁用",

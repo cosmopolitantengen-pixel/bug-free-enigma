@@ -67,7 +67,7 @@ class OpenAIResponsesProvider:
     ) -> None:
         if not api_key.strip():
             raise ModelProviderConfigurationError("OPENAI_API_KEY is required for the openai provider")
-        _validate_base_url(base_url)
+        _validate_base_url(base_url, "OPENAI_BASE_URL")
         if not default_model.strip():
             raise ModelProviderConfigurationError("AI_COMPANY_OS_MODEL_NAME is required")
         self.default_model = default_model.strip()
@@ -108,6 +108,81 @@ class OpenAIResponsesProvider:
         return ProviderGeneration(output, prompt_tokens, completion_tokens, total_tokens)
 
 
+class DeepSeekChatProvider:
+    name = "deepseek"
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        default_model: str = "deepseek-v4-flash",
+        base_url: str = "https://api.deepseek.com",
+        timeout_seconds: float = 60.0,
+        client: httpx.Client | None = None,
+    ) -> None:
+        if not api_key.strip():
+            raise ModelProviderConfigurationError(
+                "DEEPSEEK_API_KEY is required for the deepseek provider"
+            )
+        _validate_base_url(base_url, "DEEPSEEK_BASE_URL")
+        if not default_model.strip():
+            raise ModelProviderConfigurationError(
+                "AI_COMPANY_OS_DEEPSEEK_MODEL is required"
+            )
+        self.default_model = default_model.strip()
+        self._client = client or httpx.Client(
+            base_url=base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {api_key.strip()}"},
+            timeout=timeout_seconds,
+        )
+
+    def generate(
+        self, prompt: str, model_name: str, purpose: str, max_output_tokens: int
+    ) -> ProviderGeneration:
+        try:
+            response = self._client.post(
+                "/chat/completions",
+                json={
+                    "model": model_name,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"Complete the request for purpose: {purpose}.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": False,
+                    "max_tokens": max_output_tokens,
+                },
+            )
+        except httpx.HTTPError as exc:
+            raise ModelProviderError(
+                f"deepseek request failed: {exc.__class__.__name__}"
+            ) from exc
+        if not response.is_success:
+            raise ModelProviderError(_provider_http_error("deepseek", response))
+        try:
+            payload = response.json()
+            output = _chat_completion_text(payload)
+            usage = payload.get("usage") or {}
+            prompt_tokens = int(
+                usage.get("prompt_tokens") or _estimate_tokens(prompt)
+            )
+            completion_tokens = int(
+                usage.get("completion_tokens") or _estimate_tokens(output)
+            )
+            total_tokens = int(
+                usage.get("total_tokens") or prompt_tokens + completion_tokens
+            )
+        except (TypeError, ValueError, KeyError, IndexError) as exc:
+            raise ModelProviderError(
+                "deepseek returned an invalid response payload"
+            ) from exc
+        if not output:
+            raise ModelProviderError("deepseek returned no text output")
+        return ProviderGeneration(output, prompt_tokens, completion_tokens, total_tokens)
+
+
 def _response_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct.strip():
@@ -124,23 +199,43 @@ def _response_text(payload: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+def _chat_completion_text(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices") or []
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    message = first.get("message") or {}
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    return content.strip() if isinstance(content, str) else ""
+
+
 def _provider_http_error(provider: str, response: httpx.Response) -> str:
     request_id = response.headers.get("x-request-id")
     suffix = f" (request {request_id})" if request_id else ""
     return f"{provider} returned HTTP {response.status_code}{suffix}"
 
 
-def _validate_base_url(base_url: str) -> None:
+def _validate_base_url(base_url: str, setting_name: str) -> None:
     parsed = urlparse(base_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        raise ModelProviderConfigurationError("OPENAI_BASE_URL must be an absolute HTTP(S) URL")
+        raise ModelProviderConfigurationError(
+            f"{setting_name} must be an absolute HTTP(S) URL"
+        )
     if parsed.username or parsed.password:
-        raise ModelProviderConfigurationError("OPENAI_BASE_URL must not contain credentials")
+        raise ModelProviderConfigurationError(
+            f"{setting_name} must not contain credentials"
+        )
     if parsed.query or parsed.fragment:
-        raise ModelProviderConfigurationError("OPENAI_BASE_URL must not contain a query or fragment")
+        raise ModelProviderConfigurationError(
+            f"{setting_name} must not contain a query or fragment"
+        )
     if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
         raise ModelProviderConfigurationError(
-            "OPENAI_BASE_URL must use HTTPS unless it targets a loopback host"
+            f"{setting_name} must use HTTPS unless it targets a loopback host"
         )
 
 

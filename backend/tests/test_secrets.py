@@ -93,6 +93,29 @@ class SecretFileTests(unittest.TestCase):
         finally:
             os.unlink(secret_path)
 
+    def test_deepseek_model_factory_accepts_api_key_file(self):
+        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
+            handle.write("file-deepseek-key\n")
+            secret_path = handle.name
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "DEEPSEEK_API_KEY_FILE": secret_path,
+                    "AI_COMPANY_OS_MODEL_PROVIDER": "deepseek",
+                    "AI_COMPANY_OS_MODEL_FALLBACKS": "local",
+                },
+                clear=True,
+            ):
+                model_gateway = create_model_gateway()
+
+            status = model_gateway.provider_status()
+            self.assertEqual(status["default_provider"], "deepseek")
+            self.assertEqual(status["fallback_order"], ["local"])
+            self.assertNotIn("file-deepseek-key", str(status))
+        finally:
+            os.unlink(secret_path)
+
     def test_database_url_file_is_accepted_without_exposing_secret(self):
         with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as handle:
             handle.write("postgresql://user:secret@db/company\n")

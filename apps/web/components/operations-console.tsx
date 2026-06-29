@@ -347,6 +347,27 @@ function WorkView({ data, mutate, notify, fail }: { data: DataSet; mutate: Mutat
   const [description, setDescription] = useState("为 AI Company OS 创建一份安全的内部运营说明。");
   const [input, setInput] = useState("{}");
   const [submitting, setSubmitting] = useState(false);
+  const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
+  const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
+  const [modelProvider, setModelProvider] = useState(() => text(data.providers.default_provider, "local"));
+  const availableModels = allowedModels[modelProvider] ?? [];
+  const [modelName, setModelName] = useState(() => text(data.providers.default_model, "deterministic_mock_v1"));
+  const [modelPrompt, setModelPrompt] = useState("请总结当前任务并给出三条可执行建议。");
+  const [modelSubmitting, setModelSubmitting] = useState(false);
+  const [modelResult, setModelResult] = useState<ApiRecord | null>(null);
+
+  useEffect(() => {
+    if (!providerNames.includes(modelProvider)) {
+      setModelProvider(text(data.providers.default_provider, providerNames[0] ?? "local"));
+    }
+  }, [data.providers.default_provider, modelProvider, providerNames]);
+
+  useEffect(() => {
+    const models = allowedModels[modelProvider] ?? [];
+    if (models.length && !models.includes(modelName)) {
+      setModelName(models[0]);
+    }
+  }, [allowedModels, modelName, modelProvider]);
   const runWorkflow = async (event: FormEvent) => {
     event.preventDefault(); setSubmitting(true);
     try {
@@ -362,6 +383,28 @@ function WorkView({ data, mutate, notify, fail }: { data: DataSet; mutate: Mutat
       notify(decision === "approve" ? "审批已批准。" : "审批已拒绝。");
     } catch (error) { fail(error instanceof Error ? error.message : "审批操作失败"); }
   };
+  const generateModelOutput = async (event: FormEvent) => {
+    event.preventDefault();
+    setModelSubmitting(true);
+    try {
+      const result = await mutate<ApiRecord>("/models/generate", {
+        prompt: modelPrompt,
+        actor_id: "document_agent_v1",
+        purpose: "console_generation",
+        provider: modelProvider,
+        model_name: modelName,
+      });
+      setModelResult(result);
+      notify(result.blocked ? "模型调用被预算策略阻止。" : "模型调用已完成。");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "模型调用失败");
+    } finally {
+      setModelSubmitting(false);
+    }
+  };
+  const routing = (modelResult?.routing as ApiRecord | undefined) ?? {};
+  const usage = (modelResult?.usage as ApiRecord | undefined) ?? {};
+  const costLog = (modelResult?.cost_log as ApiRecord | undefined) ?? {};
   return (
     <div className="view-stack">
       <section className="two-column work-layout">
@@ -380,6 +423,19 @@ function WorkView({ data, mutate, notify, fail }: { data: DataSet; mutate: Mutat
             const request = item.request as ApiRecord | undefined;
             return <div className="action-row"><EntityRow title={formatValue(request?.action, "审批请求")} detail={`${shortId(item.approval_id)} / ${formatValue(request?.actor_id)}`} status={text(item.status)} />{pending && <div className="inline-actions"><button className="icon-button approve" title="批准" onClick={() => void decide(item.approval_id, "approve")}><Check /></button><button className="icon-button reject" title="拒绝" onClick={() => void decide(item.approval_id, "reject")}><X /></button></div>}</div>;
           }} />
+        </Panel>
+      </section>
+      <section className="two-column work-layout">
+        <Panel title="调用 AI 模型" meta="多供应商受控路由">
+          <form className="form-grid" onSubmit={generateModelOutput}>
+            <Field label="模型服务商"><select value={modelProvider} onChange={(e) => setModelProvider(e.target.value)}>{providerNames.map((name) => <option key={name} value={name}>{formatValue(name)}</option>)}</select></Field>
+            <Field label="模型"><select value={modelName} onChange={(e) => setModelName(e.target.value)}>{availableModels.map((name) => <option key={name} value={name}>{name}</option>)}</select></Field>
+            <Field label="提示词"><textarea value={modelPrompt} onChange={(e) => setModelPrompt(e.target.value)} required /></Field>
+            <button className="button" disabled={modelSubmitting || !modelName}><Bot />{modelSubmitting ? "调用中..." : "调用模型"}</button>
+          </form>
+        </Panel>
+        <Panel title="模型结果" meta={modelResult ? (modelResult.blocked ? "已阻止" : "已完成") : "等待调用"}>
+          {modelResult ? <div className="model-result"><p>{text(modelResult.output, "没有生成输出")}</p><div className="system-facts"><Fact label="请求供应商" value={formatValue(routing.requested_provider)} /><Fact label="实际供应商" value={formatValue(routing.actual_provider)} /><Fact label="降级发生" value={routing.fallback_used ? "是" : "否"} /><Fact label="尝试顺序" value={Array.isArray(routing.attempted_providers) ? routing.attempted_providers.map((item) => formatValue(item)).join(" → ") : "--"} /><Fact label="模型" value={text(usage.model_name)} /><Fact label="总 Token" value={text(usage.total_tokens, "0")} /><Fact label="估算费用" value={`$${text(costLog.amount, "0")}`} /></div></div> : <EmptyState message="选择供应商和模型后即可发起受控调用。" />}
         </Panel>
       </section>
       <Panel title="任务" meta={`共 ${data.tasks.length} 项`}>
@@ -471,6 +527,10 @@ function IncidentItem({ item, updateIncident }: { item: ApiRecord; updateInciden
 function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean }) {
   const migrations = (data.schema.migrations as ApiRecord[] | undefined) ?? [];
   const readinessChecks = (data.readiness.checks as ApiRecord[] | undefined) ?? [];
+  const providerNames = (data.providers.providers as string[] | undefined) ?? [];
+  const fallbackOrder = (data.providers.fallback_order as string[] | undefined) ?? [];
+  const providerDetails = (data.providers.provider_details as Record<string, ApiRecord> | undefined) ?? {};
+  const providerRows = providerNames.map((name) => ({ id: name, name, is_default: name === text(data.providers.default_provider), ...(providerDetails[name] ?? {}) }));
   return (
     <div className="view-stack">
       <section className="two-column work-layout">
@@ -500,6 +560,8 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
         <div className="system-facts">
           <Fact label="模型服务商" value={formatValue(data.providers.default_provider)} />
           <Fact label="默认模型" value={text(data.providers.default_model)} />
+          <Fact label="已配置供应商" value={providerNames.length ? providerNames.map((name) => formatValue(name)).join("、") : "无"} />
+          <Fact label="降级顺序" value={fallbackOrder.length ? fallbackOrder.map((name) => formatValue(name)).join(" → ") : "未启用"} />
           <Fact label="向量嵌入" value={data.embeddings.enabled ? "已启用" : "已禁用"} />
           <Fact label="嵌入模型" value={text(data.embeddings.default_model, "未配置")} />
           <Fact label="向量维度" value={text(data.embeddings.dimensions)} />
@@ -507,6 +569,9 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
           <Fact label="失败文档" value={text(data.embeddings.failed_documents, "0")} />
           <Fact label="向量存储" value={data.embeddings.vector_store ? "已连接" : "未连接"} />
         </div>
+      </Panel>
+      <Panel title="模型路由与价格" meta={`${providerRows.length} 个供应商`}>
+        <EntityList items={providerRows} empty="没有已配置的模型供应商。" render={(item) => <ProviderRouteItem item={item} />} />
       </Panel>
       <Panel title="告警发送" meta={data.alertStatus.enabled ? "已启用" : "已禁用"}>
         <div className="system-facts">
@@ -522,6 +587,13 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
       <div className="legacy-note"><FileClock /><div><strong>已保留旧版控制台</strong><span>无依赖的备用控制台仍位于 <code>apps/web_dashboard</code>。</span></div></div>
     </div>
   );
+}
+
+function ProviderRouteItem({ item }: { item: ApiRecord }) {
+  const models = (item.allowed_models as string[] | undefined) ?? [];
+  const pricing = (item.pricing_usd_per_million as Record<string, ApiRecord> | undefined) ?? {};
+  const priceText = Object.entries(pricing).map(([model, rates]) => `${model}：输入 $${text(rates.input)} / 输出 $${text(rates.output)}`).join("；");
+  return <div className="incident-detail"><EntityRow title={formatValue(item.name)} detail={`默认：${text(item.default_model)} / 可用：${models.join("、") || "无"}`} status={item.is_default ? "默认" : "可用"} /><span className="muted-line">{priceText ? `${priceText}（每百万 Token）` : "价格使用预算策略中的默认单价。"}</span></div>;
 }
 
 function catalogName(item: ApiRecord, idKey: string): string {

@@ -78,6 +78,7 @@ The suite currently covers:
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
 - Next.js Playwright browser E2E for desktop and 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
+- DeepSeek Chat Completions request/response handling, provider error redaction, explicit multi-provider fallback routing, actual-provider usage records, provider-specific pricing, secret-file loading, and console provider/model selection
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
 - PostgreSQL migrations, append-only guards, and pgvector round trips when `AI_COMPANY_OS_TEST_POSTGRES_URL` is configured

@@ -29,7 +29,7 @@ This repository currently contains:
 - Unit tests in `backend/tests/`
 - A Next.js and TypeScript operations console in `apps/web/`
 
-The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers with queue health reporting, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub metadata import, configurable OpenAI model and embedding providers, service-level CI coverage, and browser E2E console smoke coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
+The core remains framework-light so the safety model can be tested independently. FastAPI and SQLite provide the complete deterministic V1 baseline. PostgreSQL/pgvector persistence, Redis/RQ scheduler workers with queue health reporting, backend and web containers, the Next.js operations console, optional production HTTP bearer auth, optional Incident alert webhooks, Incident runbook matching, deployment readiness checks, controlled GitHub metadata import, native OpenAI/DeepSeek generation providers, OpenAI embeddings, explicit model fallback routing, service-level CI coverage, and browser E2E console smoke coverage are also present. Live connector adapters remain production-expansion work; see `docs/V1_COMPLETION_AUDIT.md`.
 
 ## Quick Check
 
@@ -62,7 +62,7 @@ For the PostgreSQL/pgvector stack, create `.env` from `.env.example`, replace th
 docker compose --env-file .env up --build
 ```
 
-Live providers are opt-in. Set `OPENAI_API_KEY`, `AI_COMPANY_OS_MODEL_PROVIDER=openai`, and `AI_COMPANY_OS_EMBEDDING_PROVIDER=openai` in `.env` to enable Responses API generation plus 1536-dimensional pgvector Knowledge indexing and semantic search. Without those settings, deterministic generation and lexical Knowledge search remain fully available.
+Live providers are opt-in. Generation supports native OpenAI Responses and DeepSeek Chat Completions adapters, per-request provider/model selection, explicit provider fallback, and provider-specific DeepSeek V4 pricing. Set `DEEPSEEK_API_KEY` with `AI_COMPANY_OS_MODEL_PROVIDER=deepseek`, or set `OPENAI_API_KEY` with `AI_COMPANY_OS_MODEL_PROVIDER=openai`. OpenAI remains the embedding provider for 1536-dimensional pgvector Knowledge indexing. Without live-provider settings, deterministic generation and lexical Knowledge search remain fully available.
 
 ## Local Operations Console
 

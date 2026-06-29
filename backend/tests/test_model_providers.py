@@ -23,8 +23,9 @@ from app.knowledge_base.embeddings import (
     OpenAIEmbeddingProvider,
     ProviderEmbedding,
 )
-from app.models.gateway import ModelGateway, create_model_gateway
+from app.models.gateway import ModelGateway, ModelPricing, create_model_gateway
 from app.models.providers import (
+    DeepSeekChatProvider,
     ModelProviderConfigurationError,
     ModelProviderError,
     OpenAIResponsesProvider,
@@ -86,6 +87,10 @@ class _VectorSQLiteStore(SQLiteStateStore):
 
 
 class ModelProviderTests(unittest.TestCase):
+    def test_model_pricing_preserves_sub_micro_costs(self):
+        pricing = ModelPricing(input_per_million=0.14, output_per_million=0.28)
+        self.assertEqual(pricing.estimate(1, 1), 0.00000042)
+
     def test_openai_responses_provider_parses_text_and_usage(self):
         observed = {}
 
@@ -150,6 +155,72 @@ class ModelProviderTests(unittest.TestCase):
             provider.generate("prompt", "test-model", "unit_test", 100)
         self.assertNotIn("do not expose", str(raised.exception))
 
+    def test_deepseek_chat_provider_parses_text_and_usage(self):
+        observed = {}
+
+        def handler(request):
+            observed["path"] = request.url.path
+            observed["authorization"] = request.headers.get("authorization")
+            observed["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                request=request,
+                json={
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "DeepSeek result"}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 20,
+                        "completion_tokens": 8,
+                        "total_tokens": 28,
+                    },
+                },
+            )
+
+        provider = DeepSeekChatProvider(
+            "deepseek-test-key",
+            default_model="deepseek-v4-flash",
+            client=httpx.Client(
+                base_url="https://api.deepseek.com",
+                headers={"Authorization": "Bearer deepseek-test-key"},
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+
+        result = provider.generate(
+            "Sensitive prompt", "deepseek-v4-flash", "unit_test", 456
+        )
+
+        self.assertEqual(observed["path"], "/chat/completions")
+        self.assertEqual(observed["authorization"], "Bearer deepseek-test-key")
+        self.assertEqual(observed["body"]["model"], "deepseek-v4-flash")
+        self.assertEqual(observed["body"]["messages"][-1]["content"], "Sensitive prompt")
+        self.assertFalse(observed["body"]["stream"])
+        self.assertEqual(observed["body"]["max_tokens"], 456)
+        self.assertEqual(result.output, "DeepSeek result")
+        self.assertEqual(result.total_tokens, 28)
+
+    def test_deepseek_provider_sanitizes_http_errors(self):
+        def handler(request):
+            return httpx.Response(
+                429,
+                request=request,
+                headers={"x-request-id": "ds_req_test"},
+                json={"error": {"message": "private upstream detail"}},
+            )
+
+        provider = DeepSeekChatProvider(
+            "deepseek-test-key",
+            client=httpx.Client(
+                base_url="https://api.deepseek.com",
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+
+        with self.assertRaisesRegex(ModelProviderError, "HTTP 429.*ds_req_test") as raised:
+            provider.generate("prompt", "deepseek-v4-flash", "unit_test", 100)
+        self.assertNotIn("private upstream detail", str(raised.exception))
+
     def test_gateway_selects_provider_and_hashes_references(self):
         gateway = ModelGateway(
             providers={"fake": _FakeModelProvider()}, default_provider="fake"
@@ -173,6 +244,69 @@ class ModelProviderTests(unittest.TestCase):
                 purpose="provider_test",
                 model_name="unapproved-model",
             )
+
+    def test_gateway_falls_back_and_records_actual_provider_pricing(self):
+        gateway = ModelGateway(
+            providers={
+                "primary": _FailingModelProvider(),
+                "backup": _FakeModelProvider(),
+            },
+            default_provider="primary",
+            fallback_order=("backup",),
+            pricing={
+                "backup": {
+                    "fake-model-v1": ModelPricing(
+                        input_per_million=1.0,
+                        output_per_million=2.0,
+                    )
+                }
+            },
+        )
+
+        response = gateway.generate(
+            "Fallback input",
+            actor_id="document_agent_v1",
+            purpose="fallback_test",
+        )
+
+        self.assertTrue(response.fallback_used)
+        self.assertEqual(response.requested_provider, "primary")
+        self.assertEqual(response.attempted_providers, ("primary", "backup"))
+        self.assertEqual(response.usage.provider, "backup")
+        self.assertEqual(response.usage.estimated_cost, 0.000025)
+        status = gateway.provider_status()
+        self.assertEqual(status["fallback_order"], ["backup"])
+        self.assertEqual(
+            status["provider_details"]["backup"]["pricing_usd_per_million"]
+            ["fake-model-v1"]["output"],
+            2.0,
+        )
+
+    def test_service_exposes_fallback_routing(self):
+        gateway = ModelGateway(
+            providers={
+                "primary": _FailingModelProvider(),
+                "backup": _FakeModelProvider(),
+            },
+            default_provider="primary",
+            fallback_order=("backup",),
+        )
+        service = CompanyApplicationService(
+            company_os=build_company_os(model_gateway=gateway)
+        )
+
+        result = service.generate_model_response(
+            prompt="Fallback service test",
+            actor_id="document_agent_v1",
+            purpose="fallback_test",
+        )
+
+        self.assertFalse(result["blocked"])
+        self.assertTrue(result["routing"]["fallback_used"])
+        self.assertEqual(result["routing"]["actual_provider"], "backup")
+        self.assertEqual(
+            service.list_audit_logs()[-1]["result"], "model fallback used"
+        )
 
     def test_budget_guard_caps_output_against_call_and_remaining_totals(self):
         guard = BudgetGuard(
@@ -210,6 +344,31 @@ class ModelProviderTests(unittest.TestCase):
                 default_model="test-model",
                 base_url="http://models.example.test/v1",
             )
+
+    def test_model_factory_configures_deepseek_models_pricing_and_fallback(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DEEPSEEK_API_KEY": "deepseek-test-key",
+                "AI_COMPANY_OS_MODEL_PROVIDER": "deepseek",
+                "AI_COMPANY_OS_MODEL_FALLBACKS": "local",
+            },
+            clear=True,
+        ):
+            gateway = create_model_gateway()
+
+        status = gateway.provider_status()
+        self.assertEqual(status["default_provider"], "deepseek")
+        self.assertEqual(status["fallback_order"], ["local"])
+        self.assertEqual(
+            status["allowed_models"]["deepseek"],
+            ["deepseek-v4-flash", "deepseek-v4-pro"],
+        )
+        self.assertEqual(
+            status["provider_details"]["deepseek"]["pricing_usd_per_million"]
+            ["deepseek-v4-pro"]["input"],
+            0.435,
+        )
 
     def test_model_failure_creates_audit_cost_and_incident_records(self):
         model_gateway = ModelGateway(
