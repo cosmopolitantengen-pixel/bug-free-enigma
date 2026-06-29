@@ -74,7 +74,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The Chinese console defaults to `http://127.0.0.1:8000` and lets Human Root run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. When API auth is enabled, enter the bearer token on the System page; it is stored in the browser and sent as an `Authorization` header. CI runs Playwright browser E2E for the console after type-check and production build. Locally, run `npm run e2e` from `apps/web` after installing the Playwright Chromium browser.
+Open `http://localhost:3000`. The Chinese console defaults to `http://127.0.0.1:8000` and opens on a multi-turn chat workspace with local conversation history, provider/model selection, routing feedback, token usage, and estimated cost. Human Root can also run Workflows, decide approvals, manage schedules and Incidents, inspect catalogs, and review system integrity. Set `NEXT_PUBLIC_API_BASE` before building when the API is hosted elsewhere. Provider API keys stay in backend environment variables or secret files; they are never entered in the chat UI. When API auth is enabled, enter only the AI Company OS bearer token on the System page; it is stored in the browser and sent as an `Authorization` header. CI runs Playwright browser E2E for the console after type-check and production build. Locally, run `npm run e2e` from `apps/web` after installing the Playwright Chromium browser.
 
 The dependency-free dashboard is retained as a fallback at:
 

@@ -52,6 +52,8 @@ Before every generation or embedding request, the Budget Guard evaluates estimat
 
 Generation failures write a failed CostLog, `model_failed` Audit event, and Incident before returning a sanitized provider error. Embedding failures write `embedding_failed` or `embedding_blocked`, create an Incident, and leave lexical Knowledge search available.
 
+The Next.js chat workspace calls this same generation boundary for every turn. It sends a bounded recent transcript, keeps conversation text in browser-local storage, and renders routing/usage/cost metadata from the response. Provider credentials remain server-side; the browser never receives or stores `DEEPSEEK_API_KEY` or `OPENAI_API_KEY`.
+
 Knowledge documents are persisted before their vectors are inserted, preserving the PostgreSQL foreign-key boundary. Existing or failed documents can be rebuilt by Human Root through `POST /knowledge/embeddings/reindex`.
 
 ## API

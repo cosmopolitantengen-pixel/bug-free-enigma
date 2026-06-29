@@ -15,7 +15,7 @@ class NextDashboardTests(unittest.TestCase):
         with open(styles_path, "r", encoding="utf-8") as handle:
             styles = handle.read()
 
-        for label in ["总览", "工作台", "计划任务", "能力目录", "治理中心", "系统设置"]:
+        for label in ["对话", "总览", "工作台", "计划任务", "能力目录", "治理中心", "系统设置"]:
             self.assertIn(label, console)
         for endpoint in [
             "/dashboard/summary", "/system/integrity", "/deployment/readiness", "/workflows/run", "/approvals",
@@ -28,6 +28,9 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("暂无任务", console)
         self.assertIn("模型服务商", console)
         self.assertIn("模型路由与价格", console)
+        self.assertIn("chat_conversation", console)
+        self.assertIn("ai-company-os-chat-sessions-v1", console)
+        self.assertIn("输入消息，Enter 发送，Shift+Enter 换行", console)
         self.assertIn("@media (max-width: 760px)", styles)
 
     def test_frontend_dependencies_are_pinned(self):
@@ -66,6 +69,7 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("desktop-chromium", contents["playwright"])
         self.assertIn("mobile-chromium", contents["playwright"])
         self.assertIn("工作流已受理：", contents["e2e"])
+        self.assertIn("sends a multi-turn chat and restores it after reload", contents["e2e"])
         self.assertIn("/approvals/approval-1/approve", contents["e2e"])
         self.assertIn("/approvals/approval-1/reject", contents["e2e"])
         self.assertIn("/schedules/schedule-1/pause", contents["e2e"])

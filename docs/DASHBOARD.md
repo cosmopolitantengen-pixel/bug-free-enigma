@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its Chinese-language six-view operations console covers overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage now runs in CI against mocked API responses for desktop and 390 px mobile viewports, including readiness visibility, navigation, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation.
+Its Chinese-language seven-view operations console opens on a multi-turn chat workspace and also covers overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. Chat sessions persist in the current browser, support explicit provider/model selection, and show actual routing, fallback, token, and cost metadata returned by the governed Model Gateway. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage runs in CI against mocked API responses for desktop and 390 px mobile viewports, including chat generation and reload persistence, readiness visibility, navigation, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -101,6 +101,8 @@ POST /agents/proposals/{proposal_id}/register
 
 ## Current Capabilities
 
+- Hold multi-turn conversations through the governed Model Gateway, with browser-local session history and provider/model controls.
+- Inspect actual provider, model, fallback, token usage, and estimated cost on each assistant response.
 - View system health and core counts.
 - Create, pause, resume, cancel, and tick durable schedules; inspect execution history, failed executions, Redis/RQ worker counts, queue backlog, failed queue jobs, and domain events.
 - View active persistence backend, schema version, and applied SQLite migrations.
@@ -140,6 +142,8 @@ POST /agents/proposals/{proposal_id}/register
 - View pending/approved capability proposals.
 - Run proposal sandbox tests and register proposals only after approval and sandbox pass.
 - Change the API base URL from the page.
+
+Provider API keys are backend secrets configured through environment variables or secret files. The System page bearer-token field is only for authenticating the browser to AI Company OS and must not be used for a DeepSeek or OpenAI API key.
 
 ## Local Use
 

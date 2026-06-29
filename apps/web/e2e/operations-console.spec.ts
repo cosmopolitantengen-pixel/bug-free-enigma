@@ -187,8 +187,11 @@ test.describe("AI Company OS operations console", () => {
     await mockApi(page);
     await page.goto("/");
 
+    await expect(page.getByRole("heading", { name: "对话" })).toBeVisible();
+    await expect(page.getByText("开始一段新对话")).toBeVisible();
+    await page.getByRole("button", { name: /总览/ }).click();
     await expect(page.getByRole("heading", { name: "总览" })).toBeVisible();
-    await expect(page.getByText("任务")).toBeVisible();
+    await expect(page.getByText("任务", { exact: true })).toBeVisible();
     await expect(page.getByText("Initial task")).toBeVisible();
 
     await page.getByRole("button", { name: /系统设置/ }).click();
@@ -201,6 +204,42 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: /能力目录/ }).click();
     await expect(page.getByRole("heading", { name: "能力目录" })).toBeVisible();
     await expect(page.getByPlaceholder("搜索智能体、技能、工具和工作流")).toBeVisible();
+  });
+
+  test("sends a multi-turn chat and restores it after reload", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Chat smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("对话模型服务商").selectOption("deepseek");
+    await page.getByLabel("对话模型", { exact: true }).selectOption("deepseek-v4-pro");
+    await page.getByLabel("聊天消息").fill("帮我设计一个三步发布计划");
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    await expect(page.locator(".chat-message.user").getByText("帮我设计一个三步发布计划")).toBeVisible();
+    await expect(page.getByText("DeepSeek generated result")).toBeVisible();
+    await expect(page.getByText("42 Token")).toBeVisible();
+    expect(api.actions.find((item) => item.path === "/models/generate")?.body).toMatchObject({
+      provider: "deepseek",
+      model_name: "deepseek-v4-pro",
+      actor_id: "ceo_agent_v1",
+      purpose: "chat_conversation",
+    });
+    expect(String(api.actions.find((item) => item.path === "/models/generate")?.body?.prompt)).toContain("帮我设计一个三步发布计划");
+
+    await page.getByLabel("聊天消息").fill("把第二步再说具体一点");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await expect(page.locator(".chat-message.user").getByText("把第二步再说具体一点")).toBeVisible();
+    await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
+    const modelCalls = api.actions.filter((item) => item.path === "/models/generate");
+    expect(modelCalls).toHaveLength(2);
+    expect(String(modelCalls[1].body?.prompt)).toContain("DeepSeek generated result");
+    expect(String(modelCalls[1].body?.prompt)).toContain("把第二步再说具体一点");
+
+    await page.reload();
+    await expect(page.locator(".chat-message.user").getByText("帮我设计一个三步发布计划")).toBeVisible();
+    await expect(page.locator(".chat-message.user").getByText("把第二步再说具体一点")).toBeVisible();
+    await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
   });
 
   test("persists bearer token and submits a controlled workflow", async ({ page }, testInfo) => {
@@ -354,6 +393,7 @@ test.describe("AI Company OS operations console", () => {
     await mockApi(page);
     await page.goto("/");
 
+    await expect(page.getByRole("heading", { name: "对话", level: 1 })).toBeVisible();
     await page.getByRole("button", { name: "打开导航" }).click();
     await page.getByRole("button", { name: /计划任务/ }).click();
     await expect(page.getByRole("heading", { name: "计划任务", level: 1 })).toBeVisible();

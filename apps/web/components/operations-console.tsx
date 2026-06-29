@@ -14,19 +14,41 @@ import {
   FileClock,
   ListChecks,
   Menu,
+  MessageSquare,
   Play,
+  Plus,
   RefreshCw,
   Search,
+  Send,
   ServerCog,
   ShieldCheck,
   SlidersHorizontal,
+  Trash2,
   Workflow,
   X,
 } from "lucide-react";
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiRecord, apiRequest, formatDate, formatValue, getStoredApiToken, shortId, storeApiToken, text } from "@/lib/api";
 
-type View = "overview" | "work" | "scheduler" | "catalog" | "governance" | "system";
+type View = "chat" | "overview" | "work" | "scheduler" | "catalog" | "governance" | "system";
+type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+  provider?: string;
+  model?: string;
+  totalTokens?: number;
+  cost?: number;
+  fallbackUsed?: boolean;
+  failed?: boolean;
+};
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  updatedAt: string;
+};
 type DataSet = {
   summary: ApiRecord;
   health: ApiRecord;
@@ -81,6 +103,7 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
 };
 
 const NAV_ITEMS: Array<{ id: View; label: string; icon: typeof Activity }> = [
+  { id: "chat", label: "对话", icon: MessageSquare },
   { id: "overview", label: "总览", icon: CircleGauge },
   { id: "work", label: "工作台", icon: ListChecks },
   { id: "scheduler", label: "计划任务", icon: CalendarClock },
@@ -88,6 +111,36 @@ const NAV_ITEMS: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "governance", label: "治理中心", icon: ShieldCheck },
   { id: "system", label: "系统设置", icon: ServerCog },
 ];
+
+const CHAT_STORAGE_KEY = "ai-company-os-chat-sessions-v1";
+
+function createId(prefix: string) {
+  const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${suffix}`;
+}
+
+function createChatSession(): ChatSession {
+  const now = new Date().toISOString();
+  return { id: createId("chat"), title: "新对话", messages: [], updatedAt: now };
+}
+
+function buildChatPrompt(messages: ChatMessage[]) {
+  const transcript = messages
+    .slice(-20)
+    .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
+    .join("\n")
+    .slice(-12000);
+  return [
+    "You are the conversational assistant inside AI Company OS.",
+    "Reply helpfully and directly in the same language as the user. Use prior turns for context.",
+    "Do not claim to have performed actions or accessed data unless that information is present in the conversation.",
+    "Conversation:",
+    transcript,
+    "Assistant:",
+  ].join("\n");
+}
 
 const DATA_LABELS: Record<keyof DataSet, string> = {
   summary: "总览",
@@ -169,7 +222,7 @@ const CATALOG_LABELS: Record<string, string> = {
 };
 
 export function OperationsConsole() {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>("chat");
   const [data, setData] = useState<DataSet>(EMPTY_DATA);
   const [apiBase, setApiBase] = useState(
     process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000",
@@ -229,6 +282,11 @@ export function OperationsConsole() {
     await refresh();
     return result;
   }, [apiBase, apiToken, refresh]);
+
+  const callModel = useCallback(async (body: ApiRecord) => apiRequest<ApiRecord>(apiBase, "/models/generate", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }, apiToken), [apiBase, apiToken]);
 
   const saveApiBase = (event: FormEvent) => {
     event.preventDefault();
@@ -293,6 +351,7 @@ export function OperationsConsole() {
 
         {loading && Object.keys(data.summary).length === 0 ? <LoadingState /> : (
           <>
+            {view === "chat" && <ChatView data={data} callModel={callModel} fail={setError} />}
             {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} />}
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
@@ -303,6 +362,201 @@ export function OperationsConsole() {
         )}
       </main>
     </div>
+  );
+}
+
+type ModelCall = (body: ApiRecord) => Promise<ApiRecord>;
+
+function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCall; fail: (v: string) => void }) {
+  const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
+  const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
+  const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
+  const [model, setModel] = useState(() => text(data.providers.default_model, "deterministic_mock_v1"));
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState("");
+  const [chatReady, setChatReady] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [sendingChatId, setSendingChatId] = useState<string | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const availableModels = allowedModels[provider] ?? [];
+  const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
+
+  useEffect(() => {
+    let loaded: ChatSession[] = [];
+    try {
+      const stored = window.localStorage.getItem(CHAT_STORAGE_KEY);
+      const parsed = stored ? JSON.parse(stored) : [];
+      if (Array.isArray(parsed)) loaded = parsed as ChatSession[];
+    } catch {
+      window.localStorage.removeItem(CHAT_STORAGE_KEY);
+    }
+    const next = loaded.length ? loaded : [createChatSession()];
+    setSessions(next);
+    setActiveSessionId(next[0].id);
+    setChatReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (chatReady) window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(sessions));
+  }, [chatReady, sessions]);
+
+  useEffect(() => {
+    if (!providerNames.includes(provider)) {
+      setProvider(text(data.providers.default_provider, providerNames[0] ?? "local"));
+    }
+  }, [data.providers.default_provider, provider, providerNames]);
+
+  useEffect(() => {
+    const models = allowedModels[provider] ?? [];
+    if (models.length && !models.includes(model)) setModel(models[0]);
+  }, [allowedModels, model, provider]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "end" });
+  }, [activeSession?.messages.length, sendingChatId]);
+
+  const startNewChat = () => {
+    const next = createChatSession();
+    setSessions((current) => [next, ...current]);
+    setActiveSessionId(next.id);
+    setDraft("");
+  };
+
+  const deleteChat = (sessionId: string) => {
+    setSessions((current) => {
+      const remaining = current.filter((session) => session.id !== sessionId);
+      const next = remaining.length ? remaining : [createChatSession()];
+      if (sessionId === activeSessionId) setActiveSessionId(next[0].id);
+      return next;
+    });
+  };
+
+  const sendMessage = async (event: FormEvent) => {
+    event.preventDefault();
+    const content = draft.trim();
+    if (!content || !activeSession || sendingChatId || !model) return;
+
+    fail("");
+    const now = new Date().toISOString();
+    const userMessage: ChatMessage = { id: createId("message"), role: "user", content, createdAt: now };
+    const nextMessages = [...activeSession.messages, userMessage];
+    const sessionId = activeSession.id;
+    setDraft("");
+    setSendingChatId(sessionId);
+    setSessions((current) => current.map((session) => session.id === sessionId ? {
+      ...session,
+      title: session.messages.length ? session.title : content.slice(0, 28),
+      messages: nextMessages,
+      updatedAt: now,
+    } : session));
+
+    try {
+      const result = await callModel({
+        prompt: buildChatPrompt(nextMessages),
+        actor_id: "ceo_agent_v1",
+        purpose: "chat_conversation",
+        provider,
+        model_name: model,
+      });
+      const routing = (result.routing as ApiRecord | undefined) ?? {};
+      const usage = (result.usage as ApiRecord | undefined) ?? {};
+      const cost = (result.cost_log as ApiRecord | undefined) ?? {};
+      const reply: ChatMessage = {
+        id: createId("message"),
+        role: "assistant",
+        content: result.blocked ? "本次请求被预算策略阻止，请调整预算或模型后重试。" : text(result.output, "模型没有返回内容。"),
+        createdAt: new Date().toISOString(),
+        provider: text(routing.actual_provider ?? usage.provider, provider),
+        model: text(usage.model_name, model),
+        totalTokens: Number(usage.total_tokens ?? 0),
+        cost: Number(cost.amount ?? 0),
+        fallbackUsed: Boolean(routing.fallback_used),
+        failed: Boolean(result.blocked),
+      };
+      setSessions((current) => current.map((session) => session.id === sessionId ? {
+        ...session,
+        messages: [...session.messages, reply],
+        updatedAt: reply.createdAt,
+      } : session));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "模型调用失败";
+      const failedReply: ChatMessage = {
+        id: createId("message"), role: "assistant", content: `发送失败：${message}`, createdAt: new Date().toISOString(), failed: true,
+      };
+      setSessions((current) => current.map((session) => session.id === sessionId ? {
+        ...session,
+        messages: [...session.messages, failedReply],
+        updatedAt: failedReply.createdAt,
+      } : session));
+      fail(message);
+    } finally {
+      setSendingChatId(null);
+    }
+  };
+
+  if (!chatReady || !activeSession) return <LoadingState />;
+
+  return (
+    <section className="chat-layout" aria-label="AI 对话工作区">
+      <aside className="chat-sidebar">
+        <button className="button chat-new-button" onClick={startNewChat}><Plus />新对话</button>
+        <div className="chat-session-list" aria-label="对话列表">
+          {sessions.map((session) => (
+            <div className={`chat-session ${session.id === activeSession.id ? "active" : ""}`} key={session.id}>
+              <button className="chat-session-open" onClick={() => setActiveSessionId(session.id)}>
+                <strong>{session.title || "新对话"}</strong>
+                <span>{session.messages.length ? `${session.messages.length} 条消息` : "尚未开始"}</span>
+              </button>
+              <button className="icon-button" onClick={() => deleteChat(session.id)} aria-label={`删除对话 ${session.title}`} title="删除对话"><Trash2 /></button>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <div className="chat-main">
+        <div className="chat-toolbar">
+          <div>
+            <strong>{activeSession.title}</strong>
+            <span>对话记录保存在当前浏览器</span>
+          </div>
+          <div className="chat-model-controls">
+            <label><span>服务商</span><select aria-label="对话模型服务商" value={provider} onChange={(event) => setProvider(event.target.value)}>{providerNames.map((name) => <option key={name} value={name}>{formatValue(name)}</option>)}</select></label>
+            <label><span>模型</span><select aria-label="对话模型" value={model} onChange={(event) => setModel(event.target.value)}>{availableModels.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
+          </div>
+        </div>
+
+        <div className="chat-messages" aria-live="polite">
+          {activeSession.messages.length === 0 && <div className="chat-empty"><MessageSquare /><strong>开始一段新对话</strong><span>可以提问、讨论方案，也可以让 AI 帮你整理和创作。</span></div>}
+          {activeSession.messages.map((message) => (
+            <article className={`chat-message ${message.role} ${message.failed ? "failed" : ""}`} key={message.id}>
+              <div className="chat-message-label">{message.role === "user" ? "你" : "AI Company OS"}</div>
+              <p>{message.content}</p>
+              {message.role === "assistant" && message.provider && <div className="chat-message-meta">
+                <span>{formatValue(message.provider)}</span><span>{message.model}</span><span>{message.totalTokens ?? 0} Token</span><span>${(message.cost ?? 0).toFixed(9)}</span>{message.fallbackUsed && <span>已降级</span>}
+              </div>}
+            </article>
+          ))}
+          {sendingChatId === activeSession.id && <article className="chat-message assistant pending"><div className="chat-message-label">AI Company OS</div><p>正在思考...</p></article>}
+          <div ref={chatEndRef} aria-hidden="true" />
+        </div>
+
+        <form className="chat-composer" onSubmit={sendMessage}>
+          <textarea
+            aria-label="聊天消息"
+            placeholder="输入消息，Enter 发送，Shift+Enter 换行"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <button className="button chat-send-button" type="submit" aria-label="发送消息" disabled={!draft.trim() || Boolean(sendingChatId) || !model}><Send />发送</button>
+        </form>
+      </div>
+    </section>
   );
 }
 
