@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -358,9 +359,11 @@ def _workspace_command_adapter(input: dict[str, Any], context: ToolAdapterContex
     except (TypeError, ValueError) as exc:
         raise ToolAdapterError("timeout_seconds must be an integer") from exc
     environment = {key: value for key, value in os.environ.items() if key.upper() in SAFE_ENVIRONMENT_KEYS}
+    resolved_executable = shutil.which(argv[0], path=environment.get("PATH"))
+    execution_argv = [resolved_executable, *argv[1:]] if resolved_executable else argv
     try:
         completed = subprocess.run(
-            argv,
+            execution_argv,
             cwd=cwd,
             env=environment,
             capture_output=True,

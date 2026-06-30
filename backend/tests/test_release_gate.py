@@ -18,6 +18,7 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertIn("/deployment/readiness", release_gate.REQUIRED_API_PATHS)
         self.assertIn("/github/absorptions/import", release_gate.REQUIRED_API_PATHS)
         self.assertIn("/runbooks", release_gate.REQUIRED_API_PATHS)
+        self.assertIn("/tasks/{task_id}/decision", release_gate.REQUIRED_API_PATHS)
 
 
 if __name__ == "__main__":

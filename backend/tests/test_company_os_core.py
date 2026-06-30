@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -769,6 +770,80 @@ class CompanyOSCoreTests(unittest.TestCase):
             self.assertIn("workspace-ok", command_result["stdout"])
             self.assertIn("secret-hidden", command_result["stdout"])
             self.assertNotIn("must-not-reach-command", command_result["stdout"])
+
+    def test_workspace_command_resolves_platform_executable_after_approval(self):
+        from app.services.company import CompanyApplicationService
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)
+        ), patch(
+            "app.tools.adapters.shutil.which", return_value=r"C:\Program Files\nodejs\npm.cmd"
+        ), patch(
+            "app.tools.adapters.subprocess.run",
+            return_value=subprocess.CompletedProcess(["npm", "--version"], 0, stdout="10.0.0\n", stderr=""),
+        ) as run_process:
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="workspace_command_tool",
+                actor_id="workspace_agent_v1",
+                input={"argv": ["npm", "--version"], "cwd": "."},
+                reason="Resolve the approved executable for this platform.",
+            )
+            self.assertEqual(
+                requested["approval"]["request"]["metadata"]["tool_input"]["argv"][0],
+                "npm",
+            )
+            service.decide_approval(
+                requested["approval"]["approval_id"],
+                ApprovalStatus.APPROVED,
+                "human_root",
+                "approve npm version check",
+            )
+
+            completed = service.complete_tool_run(requested["run"]["run_id"])
+            executed_argv = run_process.call_args.args[0]
+
+            self.assertEqual(completed["run"]["status"], "completed")
+            self.assertTrue(executed_argv[0].lower().endswith("npm.cmd"))
+            self.assertEqual(json.loads(completed["run"]["result"])["argv"][0], "npm")
+
+    def test_workspace_command_nonzero_exit_is_a_failed_run_with_output(self):
+        from app.services.company import CompanyApplicationService
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)
+        ), patch(
+            "app.tools.adapters.shutil.which", return_value=sys.executable
+        ), patch(
+            "app.tools.adapters.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                [sys.executable, "-c", "raise SystemExit(3)"],
+                3,
+                stdout="partial output\n",
+                stderr="validation failed\n",
+            ),
+        ):
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="workspace_command_tool",
+                actor_id="workspace_agent_v1",
+                input={"argv": [sys.executable, "-c", "raise SystemExit(3)"], "cwd": "."},
+                reason="Preserve a failing command result.",
+            )
+            service.decide_approval(
+                requested["approval"]["approval_id"],
+                ApprovalStatus.APPROVED,
+                "human_root",
+                "approve failure-state test",
+            )
+
+            completed = service.complete_tool_run(requested["run"]["run_id"])
+            command_result = json.loads(completed["run"]["result"])
+
+            self.assertEqual(completed["run"]["status"], "failed")
+            self.assertEqual(completed["run"]["error"], "command exited with status 3")
+            self.assertIn("partial output", command_result["stdout"])
+            self.assertIn("validation failed", command_result["stderr"])
 
     def test_approved_workspace_command_blocks_changed_arguments(self):
         from app.services.company import CompanyApplicationService

@@ -39,8 +39,11 @@ type ChatAction = {
   description: string;
   input: ApiRecord;
   purpose: string;
-  status: "pending" | "executing" | "completed" | "waiting_approval" | "cancelled" | "failed";
+  status: "pending" | "executing" | "waiting_approval" | "deciding" | "completed" | "cancelled" | "failed";
   taskId?: string;
+  approvalId?: string;
+  riskLevel?: string;
+  approvalInput?: ApiRecord;
 };
 type ChatMessage = {
   id: string;
@@ -151,6 +154,15 @@ function chatActionResult(result: ApiRecord): string {
     }
   }
   return text(result.output, "任务已经完成。");
+}
+
+function chatApprovalPreview(action: ChatAction): string {
+  const input = action.approvalInput ?? {};
+  const argv = input.argv;
+  if (Array.isArray(argv)) return argv.map((item) => String(item)).join(" ").slice(0, 1000);
+  const path = text(input.path, "");
+  if (path) return `文件：${path}`;
+  return action.purpose;
 }
 
 const DATA_LABELS: Record<keyof DataSet, string> = {
@@ -311,6 +323,20 @@ export function OperationsConsole() {
     return result;
   }, [apiBase, apiToken, refresh]);
 
+  const decideChatAction = useCallback(async (taskId: string, decision: "approved" | "rejected") => {
+    const result = await apiRequest<ApiRecord>(apiBase, `/tasks/${taskId}/decision`, {
+      method: "POST",
+      signal: AbortSignal.timeout(130_000),
+      body: JSON.stringify({
+        status: decision,
+        decided_by: "human_root",
+        note: decision === "approved" ? "由聊天行动卡批准并续跑" : "由聊天行动卡拒绝执行",
+      }),
+    }, apiToken);
+    await refresh();
+    return result;
+  }, [apiBase, apiToken, refresh]);
+
   const saveApiBase = (event: FormEvent) => {
     event.preventDefault();
     const next = apiDraft.trim().replace(/\/$/, "");
@@ -374,7 +400,7 @@ export function OperationsConsole() {
 
         {loading && Object.keys(data.summary).length === 0 ? <LoadingState /> : (
           <>
-            {view === "chat" && <ChatView data={data} callChat={callChat} executeChatAction={executeChatAction} fail={setError} />}
+            {view === "chat" && <ChatView data={data} callChat={callChat} executeChatAction={executeChatAction} decideChatAction={decideChatAction} fail={setError} />}
             {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} />}
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
@@ -390,8 +416,9 @@ export function OperationsConsole() {
 
 type ChatCall = (body: ApiRecord) => Promise<ApiRecord>;
 type ChatActionCall = (proposalId: string) => Promise<ApiRecord>;
+type ChatDecisionCall = (taskId: string, decision: "approved" | "rejected") => Promise<ApiRecord>;
 
-function ChatView({ data, callChat, executeChatAction, fail }: { data: DataSet; callChat: ChatCall; executeChatAction: ChatActionCall; fail: (v: string) => void }) {
+function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }: { data: DataSet; callChat: ChatCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; fail: (v: string) => void }) {
   const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
   const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
   const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
@@ -554,10 +581,21 @@ function ChatView({ data, callChat, executeChatAction, fail }: { data: DataSet; 
     try {
       const result = await executeChatAction(action.proposalId);
       const task = (result.task as ApiRecord | undefined) ?? {};
+      const approval = (result.approval as ApiRecord | undefined) ?? {};
+      const approvalRequest = (approval.request as ApiRecord | undefined) ?? {};
+      const approvalMetadata = (approvalRequest.metadata as ApiRecord | undefined) ?? {};
+      const approvalRisk = (approval.risk as ApiRecord | undefined) ?? {};
+      const toolRun = (result.tool_run as ApiRecord | undefined) ?? {};
       const waiting = Boolean(result.approval_required);
       const blocked = Boolean(result.blocked);
       const status: ChatAction["status"] = blocked ? "failed" : waiting ? "waiting_approval" : "completed";
-      updateAction(sessionId, message.id, { status, taskId: text(task.task_id) });
+      updateAction(sessionId, message.id, {
+        status,
+        taskId: text(task.task_id),
+        approvalId: text(approval.approval_id),
+        riskLevel: text(approvalRisk.level ?? toolRun.risk_level),
+        approvalInput: (approvalMetadata.tool_input as ApiRecord | undefined) ?? {},
+      });
       const resultMessage: ChatMessage = {
         id: createId("message"),
         role: "assistant",
@@ -580,6 +618,50 @@ function ChatView({ data, callChat, executeChatAction, fail }: { data: DataSet; 
       fail(errorMessage);
     } finally {
       executingActionIds.current.delete(action.proposalId);
+    }
+  };
+
+  const decideAction = async (message: ChatMessage, decision: "approved" | "rejected") => {
+    if (!activeSession || !message.action || message.action.status !== "waiting_approval") return;
+    const sessionId = activeSession.id;
+    const action = message.action;
+    const taskId = action.taskId;
+    if (!taskId) return;
+    const operationId = action.approvalId || action.proposalId;
+    if (executingActionIds.current.has(operationId)) return;
+    executingActionIds.current.add(operationId);
+    updateAction(sessionId, message.id, { status: "deciding" });
+    try {
+      const result = await decideChatAction(taskId, decision);
+      const task = (result.task as ApiRecord | undefined) ?? {};
+      const resumedToolRun = (result.tool_run as ApiRecord | undefined) ?? {};
+      const rejected = decision === "rejected" || text(result.outcome) === "rejected" || text(task.status) === "cancelled";
+      const blocked = Boolean(result.blocked);
+      const failed = text(result.outcome) === "failed" || text(task.status) === "failed" || text(resumedToolRun.status) === "failed";
+      updateAction(sessionId, message.id, { status: rejected ? "cancelled" : blocked || failed ? "failed" : "completed" });
+      const resultMessage: ChatMessage = {
+        id: createId("message"),
+        role: "assistant",
+        content: rejected
+          ? "Human Root 已拒绝，本次行动没有执行。"
+          : blocked
+            ? `审批后仍被安全策略阻止：${text(result.output, "行动未执行。")}`
+            : failed
+              ? `行动执行失败：${text(result.output, text(resumedToolRun.error, "命令没有成功完成。"))}`
+              : `审批通过，行动已完成。\n${chatActionResult(result)}`,
+        createdAt: new Date().toISOString(),
+        failed: blocked || failed,
+      };
+      setSessions((current) => current.map((session) => session.id === sessionId ? {
+        ...session,
+        messages: [...session.messages, resultMessage],
+        updatedAt: resultMessage.createdAt,
+      } : session));
+    } catch (error) {
+      updateAction(sessionId, message.id, { status: "waiting_approval" });
+      fail(error instanceof Error ? error.message : "审批续跑失败");
+    } finally {
+      executingActionIds.current.delete(operationId);
     }
   };
 
@@ -633,6 +715,11 @@ function ChatView({ data, callChat, executeChatAction, fail }: { data: DataSet; 
                 <div className="chat-action-heading"><Workflow /><div><strong>{message.action.workflowName}</strong><span>{message.action.purpose}</span></div><StatusPill value={message.action.status} /></div>
                 <div className="chat-action-detail"><span>执行后将创建受控任务</span><code>{message.action.workflowId}</code></div>
                 {message.action.status === "pending" && <div className="chat-action-buttons"><button className="small-button" onClick={() => cancelAction(message)}>取消</button><button className="button" onClick={() => void executeAction(message)}><Play />确认执行</button></div>}
+                {message.action.status === "waiting_approval" && <div className="chat-approval-block">
+                  <div className="chat-approval-facts"><span>风险：{formatValue(message.action.riskLevel, "待评估")}</span><span>审批：{shortId(message.action.approvalId)}</span></div>
+                  <code>{chatApprovalPreview(message.action)}</code>
+                  <div className="chat-action-buttons"><button className="small-button" onClick={() => void decideAction(message, "rejected")}><X />拒绝</button><button className="button" onClick={() => void decideAction(message, "approved")}><Check />批准并继续</button></div>
+                </div>}
                 {message.action.taskId && <div className="muted-line">任务：{shortId(message.action.taskId)}</div>}
               </div>}
             </article>
@@ -973,4 +1060,4 @@ function EntityRow({ title, detail, status }: { title: string; detail: string; s
 function StatusPill({ value }: { value: string }) { const tone = useMemo(() => statusTone(value), [value]); return <span className={`status ${tone}`}>{formatValue(value)}</span>; }
 function EmptyState({ message }: { message: string }) { return <div className="empty-state"><Boxes /><span>{message}</span></div>; }
 function LoadingState() { return <div className="loading-state"><RefreshCw className="spin" /><strong>正在加载运营数据</strong><span>正在连接 AI Company OS API。</span></div>; }
-function statusTone(value: string) { const v = value.toLowerCase(); if (["ok", "ready", "completed", "approved", "enabled", "active", "verified", "executed"].includes(v)) return "good"; if (["failed", "blocked", "rejected", "critical", "not_ready", "forbidden", "cancelled", "open"].includes(v)) return "bad"; if (["pending", "warning", "waiting_approval", "medium", "paused", "need_more_info"].includes(v)) return "warn"; return "neutral"; }
+function statusTone(value: string) { const v = value.toLowerCase(); if (["ok", "ready", "completed", "approved", "enabled", "active", "verified", "executed"].includes(v)) return "good"; if (["failed", "blocked", "rejected", "critical", "not_ready", "forbidden", "cancelled", "open"].includes(v)) return "bad"; if (["pending", "executing", "deciding", "warning", "waiting_approval", "medium", "paused", "need_more_info"].includes(v)) return "warn"; return "neutral"; }

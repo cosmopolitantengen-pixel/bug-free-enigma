@@ -64,6 +64,7 @@ class CompanyApplicationService:
     _chat_action_proposals: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _chat_action_results: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
     _chat_action_lock: Lock = field(default_factory=Lock, init=False, repr=False)
+    _task_decision_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._bind_workflow_skill_runtime()
@@ -2734,6 +2735,54 @@ class CompanyApplicationService:
             "incident": to_plain(incident) if incident else None,
         }
 
+    def decide_and_resume_task(
+        self,
+        task_id: str,
+        status: ApprovalStatus,
+        decided_by: str,
+        note: str,
+    ) -> dict:
+        if decided_by != "human_root":
+            raise ValueError("only human_root can decide and resume a task")
+        if status not in {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}:
+            raise ValueError("task decision must be approved or rejected")
+        if not note.strip():
+            raise ValueError("task decision note is required")
+
+        with self._task_decision_lock:
+            task = self.tasks[task_id]
+            if not task.approval_id:
+                raise ValueError("task has no approval to decide")
+            approval = self.company_os.approvals.get(task.approval_id)
+            if approval.request.task_id != task.task_id:
+                raise ValueError("approval does not authorize this task")
+
+            if approval.status in {ApprovalStatus.PENDING, ApprovalStatus.NEED_MORE_INFO}:
+                self.decide_approval(approval.approval_id, status, decided_by, note.strip())
+            elif approval.status != status:
+                raise ValueError(f"task approval is already {approval.status.value}")
+
+            if task.status == TaskStatus.NEEDS_APPROVAL:
+                result = self.resume_task(task_id)
+                return {**result, "decision": to_plain(approval), "already_resolved": False}
+            if task.status in {
+                TaskStatus.COMPLETED,
+                TaskStatus.CANCELLED,
+                TaskStatus.FAILED,
+                TaskStatus.BLOCKED,
+            }:
+                return {
+                    "task": to_plain(task),
+                    "output": task.result,
+                    "outcome": "already_resolved",
+                    "approval": to_plain(approval),
+                    "decision": to_plain(approval),
+                    "approval_required": False,
+                    "blocked": task.status == TaskStatus.BLOCKED,
+                    "already_resolved": True,
+                }
+            raise ValueError(f"task is not waiting for approval: {task.status.value}")
+
     def pause_task(self, task_id: str) -> dict:
         task = self.tasks[task_id]
         task.transition(TaskStatus.PAUSED)
@@ -4033,10 +4082,14 @@ class CompanyApplicationService:
             run.completed_at = utc_now()
             return
 
-        run.status = ToolRunStatus.COMPLETED
         if adapter_result is None:
             adapter_result = {"message": f"Simulated {tool.name} execution completed."}
         run.result = json.dumps(to_plain(adapter_result), sort_keys=True)
+        if tool.tool_id == "workspace_command_tool" and adapter_result.get("exit_code") != 0:
+            run.status = ToolRunStatus.FAILED
+            run.error = f"command exited with status {adapter_result.get('exit_code')}"
+        else:
+            run.status = ToolRunStatus.COMPLETED
         run.completed_at = utc_now()
 
     def _execute_skill_run(self, run: SkillRun, skill: Skill) -> None:

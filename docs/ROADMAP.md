@@ -94,6 +94,7 @@ Current status:
 - Approval is the eighth native Workflow. Low-risk requests complete without a fabricated approval, controlled requests pause for Human Root and resume after a persisted decision, rejection is enforced as a valid outcome, and forbidden actions remain blocked.
 - GitHub project analysis is the ninth native Workflow. It uses one task-scoped Human Root approval, executes registered analysis/risk Skills only after approval, preserves the external-content boundary, blocks failed sandbox evidence, and registers passed analyses as Knowledge only across SQLite restarts.
 - Tool Call is the tenth native Workflow. It preserves the authoritative Tool Runtime, links three control Skills and the Tool Run to one task, resumes approvals across SQLite restarts, enforces rejection without execution, and separates adapter failure from permission/risk blocks.
+- Approval-gated chat actions now expose risk and command context inline. Human Root can reject or approve-and-resume through one idempotent persisted-task endpoint, including after browser reload or SQLite process restart.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
@@ -134,7 +135,7 @@ Current interim implementation:
 - Next.js System view includes production readiness checks without exposing secret values
 - Next.js Governance view includes Incident runbook guidance and runbook catalog visibility
 
-The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls and now has CI browser E2E coverage for desktop/mobile navigation, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation. Deeper browser coverage for provider failures and destructive restore approval remains alongside deployment promotion automation, managed alert routing/escalation, external secret-manager adapters beyond file-mounted secrets, managed identity, and full production session hardening.
+The Next.js console satisfies the production UI migration, while the static shell remains as a fallback. The console can store an operator bearer token for protected API calls and now has CI browser E2E coverage for desktop/mobile navigation, multi-turn chat, inline high-risk action approval across reload, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation. Deeper browser coverage for provider failures and destructive restore approval remains alongside deployment promotion automation, managed alert routing/escalation, external secret-manager adapters beyond file-mounted secrets, managed identity, and full production session hardening.
 
 ## Phase 4: Controlled Evolution
 

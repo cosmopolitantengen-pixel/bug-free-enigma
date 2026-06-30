@@ -45,7 +45,7 @@ A Tool is a registered capability an Agent can request. Tools are lower authorit
 - Every Tool Run request writes an audit event.
 - Completion writes a separate `tool_run_completed` audit event.
 
-`POST /workflows/run` with `tool_call_v1` wraps the same Tool Runtime in a complete task process. Approval-request, risk, and audit Skills create task-linked Skill Runs; the actual Tool Run remains the execution source of truth. Approval-gated calls resume through `POST /tasks/{task_id}/resume`, rechecking live Agent enablement, Tool authorization, permission, and risk before execution. Rejected calls are closed without execution. Workflow and Tool evidence persist across SQLite restarts.
+`POST /workflows/run` with `tool_call_v1` wraps the same Tool Runtime in a complete task process. Approval-request, risk, and audit Skills create task-linked Skill Runs; the actual Tool Run remains the execution source of truth. Approval-gated calls resume through `POST /tasks/{task_id}/resume`, or Human Root can record the decision and resume in one idempotent call through `POST /tasks/{task_id}/decision`. Both paths recheck live Agent enablement, Tool authorization, permission, and risk before execution. Rejected calls are closed without execution. Workflow and Tool evidence persist across SQLite restarts.
 
 ## Current Internal Adapters
 
@@ -75,8 +75,8 @@ The filesystem read adapter is intentionally narrow:
 - file reads are capped at 64 KiB
 - delete, upload, and external send operations remain unavailable
 
-Workspace writes use a separate approval-gated patch tool. It only edits existing allowed text files, requires `old_text` to match exactly once, can reject stale `expected_sha256` state, writes atomically, and never exposes patch contents in approval metadata. The command tool always requires Human Root approval, executes without a shell, allows only development executables, strips provider keys and unrelated environment variables, caps output, and enforces a 120-second maximum timeout.
+Workspace writes use a separate approval-gated patch tool. It only edits existing allowed text files, requires `old_text` to match exactly once, can reject stale `expected_sha256` state, writes atomically, and never exposes patch contents in approval metadata. The command tool always requires Human Root approval, executes without a shell, resolves approved executable names through the sanitized platform PATH, allows only development executables, strips provider keys and unrelated environment variables, caps output, and enforces a 120-second maximum timeout. A non-zero process exit marks the Tool Run as failed while retaining bounded stdout and stderr evidence.
 
-Chat auto mode recognizes explicit workspace requests such as `git status`, `git diff`, `git log`, `搜索代码：...`, and `运行后端测试`. It creates a `tool_call_v1` proposal first; no tool executes until Human Root confirms the chat action, and command actions still pass through the Tool Runtime approval gate.
+Chat auto mode recognizes explicit workspace requests such as `git status`, `git diff`, `git log`, `搜索代码：...`, and `运行后端测试`. It creates a `tool_call_v1` proposal first; no tool executes until Human Root confirms the chat action. Command actions then show their risk, approval ID, and exact argument array inside chat. Human Root can reject or approve and continue without leaving the conversation, and the waiting approval card survives a browser reload.
 
 Real browser, computer-control, or external API adapters should only be added after their permission boundaries, sandbox behavior, approval flow, and audit output are covered by tests.

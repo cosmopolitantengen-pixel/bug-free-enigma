@@ -1241,11 +1241,14 @@ class PersistenceTests(unittest.TestCase):
             ).json()
 
             second = TestClient(create_app(sqlite_path=db_path))
-            second.post(
-                f"/approvals/{waiting['approval']['approval_id']}/approve",
-                json={"note": "Approve after reload."},
+            resumed = second.post(
+                f"/tasks/{waiting['task']['task_id']}/decision",
+                json={
+                    "status": "approved",
+                    "decided_by": "human_root",
+                    "note": "Approve and resume after reload.",
+                },
             )
-            resumed = second.post(f"/tasks/{waiting['task']['task_id']}/resume")
 
             third = TestClient(create_app(sqlite_path=db_path))
             tasks = third.get("/tasks").json()
@@ -1257,6 +1260,7 @@ class PersistenceTests(unittest.TestCase):
 
             self.assertEqual(resumed.status_code, 200)
             self.assertEqual(resumed.json()["outcome"], "completed")
+            self.assertEqual(resumed.json()["decision"]["status"], "approved")
             self.assertEqual(tasks[0]["status"], "completed")
             self.assertEqual(runs[0]["status"], "completed")
             self.assertEqual(tool_runs[0]["status"], "completed")

@@ -754,6 +754,102 @@ class ApiRouteTests(unittest.TestCase):
             ["completed", "completed", "waiting_approval", "completed"],
         )
 
+    def test_task_decision_approves_resumes_and_is_idempotent(self):
+        self._register_workflow_approval_tool()
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Inline chat approval",
+                "description": "Approve and resume through one persistent task endpoint.",
+                "input": {
+                    "tool_id": "workflow_approval_tool",
+                    "actor_id": "workflow_approval_agent",
+                    "tool_input": {"topic": "inline"},
+                    "reason": "Verify the chat approval continuation contract.",
+                },
+            },
+        ).json()
+        task_id = waiting["task"]["task_id"]
+        body = {
+            "status": "approved",
+            "decided_by": "human_root",
+            "note": "Approved directly from the chat action card.",
+        }
+
+        decided = self.client.post(f"/tasks/{task_id}/decision", json=body)
+        repeated = self.client.post(f"/tasks/{task_id}/decision", json=body)
+
+        self.assertEqual(decided.status_code, 200)
+        self.assertEqual(decided.json()["outcome"], "completed")
+        self.assertEqual(decided.json()["task"]["status"], "completed")
+        self.assertEqual(decided.json()["decision"]["status"], "approved")
+        self.assertFalse(decided.json()["already_resolved"])
+        self.assertEqual(repeated.status_code, 200)
+        self.assertTrue(repeated.json()["already_resolved"])
+        self.assertEqual(repeated.json()["task"]["task_id"], task_id)
+        self.assertEqual(len(self.client.get("/tools/runs").json()), 1)
+
+    def test_task_decision_rejects_non_root_actor(self):
+        self._register_workflow_approval_tool()
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Root-only inline approval",
+                "description": "Only Human Root may decide a waiting task.",
+                "input": {
+                    "tool_id": "workflow_approval_tool",
+                    "actor_id": "workflow_approval_agent",
+                    "tool_input": {"topic": "root-only"},
+                    "reason": "Verify the Human Root boundary.",
+                },
+            },
+        ).json()
+
+        denied = self.client.post(
+            f"/tasks/{waiting['task']['task_id']}/decision",
+            json={"status": "approved", "decided_by": "tech_agent_v1", "note": "self approve"},
+        )
+
+        self.assertEqual(denied.status_code, 400)
+        self.assertIn("only human_root", denied.json()["detail"])
+        self.assertEqual(self.client.get(f"/tasks/{waiting['task']['task_id']}").json()["status"], "needs_approval")
+        self.assertEqual(self.client.get("/approvals").json()[-1]["status"], "pending")
+
+    def test_task_decision_rejection_closes_tool_run_without_execution(self):
+        self._register_workflow_approval_tool()
+        waiting = self.client.post(
+            "/workflows/run",
+            json={
+                "workflow_id": "tool_call_v1",
+                "title": "Inline chat rejection",
+                "description": "Reject the waiting Tool Run from chat.",
+                "input": {
+                    "tool_id": "workflow_approval_tool",
+                    "actor_id": "workflow_approval_agent",
+                    "tool_input": {"topic": "reject-inline"},
+                    "reason": "Verify inline rejection never executes the Tool.",
+                },
+            },
+        ).json()
+
+        rejected = self.client.post(
+            f"/tasks/{waiting['task']['task_id']}/decision",
+            json={
+                "status": "rejected",
+                "decided_by": "human_root",
+                "note": "Reject directly from the chat action card.",
+            },
+        )
+
+        self.assertEqual(rejected.status_code, 200)
+        self.assertEqual(rejected.json()["outcome"], "rejected")
+        self.assertEqual(rejected.json()["task"]["status"], "cancelled")
+        self.assertEqual(rejected.json()["tool_run"]["status"], "blocked")
+        self.assertIsNone(rejected.json()["tool_run"]["result"])
+        self.assertEqual(rejected.json()["decision"]["status"], "rejected")
+
     def test_tool_call_workflow_enforces_rejection_without_executing_tool(self):
         self._register_workflow_approval_tool()
         waiting = self.client.post(

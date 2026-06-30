@@ -25,6 +25,7 @@ REQUIRED_API_PATHS = {
     "/scheduler/queue-health",
     "/alerts/status",
     "/runbooks",
+    "/tasks/{task_id}/decision",
     "/workflows/run",
 }
 

@@ -63,6 +63,7 @@ POST /tasks
 GET /tasks/{id}
 POST /tasks/{id}/run
 POST /tasks/{id}/resume
+POST /tasks/{id}/decision
 POST /tasks/{id}/pause
 POST /tasks/{id}/cancel
 
@@ -141,7 +142,7 @@ The scheduler API persists one-time and recurring internal jobs, supports pause/
 
 `GET /models/providers` lists configured provider names, each provider's default and allowlisted models, the explicit fallback order, and non-secret per-million-token pricing metadata. `POST /models/generate` accepts optional `provider` and `model_name` selections. Successful responses include routing metadata for requested, attempted, and actual providers plus a `fallback_used` flag; usage and CostLog records always identify the provider and model that actually completed the request.
 
-`POST /chat/respond` is the governed conversational entrypoint. `chat` mode always returns a Model Gateway response, `action` mode always proposes a Workflow, and `auto` mode proposes work only for explicit operational language. Proposals are audited and do not create tasks. Human Root confirmation calls `POST /chat/actions/{id}/execute`, which consumes the server-held proposal exactly once and runs the existing Workflow boundary, preserving Workflow Skill, approval, Memory, evaluation, and audit behavior. Completed proposal results are cached so retries return the same task instead of creating duplicates.
+`POST /chat/respond` is the governed conversational entrypoint. `chat` mode always returns a Model Gateway response, `action` mode always proposes a Workflow, and `auto` mode proposes work only for explicit operational language. Proposals are audited and do not create tasks. Human Root confirmation calls `POST /chat/actions/{id}/execute`, which consumes the server-held proposal exactly once and runs the existing Workflow boundary, preserving Workflow Skill, approval, Memory, evaluation, and audit behavior. Completed proposal results are cached so retries return the same task instead of creating duplicates. When that Workflow pauses, `POST /tasks/{task_id}/decision` records a Human Root approval or rejection and resumes the persisted task through one locked service operation. Repeating the same final decision returns the already-resolved task without executing it twice.
 
 ## Current Implementation
 
@@ -198,6 +199,7 @@ Current implemented routes include:
 - `GET /tasks/{task_id}`
 - `POST /tasks/{task_id}/run`
 - `POST /tasks/{task_id}/resume`
+- `POST /tasks/{task_id}/decision`
 - `POST /tasks/{task_id}/pause`
 - `POST /tasks/{task_id}/cancel`
 - `GET /approvals`
@@ -358,7 +360,7 @@ HTTP authentication is disabled by default for local development. In protected d
 
 `POST /tools/runs/{run_id}/complete` completes a waiting Tool Run only after its linked approval has been approved. Pending, rejected, blocked, or non-waiting Tool Runs cannot be completed. Completion writes a separate `tool_run_completed` audit event.
 
-`POST /workflows/run` with `tool_call_v1` is the end-to-end task form of those Tool controls. It adds three controlled Skill Runs, Workflow traces and Evaluation, distinguishes adapter `failed` state from policy `blocked` state, enforces rejection without execution, and revalidates live Agent/Tool permissions immediately before approved execution. Waiting Tool Call Workflows survive SQLite restart and resume through `POST /tasks/{task_id}/resume`.
+`POST /workflows/run` with `tool_call_v1` is the end-to-end task form of those Tool controls. It adds three controlled Skill Runs, Workflow traces and Evaluation, distinguishes adapter `failed` state from policy `blocked` state, enforces rejection without execution, and revalidates live Agent/Tool permissions immediately before approved execution. Waiting Tool Call Workflows survive SQLite restart and can either resume after a separate approval through `POST /tasks/{task_id}/resume` or use the Human Root-only `POST /tasks/{task_id}/decision` decision-and-resume operation used by chat.
 
 `POST /approvals/request` evaluates a proposed action through Permission and Risk. Low-risk allowed actions are audited as allowed. Medium/high-risk actions create pending approvals. Forbidden or permission-blocked actions create blocked approvals and audit events.
 

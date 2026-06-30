@@ -45,7 +45,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 207 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 221 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions runs the release gate for API contract, readiness redaction, core Workflow smoke, console endpoint wiring, and secret-like committed values.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.

@@ -136,9 +136,37 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
     if (request.method() === "POST" && url.pathname.startsWith("/chat/actions/")) {
       state.actions.push({ method: request.method(), path: url.pathname });
       const isToolAction = url.pathname.includes("chat-tool-1");
+      const isCommandAction = url.pathname.includes("chat-command-1");
+      const isFailedCommandAction = url.pathname.includes("chat-command-fail");
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify(isToolAction ? {
+        body: JSON.stringify(isFailedCommandAction ? {
+          workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
+          task: { task_id: "task-command-failed", status: "needs_approval" },
+          output: "Tool Call requires Human Root approval.",
+          tool_run: { run_id: "tool-run-command-failed", status: "waiting_approval", risk_level: "high" },
+          approval: {
+            approval_id: "approval-command-failed",
+            status: "pending",
+            risk: { level: "high" },
+            request: { metadata: { tool_input: { argv: ["python", "-c", "raise SystemExit(1)"], cwd: ".", timeout_seconds: 30 } } },
+          },
+          approval_required: true,
+          blocked: false,
+        } : isCommandAction ? {
+          workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
+          task: { task_id: "task-command-123456", status: "needs_approval" },
+          output: "Tool Call requires Human Root approval.",
+          tool_run: { run_id: "tool-run-command-1", status: "waiting_approval", risk_level: "high" },
+          approval: {
+            approval_id: "approval-command-1",
+            status: "pending",
+            risk: { level: "high" },
+            request: { metadata: { tool_input: { argv: ["python", "-m", "unittest", "discover", "-s", "backend/tests"], cwd: ".", timeout_seconds: 120 } } },
+          },
+          approval_required: true,
+          blocked: false,
+        } : isToolAction ? {
           workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
           task: { task_id: "task-tool-123456", status: "completed" },
           output: "Tool Call completed",
@@ -149,6 +177,47 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           workflow: { workflow_id: "task_planning_v1", name: "Task Planning" },
           task: { task_id: "task-created-123456", status: "planned" },
           output: "# Task Plan\n\n1. Prepare\n2. Launch\n3. Review",
+          approval_required: false,
+          blocked: false,
+        }),
+      });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/tasks/task-command-failed/decision") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          task: { task_id: "task-command-failed", status: "failed" },
+          output: "command exited with status 1",
+          outcome: "failed",
+          tool_run: { status: "failed", error: "command exited with status 1", result: null },
+          approval_required: false,
+          blocked: false,
+        }),
+      });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/tasks/task-command-123456/decision") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      const rejected = body.status === "rejected";
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(rejected ? {
+          task: { task_id: "task-command-123456", status: "cancelled" },
+          output: "Human Root rejected Tool execution.",
+          outcome: "rejected",
+          approval_required: false,
+          blocked: false,
+        } : {
+          task: { task_id: "task-command-123456", status: "completed" },
+          output: "Tool Call completed",
+          outcome: "completed",
+          tool_run: { status: "completed", result: JSON.stringify({ exit_code: 0, stdout: "Ran 221 tests in 62.0s\nOK", stderr: "" }) },
           approval_required: false,
           blocked: false,
         }),
@@ -182,7 +251,45 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const messages = body.messages as Array<{ role: string; content: string }>;
       const latest = messages[messages.length - 1]?.content ?? "";
       state.actions.push({ method: request.method(), path: url.pathname, body });
-      if (latest.toLowerCase() === "git status") {
+      if (latest === "运行失败测试") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            type: "action_proposal",
+            message: "我可以调用“工具调用”来验证失败状态。确认后才会创建任务并执行。",
+            action: {
+              proposal_id: "chat-command-fail",
+              workflow_id: "tool_call_v1",
+              workflow_name: "工具调用",
+              title: latest,
+              description: latest,
+              input: { tool_id: "workspace_command_tool", actor_id: "workspace_agent_v1", reason: latest, tool_input: { argv: ["python", "-c", "raise SystemExit(1)"], cwd: "." } },
+              purpose: "验证失败状态",
+              status: "pending",
+            },
+            blocked: false,
+          }),
+        });
+      } else if (latest === "运行后端测试") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            type: "action_proposal",
+            message: "我可以调用“工具调用”来运行后端测试套件。确认后才会创建任务并执行。",
+            action: {
+              proposal_id: "chat-command-1",
+              workflow_id: "tool_call_v1",
+              workflow_name: "工具调用",
+              title: latest,
+              description: latest,
+              input: { tool_id: "workspace_command_tool", actor_id: "workspace_agent_v1", reason: latest, tool_input: { argv: ["python", "-m", "unittest", "discover", "-s", "backend/tests"], cwd: "." } },
+              purpose: "运行后端测试套件",
+              status: "pending",
+            },
+            blocked: false,
+          }),
+        });
+      } else if (latest.toLowerCase() === "git status") {
         await route.fulfill({
           contentType: "application/json",
           body: JSON.stringify({
@@ -362,6 +469,42 @@ test.describe("AI Company OS operations console", () => {
 
     await expect(page.getByText(/## main\.\.\.origin\/main/)).toBeVisible();
     expect(api.actions.filter((item) => item.path === "/chat/actions/chat-tool-1/execute")).toHaveLength(1);
+  });
+
+  test("approves and resumes a high-risk command inside chat after reload", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Inline approval smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("聊天消息").fill("运行后端测试");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await page.getByRole("button", { name: "确认执行" }).click();
+
+    await expect(page.getByText("风险：高")).toBeVisible();
+    await expect(page.getByText(/python -m unittest discover -s backend\/tests/)).toBeVisible();
+    await expect(page.getByRole("button", { name: "批准并继续" })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByRole("button", { name: "批准并继续" })).toBeVisible();
+    await page.getByRole("button", { name: "批准并继续" }).click();
+
+    await expect(page.getByText(/Ran 221 tests in 62\.0s/)).toBeVisible();
+    expect(api.actions.filter((item) => item.path === "/tasks/task-command-123456/decision")).toHaveLength(1);
+    expect(api.actions.find((item) => item.path === "/tasks/task-command-123456/decision")?.body).toMatchObject({ status: "approved", decided_by: "human_root" });
+  });
+
+  test("shows an approved command failure as failed instead of completed", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Command failure smoke runs only on the desktop project.");
+    await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("聊天消息").fill("运行失败测试");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await page.getByRole("button", { name: "确认执行" }).click();
+    await page.getByRole("button", { name: "批准并继续" }).click();
+
+    await expect(page.getByText(/行动执行失败：command exited with status 1/)).toBeVisible();
+    await expect(page.locator(".chat-action-card.failed")).toBeVisible();
   });
 
   test("persists bearer token and submits a controlled workflow", async ({ page }, testInfo) => {

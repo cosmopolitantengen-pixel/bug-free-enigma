@@ -19,7 +19,7 @@
 - Native task-planning Workflow permission/risk/Skill checks, traces, audit, Memory, Evaluation, Incident, API, dashboard, and SQLite reload
 - Approval-gated Workflow resume after Human Root approval
 - Workflow Run and Workflow Step trace persistence
-- Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem boundaries, concurrency-checked workspace patching, sanitized allowlisted commands, read-only Git inspection, and adapter failure handling
+- Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem boundaries, concurrency-checked workspace patching, sanitized allowlisted commands, platform executable resolution, non-zero command failure evidence, read-only Git inspection, and adapter failure handling
 - Model Gateway usage and cost logging
 - OpenAI Responses and Embeddings request/response contracts through mocked HTTP transports
 - pgvector Knowledge indexing orchestration, semantic search, Root-only reindex, and lexical fallback
@@ -77,7 +77,7 @@ The suite currently covers:
 - Local auth registration, login, duplicate-user rejection, password hashing, expiring session tokens, TTL validation, and SQLite reload
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
-- Next.js Playwright browser E2E for desktop multi-turn chat generation, reload persistence, audited action proposal confirmation, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
+- Next.js Playwright browser E2E for desktop multi-turn chat generation, reload persistence, audited action proposal confirmation, inline high-risk command approval and continuation across reload, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
 - Chat API separation between idea discussion and explicit operational proposals, with no task creation before Human Root confirmation, idempotent duplicate confirmation, and normal Workflow/Memory behavior after confirmation
 - DeepSeek Chat Completions request/response handling, provider error redaction, explicit multi-provider fallback routing, actual-provider usage records, provider-specific pricing, secret-file loading, and console provider/model selection
 - Approval request routing for pending and blocked actions
@@ -92,7 +92,7 @@ The suite currently covers:
 - Filesystem read external-content inspection for clean and instruction-risk source files
 - Workflow Run and Workflow Step creation, API exposure, dashboard summary, dashboard mount points, and SQLite reload
 - V1 Workflow catalog API/detail exposure, all 10 common native entrypoints, and dashboard catalog rendering
-- Native Tool Call completion, adapter failure, authorization block, approval/rejection, post-approval revalidation, and SQLite restart continuation
+- Native Tool Call completion, adapter failure, authorization block, approval/rejection, Human Root-only idempotent decision-and-resume, post-approval revalidation, and SQLite restart continuation
 - Approval-gated document Workflow resume, non-waiting resume rejection, and dashboard resume controls
 - Model Gateway deterministic generation, model usage API exposure, dashboard summary, dashboard mount points, audit event creation, and SQLite reload
 - Budget Guard cost recording, over-budget blocking, dashboard summary, API exposure, and SQLite reload

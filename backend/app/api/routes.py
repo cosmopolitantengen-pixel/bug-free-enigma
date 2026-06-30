@@ -842,6 +842,22 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @router.post("/tasks/{task_id}/decision")
+    def decide_and_resume_task(task_id: str, payload: ApprovalDecisionRequest) -> dict:
+        try:
+            if payload.status is None:
+                raise ValueError("task decision status is required")
+            return service.decide_and_resume_task(
+                task_id,
+                payload.status,
+                payload.decided_by,
+                payload.note,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="task or approval not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.post("/tasks/{task_id}/handoff")
     def handoff_task(task_id: str, payload: TaskHandoffRequest) -> dict:
         try:
