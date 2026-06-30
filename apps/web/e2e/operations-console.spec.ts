@@ -27,7 +27,7 @@ function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
       task_count: 1,
       active_scheduled_job_count: 0,
       workflow_run_count: 1,
-      agent_count: 17,
+      agent_count: 18,
       model_token_count: 0,
       integrity_issue_count: 0,
       failed_scheduled_execution_count: 0,
@@ -135,9 +135,17 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
 
     if (request.method() === "POST" && url.pathname.startsWith("/chat/actions/")) {
       state.actions.push({ method: request.method(), path: url.pathname });
+      const isToolAction = url.pathname.includes("chat-tool-1");
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
+        body: JSON.stringify(isToolAction ? {
+          workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
+          task: { task_id: "task-tool-123456", status: "completed" },
+          output: "Tool Call completed",
+          tool_run: { status: "completed", result: JSON.stringify({ operation: "status", output: "## main...origin/main\n M apps/web/example.ts" }) },
+          approval_required: false,
+          blocked: false,
+        } : {
           workflow: { workflow_id: "task_planning_v1", name: "Task Planning" },
           task: { task_id: "task-created-123456", status: "planned" },
           output: "# Task Plan\n\n1. Prepare\n2. Launch\n3. Review",
@@ -174,7 +182,26 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const messages = body.messages as Array<{ role: string; content: string }>;
       const latest = messages[messages.length - 1]?.content ?? "";
       state.actions.push({ method: request.method(), path: url.pathname, body });
-      if (latest.includes("请制定")) {
+      if (latest.toLowerCase() === "git status") {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            type: "action_proposal",
+            message: "我可以调用“工具调用”来读取 Git 工作区状态。确认后才会创建任务并执行。",
+            action: {
+              proposal_id: "chat-tool-1",
+              workflow_id: "tool_call_v1",
+              workflow_name: "工具调用",
+              title: latest,
+              description: latest,
+              input: { tool_id: "git_read_tool", actor_id: "workspace_agent_v1", reason: latest, tool_input: { operation: "status" } },
+              purpose: "读取 Git 工作区状态",
+              status: "pending",
+            },
+            blocked: false,
+          }),
+        });
+      } else if (latest.includes("请制定")) {
         await route.fulfill({
           contentType: "application/json",
           body: JSON.stringify({
@@ -321,6 +348,20 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "确认执行" }).click();
     await expect(page.getByText(/行动已完成/)).toBeVisible();
     expect(api.actions.filter((item) => item.path === "/chat/actions/chat-action-1/execute")).toHaveLength(1);
+  });
+
+  test("returns Git tool output inside the chat", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Workspace tool smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("聊天消息").fill("git status");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await expect(page.getByText("读取 Git 工作区状态", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "确认执行" }).click();
+
+    await expect(page.getByText(/## main\.\.\.origin\/main/)).toBeVisible();
+    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-tool-1/execute")).toHaveLength(1);
   });
 
   test("persists bearer token and submits a controlled workflow", async ({ page }, testInfo) => {

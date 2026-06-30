@@ -41,7 +41,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(integrity.status_code, 200)
         self.assertEqual(integrity.json()["status"], "warning")
         self.assertIn("persistence_backend", [check["name"] for check in integrity.json()["checks"]])
-        self.assertEqual(len(agents.json()), 17)
+        self.assertEqual(len(agents.json()), 18)
         self.assertEqual(len(skills.json()), 18)
         self.assertGreaterEqual(len(tools.json()), 5)
         self.assertEqual(workflows.json()[0]["workflow_id"], "document_generation_v1")
@@ -1339,6 +1339,28 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(len(self.client.get("/tasks").json()), 1)
         self.assertEqual(self.client.get("/memory").json()[-1]["memory_type"], "plan")
         self.assertEqual(self.client.get("/audit-logs").json()[-1]["event_type"], "chat_action_confirmed")
+
+    def test_chat_can_run_a_read_only_workspace_tool_through_tool_workflow(self):
+        proposed = self.client.post(
+            "/chat/respond",
+            json={"messages": [{"role": "user", "content": "git status"}], "mode": "auto"},
+        )
+        action = proposed.json()["action"]
+
+        self.assertEqual(proposed.status_code, 200)
+        self.assertEqual(action["workflow_id"], "tool_call_v1")
+        self.assertEqual(action["input"]["tool_id"], "git_read_tool")
+        self.assertEqual(self.client.get("/tasks").json(), [])
+
+        executed = self.client.post(f"/chat/actions/{action['proposal_id']}/execute")
+        payload = executed.json()
+        tool_result = json.loads(payload["tool_run"]["result"])
+
+        self.assertEqual(executed.status_code, 200)
+        self.assertEqual(payload["task"]["status"], "completed")
+        self.assertEqual(payload["tool_run"]["status"], "completed")
+        self.assertEqual(tool_result["operation"], "status")
+        self.assertIn("##", tool_result["output"])
 
     def test_budget_policy_update_is_audited_and_blocks_future_model_calls(self):
         updated = self.client.post(

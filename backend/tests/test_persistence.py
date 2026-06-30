@@ -84,6 +84,33 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("domain_events_no_update", trigger_names)
             self.assertIn("domain_events_no_delete", trigger_names)
 
+    def test_existing_catalog_database_receives_new_default_workspace_capabilities(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "catalog_upgrade.db")
+            first = CompanyApplicationService(
+                company_os=build_company_os(),
+                persistence=SQLiteStateStore(db_path),
+            )
+            first.sync()
+
+            with closing(sqlite3.connect(db_path)) as connection:
+                connection.execute("DELETE FROM agents WHERE agent_id = ?", ("workspace_agent_v1",))
+                connection.execute(
+                    "DELETE FROM tools WHERE tool_id IN (?, ?, ?)",
+                    ("workspace_patch_tool", "workspace_command_tool", "git_read_tool"),
+                )
+                connection.commit()
+
+            reloaded = CompanyApplicationService(
+                company_os=build_company_os(),
+                persistence=SQLiteStateStore(db_path),
+            )
+
+            self.assertEqual(reloaded.company_os.agents.get("workspace_agent_v1").name, "Workspace Agent")
+            self.assertTrue(reloaded.company_os.tools.get("workspace_patch_tool").requires_approval)
+            self.assertTrue(reloaded.company_os.tools.get("workspace_command_tool").requires_approval)
+            self.assertFalse(reloaded.company_os.tools.get("git_read_tool").requires_approval)
+
     def test_registered_agent_and_skill_catalogs_survive_restart(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "catalogs.db")
@@ -729,7 +756,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(restored.json()["result"], "restored")
             self.assertEqual(restored.json()["restored_counts"]["tasks"], 1)
             self.assertEqual(restored.json()["restored_counts"]["memory"], 0)
-            self.assertEqual(restored.json()["restored_counts"]["agents"], 17)
+            self.assertEqual(restored.json()["restored_counts"]["agents"], 18)
             self.assertEqual(restored.json()["restored_counts"]["skills"], 18)
             self.assertEqual(restored.json()["verification"]["status"], "verified")
             self.assertIn(later_task["task_id"], [

@@ -138,6 +138,21 @@ function createChatSession(): ChatSession {
   return { id: createId("chat"), title: "新对话", messages: [], updatedAt: now };
 }
 
+function chatActionResult(result: ApiRecord): string {
+  const toolRun = result.tool_run as ApiRecord | undefined;
+  if (typeof toolRun?.result === "string") {
+    try {
+      const parsed = JSON.parse(toolRun.result) as ApiRecord;
+      const direct = parsed.output ?? parsed.stdout ?? parsed.content;
+      if (typeof direct === "string" && direct.trim()) return direct.trim().slice(0, 12000);
+      return JSON.stringify(parsed, null, 2).slice(0, 12000);
+    } catch {
+      return toolRun.result.slice(0, 12000);
+    }
+  }
+  return text(result.output, "任务已经完成。");
+}
+
 const DATA_LABELS: Record<keyof DataSet, string> = {
   summary: "总览",
   health: "服务健康",
@@ -176,6 +191,7 @@ const CATALOG_LABELS: Record<string, string> = {
   memory_agent_v1: "记忆智能体",
   skill_manager_agent_v1: "技能管理员智能体",
   workflow_agent_v1: "工作流智能体",
+  workspace_agent_v1: "工作区智能体",
   audit_agent_v1: "审计智能体",
   capability_gap_detector_agent_v1: "能力缺口检测智能体",
   agent_factory_agent_v1: "智能体工厂智能体",
@@ -203,6 +219,9 @@ const CATALOG_LABELS: Record<string, string> = {
   audit_read_tool: "审计读取工具",
   database_read_tool: "数据库读取工具",
   filesystem_read_tool: "文件系统读取工具",
+  workspace_patch_tool: "工作区补丁工具",
+  workspace_command_tool: "工作区命令工具",
+  git_read_tool: "Git 读取工具",
   external_api_tool: "外部 API 工具",
   code_execution_tool: "代码执行工具",
   document_generation_v1: "文档生成",
@@ -546,7 +565,7 @@ function ChatView({ data, callChat, executeChatAction, fail }: { data: DataSet; 
           ? `行动未完成：${text(result.output, "工作流被安全策略阻止。")}`
           : waiting
             ? `任务已创建，正在等待审批。任务编号：${shortId(task.task_id)}`
-            : `行动已完成。${text(result.output, `任务编号：${shortId(task.task_id)}`)}`,
+            : `行动已完成。\n${chatActionResult(result)}`,
         createdAt: new Date().toISOString(),
         failed: blocked,
       };

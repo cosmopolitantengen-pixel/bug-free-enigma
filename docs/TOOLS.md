@@ -26,6 +26,9 @@ A Tool is a registered capability an Agent can request. Tools are lower authorit
 - `audit_read_tool`: enabled, low-risk audit log reads.
 - `database_read_tool`: enabled, low-risk aggregate database state reads without raw SQL access.
 - `filesystem_read_tool`: enabled, low-risk workspace-only text file list/read/search.
+- `workspace_patch_tool`: enabled, medium-risk exact text replacement with stale-file protection and mandatory approval.
+- `workspace_command_tool`: enabled, high-risk allowlisted process execution with mandatory approval and sanitized environment.
+- `git_read_tool`: enabled, low-risk Git status/diff/log inspection.
 - `external_api_tool`: disabled by default, medium-risk external API preparation.
 - `code_execution_tool`: disabled by default, high-risk sandbox code execution.
 
@@ -53,6 +56,9 @@ The first implementation includes a small controlled adapter layer for safe inte
 - `audit_read_tool` returns recent append-only audit events.
 - `database_read_tool` returns aggregate state counts for core tables and stores, without accepting raw SQL.
 - `filesystem_read_tool` lists directories, reads small text files, and searches allowed text files inside the workspace.
+- `workspace_patch_tool` atomically applies one exact replacement, optionally checks the expected file SHA-256, and returns a unified diff.
+- `workspace_command_tool` runs an argument array without a shell, limits executable names, workspace `cwd`, timeout, output size, and inherited environment variables.
+- `git_read_tool` exposes read-only status, diff, and recent log operations without allowing arbitrary Git subcommands.
 
 Adapter output is stored on the Tool Run as JSON. Invalid adapter input marks the Tool Run as `failed` and writes the failure into audit output.
 
@@ -60,13 +66,17 @@ Filesystem read/search output includes external-content inspection metadata. Fil
 
 ## Filesystem Read Boundaries
 
-The filesystem adapter is read-only and intentionally narrow:
+The filesystem read adapter is intentionally narrow:
 
 - relative paths only
 - resolved paths must stay inside the workspace
 - hidden or sensitive paths such as `.git`, `.codex`, `.agents`, `.env`, virtualenvs, `node_modules`, and `__pycache__` are denied
 - only common text extensions are readable/searchable
 - file reads are capped at 64 KiB
-- write, delete, execute, upload, and external send operations are not implemented
+- delete, upload, and external send operations remain unavailable
 
-Real browser, GitHub, computer-control, or external API adapters should only be added after their permission boundaries, sandbox behavior, approval flow, and audit output are covered by tests.
+Workspace writes use a separate approval-gated patch tool. It only edits existing allowed text files, requires `old_text` to match exactly once, can reject stale `expected_sha256` state, writes atomically, and never exposes patch contents in approval metadata. The command tool always requires Human Root approval, executes without a shell, allows only development executables, strips provider keys and unrelated environment variables, caps output, and enforces a 120-second maximum timeout.
+
+Chat auto mode recognizes explicit workspace requests such as `git status`, `git diff`, `git log`, `搜索代码：...`, and `运行后端测试`. It creates a `tool_call_v1` proposal first; no tool executes until Human Root confirms the chat action, and command actions still pass through the Tool Runtime approval gate.
+
+Real browser, computer-control, or external API adapters should only be added after their permission boundaries, sandbox behavior, approval flow, and audit output are covered by tests.

@@ -37,7 +37,8 @@ ARBITRATION_PRIORITY_AREAS = {
 
 CHAT_ACTION_MARKERS = (
     "创建", "生成", "制定", "安排", "执行", "开始执行", "建立", "提交", "发起",
-    "组织", "召开", "分配", "交给", "写一份", "做一份", "运行",
+    "组织", "召开", "分配", "交给", "写一份", "做一份", "运行", "查看 git",
+    "git status", "git diff", "git log", "仓库状态", "搜索代码", "查找代码",
 )
 
 
@@ -446,11 +447,15 @@ class CompanyApplicationService:
             permission_level=tool.permission_level,
             reason=run.reason,
             target=tool.tool_id,
-            metadata={"tool_id": tool.tool_id},
+            metadata={"tool_id": tool.tool_id, "tool_input": self._tool_approval_input(tool.tool_id, run.input)},
         )
         permission = self.company_os.permissions.evaluate(agent, request)
-        risk = self.company_os.risks.assess(request)
-        if not tool.enabled:
+        risk = self._assess_tool_request(tool, request)
+        if not self._tool_approval_matches_run(approval, run, tool):
+            run.status = ToolRunStatus.BLOCKED
+            run.error = "approval does not authorize the current tool request"
+            run.completed_at = utc_now()
+        elif not tool.enabled:
             run.status = ToolRunStatus.BLOCKED
             run.error = "tool is disabled"
             run.completed_at = utc_now()
@@ -2037,7 +2042,11 @@ class CompanyApplicationService:
         workflow_id = "task_planning_v1"
         workflow_input: dict = {}
         purpose = "规划并拆分任务"
-        if any(marker in normalized for marker in ("复盘", "总结经验", "回顾执行")):
+        workspace_tool = self._chat_workspace_tool(message, normalized)
+        if workspace_tool is not None:
+            workflow_id = "tool_call_v1"
+            workflow_input, purpose = workspace_tool
+        elif any(marker in normalized for marker in ("复盘", "总结经验", "回顾执行")):
             workflow_id = "retrospective_v1"
             workflow_input = {"summary": message}
             purpose = "记录复盘并沉淀经验"
@@ -2090,6 +2099,56 @@ class CompanyApplicationService:
             "status": "pending",
             "summary": f"我可以调用“{definition.name}”来{purpose}。确认后才会创建任务并执行。",
         }
+
+    @staticmethod
+    def _chat_workspace_tool(message: str, normalized: str) -> tuple[dict, str] | None:
+        if any(marker in normalized for marker in ("git status", "查看 git 状态", "查看git状态", "仓库状态")):
+            tool_input = {"operation": "status"}
+            purpose = "读取 Git 工作区状态"
+            tool_id = "git_read_tool"
+        elif any(marker in normalized for marker in ("git diff", "查看 git 差异", "查看git差异", "查看代码差异")):
+            tool_input = {"operation": "diff"}
+            purpose = "读取 Git 未提交差异"
+            tool_id = "git_read_tool"
+        elif any(marker in normalized for marker in ("git log", "查看 git 历史", "查看git历史", "提交历史")):
+            tool_input = {"operation": "log", "limit": 10}
+            purpose = "读取 Git 提交历史"
+            tool_id = "git_read_tool"
+        elif any(marker in normalized for marker in ("搜索代码", "查找代码")):
+            query = message
+            for separator in ("：", ":"):
+                if separator in query:
+                    query = query.split(separator, 1)[1]
+                    break
+            query = query.strip().strip("\"'“”")
+            if not query or query == message.strip():
+                return None
+            tool_input = {"operation": "search", "path": ".", "query": query, "limit": 50}
+            purpose = f"在工作区搜索代码“{query[:40]}”"
+            tool_id = "filesystem_read_tool"
+        elif "运行" in normalized and "测试" in normalized:
+            if any(marker in normalized for marker in ("前端", "typescript", "typecheck")):
+                tool_input = {"argv": ["npm", "run", "typecheck"], "cwd": "apps/web", "timeout_seconds": 120}
+                purpose = "运行前端 TypeScript 检查"
+            else:
+                tool_input = {
+                    "argv": ["python", "-m", "unittest", "discover", "-s", "backend/tests"],
+                    "cwd": ".",
+                    "timeout_seconds": 120,
+                }
+                purpose = "运行后端测试套件"
+            tool_id = "workspace_command_tool"
+        else:
+            return None
+        return (
+            {
+                "tool_id": tool_id,
+                "actor_id": "workspace_agent_v1",
+                "reason": message,
+                "tool_input": tool_input,
+            },
+            purpose,
+        )
 
     def execute_chat_action(self, proposal_id: str) -> dict:
         with self._chat_action_lock:
@@ -2283,9 +2342,9 @@ class CompanyApplicationService:
             permission_level=tool.permission_level,
             reason=reason,
             target=tool.tool_id,
-            metadata={"tool_id": tool.tool_id},
+            metadata={"tool_id": tool.tool_id, "tool_input": self._tool_approval_input(tool.tool_id, input)},
         )
-        risk = self.company_os.risks.assess(request)
+        risk = self._assess_tool_request(tool, request)
         permission = self.company_os.permissions.evaluate(agent, request)
         run = ToolRun(
             tool_id=tool.tool_id,
@@ -2361,6 +2420,64 @@ class CompanyApplicationService:
             "approval": to_plain(approval) if approval else None,
             "incident": to_plain(incident) if incident else None,
         }
+
+    def _assess_tool_request(self, tool: Tool, request: ActionRequest) -> RiskAssessment:
+        assessed = self.company_os.risks.assess(request)
+        levels = {
+            RiskLevel.LOW: 0,
+            RiskLevel.MEDIUM: 1,
+            RiskLevel.HIGH: 2,
+            RiskLevel.FORBIDDEN: 3,
+        }
+        level = max((assessed.level, tool.risk_level), key=lambda value: levels[value])
+        reasons = list(assessed.reasons)
+        if tool.risk_level != assessed.level:
+            reasons.append(f"registered Tool risk is {tool.risk_level.value}")
+        return RiskAssessment(
+            request=request,
+            level=level,
+            reasons=tuple(dict.fromkeys(reasons)),
+            requires_approval=(
+                assessed.requires_approval
+                or tool.requires_approval
+                or level in {RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.FORBIDDEN}
+            ),
+            blocked=assessed.blocked or level == RiskLevel.FORBIDDEN,
+        )
+
+    @staticmethod
+    def _tool_approval_input(tool_id: str, input: dict) -> dict:
+        if tool_id == "workspace_command_tool":
+            argv = input.get("argv")
+            return {
+                "argv": list(argv) if isinstance(argv, list) else argv,
+                "cwd": input.get("cwd", "."),
+                "timeout_seconds": input.get("timeout_seconds", 30),
+            }
+        if tool_id == "workspace_patch_tool":
+            old_text = input.get("old_text")
+            new_text = input.get("new_text")
+            return {
+                "path": input.get("path"),
+                "expected_sha256": input.get("expected_sha256"),
+                "old_text_sha256": hashlib.sha256(old_text.encode("utf-8")).hexdigest() if isinstance(old_text, str) else None,
+                "new_text_sha256": hashlib.sha256(new_text.encode("utf-8")).hexdigest() if isinstance(new_text, str) else None,
+            }
+        return {"keys": sorted(str(key) for key in input)}
+
+    @classmethod
+    def _tool_approval_matches_run(cls, approval, run: ToolRun, tool: Tool) -> bool:
+        request = approval.request
+        return (
+            approval.decided_by == "human_root"
+            and request.action == tool.action
+            and request.actor_id == run.actor_id
+            and request.task_id == run.task_id
+            and request.permission_level == tool.permission_level
+            and request.target == tool.tool_id
+            and request.metadata.get("tool_id") == tool.tool_id
+            and request.metadata.get("tool_input") == cls._tool_approval_input(tool.tool_id, run.input)
+        )
 
     def create_task(
         self,

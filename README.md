@@ -7,14 +7,14 @@ The first version focuses on the operating foundation:
 - Human Root always keeps the highest authority.
 - Agents, Skills, and Workflows are registered before use.
 - Skill calls use validated inputs and run through Agent authorization, risk, approval, audit, persistence, and evaluation controls.
-- Tools are registered before use and run through Agent permission, risk, approval, and audit checks.
+- Tools are registered before use and run through Agent permission, risk, approval, and audit checks; workspace search, exact patching, allowlisted commands, and read-only Git inspection now use this boundary.
 - Model calls go through a gateway that records usage and audit events.
 - Budget guardrails check model calls before usage and cost are recorded.
 - Blocked and high-risk operational failures create incidents for human follow-up, with optional outbound alert delivery.
 - Human Root can create verified state backups and apply approval-gated durable restores with automatic pre-restore checkpoints.
 - Risk, permissions, approvals, and audit logs exist from day one.
 - Missing Skills and missing Agents become controlled proposals, not uncontrolled self-modification.
-- The V1 catalog boots with 17 scoped Agent roles and 18 registered Skills; approved catalog additions persist across restarts.
+- The catalog boots with 18 scoped Agent roles, including a dedicated Workspace Agent, and 18 registered Skills; approved catalog additions persist across restarts.
 - All 10 required V1 Workflows have native controlled runners, including Tool Call and GitHub project analysis with persisted approval continuation.
 - Native Workflow steps dispatch through the durable Skill Runtime, so Skill authorization, failure, approval, audit, and evaluation state remain inspectable alongside Workflow traces.
 - Memory and Knowledge Base receive completed work so the system can improve over time.

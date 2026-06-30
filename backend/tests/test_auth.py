@@ -99,7 +99,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(blocked.status_code, 401)
         self.assertEqual(blocked.json()["detail"], "authentication required")
         self.assertEqual(allowed.status_code, 200)
-        self.assertEqual(len(allowed.json()), 17)
+        self.assertEqual(len(allowed.json()), 18)
 
     def test_required_http_auth_accepts_sha256_static_token_and_session_tokens(self):
         token_hash = hashlib.sha256("bootstrap-token".encode("utf-8")).hexdigest()

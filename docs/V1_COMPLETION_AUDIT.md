@@ -15,7 +15,7 @@ The deterministic V1 operating baseline is implemented and verified. The broader
 | User register, login, logout | Auth routes, password hashing, expiring session tokens, auth tests | Complete |
 | Create, inspect, pause, cancel, and run tasks | Task API, state history, SQLite persistence | Complete |
 | CEO planning and Project Manager assignment | Native document and task-planning Workflows | Complete |
-| Agent and Skill execution | 17 default Agents, 18 runtime-backed Skills | Complete |
+| Agent and Skill execution | 18 default Agents, including a dedicated Workspace Agent, and 18 runtime-backed Skills | Complete |
 | Missing Skill and Agent handling | Native missing-capability Workflows, proposals, sandbox, approval | Complete |
 | Risk and approval controls | Permission Engine, Risk Engine, Approval Center, resume guards | Complete |
 | Quality and retrospective | Native quality and retrospective Workflows | Complete |

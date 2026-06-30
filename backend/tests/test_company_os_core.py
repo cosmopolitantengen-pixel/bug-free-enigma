@@ -1,8 +1,11 @@
 import json
 import os
 import sys
+import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
+from unittest.mock import patch
 
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -21,7 +24,7 @@ class CompanyOSCoreTests(unittest.TestCase):
     def test_default_bootstrap_registers_foundation(self):
         company_os = build_company_os()
 
-        self.assertEqual(len(company_os.agents.list()), 17)
+        self.assertEqual(len(company_os.agents.list()), 18)
         self.assertEqual(len(company_os.skills.list()), 18)
         self.assertGreaterEqual(len(company_os.tools.list()), 5)
         self.assertEqual(company_os.agents.get("ceo_agent_v1").reports_to, "human_root")
@@ -667,12 +670,182 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(searched["run"]["status"], "completed")
         search_result = json.loads(searched["run"]["result"])
         self.assertGreaterEqual(len(search_result["matches"]), 1)
+        self.assertIn("line", search_result["matches"][0])
+        self.assertIn("snippet", search_result["matches"][0])
         self.assertFalse(search_result["external_content_inspection"]["trusted"])
         self.assertIn("flagged_files", search_result["external_content_inspection"])
         self.assertEqual(escaped["run"]["status"], "failed")
         self.assertIn("inside the workspace", escaped["run"]["error"])
         self.assertEqual(hidden["run"]["status"], "failed")
         self.assertIn("sensitive", hidden["run"]["error"])
+
+    def test_workspace_patch_requires_approval_and_detects_stale_content(self):
+        from app.services.company import CompanyApplicationService
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)
+        ):
+            target = Path(temp_dir, "example.py")
+            target.write_text("value = 1\n", encoding="utf-8")
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="workspace_patch_tool",
+                actor_id="workspace_agent_v1",
+                input={"path": "example.py", "old_text": "value = 1", "new_text": "value = 2"},
+                reason="Apply one reviewed workspace edit.",
+            )
+
+            self.assertEqual(requested["run"]["status"], "waiting_approval")
+            self.assertEqual(requested["risk"]["level"], "medium")
+            metadata = requested["approval"]["request"]["metadata"]["tool_input"]
+            self.assertNotIn("old_text", metadata)
+            self.assertNotIn("new_text", metadata)
+            service.decide_approval(
+                requested["approval"]["approval_id"], ApprovalStatus.APPROVED, "human_root", "reviewed patch"
+            )
+            completed = service.complete_tool_run(requested["run"]["run_id"], "human_root", "apply patch")
+
+            self.assertEqual(completed["run"]["status"], "completed")
+            self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
+            patch_result = json.loads(completed["run"]["result"])
+            self.assertIn("-value = 1", patch_result["diff"])
+            self.assertIn("+value = 2", patch_result["diff"])
+
+            stale = service.request_tool_run(
+                tool_id="workspace_patch_tool",
+                actor_id="workspace_agent_v1",
+                input={
+                    "path": "example.py",
+                    "old_text": "value = 2",
+                    "new_text": "value = 3",
+                    "expected_sha256": patch_result["before_sha256"],
+                },
+                reason="Reject a stale workspace edit.",
+            )
+            service.decide_approval(stale["approval"]["approval_id"], ApprovalStatus.APPROVED, "human_root", "test stale guard")
+            stale_result = service.complete_tool_run(stale["run"]["run_id"], "human_root", "apply stale patch")
+            self.assertEqual(stale_result["run"]["status"], "failed")
+            self.assertIn("changed since", stale_result["run"]["error"])
+            self.assertEqual(target.read_text(encoding="utf-8"), "value = 2\n")
+
+    def test_workspace_command_is_approval_gated_and_uses_sanitized_environment(self):
+        from app.services.company import CompanyApplicationService
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)
+        ), patch.dict(
+            os.environ,
+            {"DEEPSEEK_API_KEY": "must-not-reach-command", "DEEPSEEK_API_KEY_FILE": ""},
+            clear=False,
+        ):
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="workspace_command_tool",
+                actor_id="workspace_agent_v1",
+                input={
+                    "argv": [
+                        sys.executable,
+                        "-c",
+                        "import os; print('workspace-ok'); print(os.getenv('DEEPSEEK_API_KEY', 'secret-hidden'))",
+                    ],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                },
+                reason="Run a reviewed workspace validation command.",
+            )
+
+            self.assertEqual(requested["run"]["status"], "waiting_approval")
+            self.assertEqual(requested["risk"]["level"], "high")
+            self.assertEqual(requested["permission_decision"], "require_approval")
+            self.assertEqual(requested["approval"]["request"]["metadata"]["tool_input"]["argv"][1], "-c")
+            service.decide_approval(
+                requested["approval"]["approval_id"], ApprovalStatus.APPROVED, "human_root", "reviewed command"
+            )
+            completed = service.complete_tool_run(requested["run"]["run_id"], "human_root", "run validation")
+            command_result = json.loads(completed["run"]["result"])
+
+            self.assertEqual(completed["run"]["status"], "completed")
+            self.assertEqual(command_result["exit_code"], 0)
+            self.assertIn("workspace-ok", command_result["stdout"])
+            self.assertIn("secret-hidden", command_result["stdout"])
+            self.assertNotIn("must-not-reach-command", command_result["stdout"])
+
+    def test_approved_workspace_command_blocks_changed_arguments(self):
+        from app.services.company import CompanyApplicationService
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)
+        ):
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="workspace_command_tool",
+                actor_id="workspace_agent_v1",
+                input={"argv": [sys.executable, "-c", "print('approved')"], "cwd": "."},
+                reason="Approve one exact command.",
+            )
+            service.decide_approval(
+                requested["approval"]["approval_id"],
+                ApprovalStatus.APPROVED,
+                "human_root",
+                "approved exact command",
+            )
+            service.tool_runs[requested["run"]["run_id"]].input["argv"][-1] = "print('changed')"
+
+            completed = service.complete_tool_run(requested["run"]["run_id"], "human_root", "execute")
+
+            self.assertEqual(completed["run"]["status"], "blocked")
+            self.assertIn("does not authorize", completed["run"]["error"])
+            self.assertIsNotNone(completed["incident"])
+
+    def test_workspace_tools_reject_path_escape_and_unlisted_commands(self):
+        from app.services.company import CompanyApplicationService
+
+        with tempfile.TemporaryDirectory() as temp_dir, patch(
+            "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)
+        ):
+            service = CompanyApplicationService(company_os=build_company_os())
+            patch_request = service.request_tool_run(
+                tool_id="workspace_patch_tool",
+                actor_id="workspace_agent_v1",
+                input={"path": "../outside.py", "old_text": "before", "new_text": "after"},
+                reason="Verify workspace path confinement.",
+            )
+            command_request = service.request_tool_run(
+                tool_id="workspace_command_tool",
+                actor_id="workspace_agent_v1",
+                input={"argv": ["powershell", "-Command", "Write-Output unsafe"], "cwd": "."},
+                reason="Verify the executable allowlist.",
+            )
+            for requested in (patch_request, command_request):
+                service.decide_approval(
+                    requested["approval"]["approval_id"],
+                    ApprovalStatus.APPROVED,
+                    "human_root",
+                    "approve negative test",
+                )
+
+            patch_result = service.complete_tool_run(patch_request["run"]["run_id"])
+            command_result = service.complete_tool_run(command_request["run"]["run_id"])
+
+            self.assertEqual(patch_result["run"]["status"], "failed")
+            self.assertIn("inside the workspace", patch_result["run"]["error"])
+            self.assertEqual(command_result["run"]["status"], "failed")
+            self.assertIn("not allowlisted", command_result["run"]["error"])
+
+    def test_git_read_tool_inspects_repository_without_approval(self):
+        from app.services.company import CompanyApplicationService
+
+        service = CompanyApplicationService(company_os=build_company_os())
+        result = service.request_tool_run(
+            tool_id="git_read_tool",
+            actor_id="workspace_agent_v1",
+            input={"operation": "status"},
+            reason="Inspect repository status without changing it.",
+        )
+
+        self.assertEqual(result["run"]["status"], "completed")
+        self.assertIsNone(result["approval"])
+        self.assertIn("##", json.loads(result["run"]["result"])["output"])
 
     def test_tool_adapter_reports_invalid_input_as_failed_run(self):
         from app.services.company import CompanyApplicationService
