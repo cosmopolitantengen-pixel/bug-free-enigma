@@ -31,6 +31,17 @@ import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState
 import { ApiRecord, apiRequest, formatDate, formatValue, getStoredApiToken, shortId, storeApiToken, text } from "@/lib/api";
 
 type View = "chat" | "overview" | "work" | "scheduler" | "catalog" | "governance" | "system";
+type ChatAction = {
+  proposalId: string;
+  workflowId: string;
+  workflowName: string;
+  title: string;
+  description: string;
+  input: ApiRecord;
+  purpose: string;
+  status: "pending" | "executing" | "completed" | "waiting_approval" | "cancelled" | "failed";
+  taskId?: string;
+};
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -42,6 +53,7 @@ type ChatMessage = {
   cost?: number;
   fallbackUsed?: boolean;
   failed?: boolean;
+  action?: ChatAction;
 };
 type ChatSession = {
   id: string;
@@ -124,22 +136,6 @@ function createId(prefix: string) {
 function createChatSession(): ChatSession {
   const now = new Date().toISOString();
   return { id: createId("chat"), title: "新对话", messages: [], updatedAt: now };
-}
-
-function buildChatPrompt(messages: ChatMessage[]) {
-  const transcript = messages
-    .slice(-20)
-    .map((message) => `${message.role === "user" ? "User" : "Assistant"}: ${message.content}`)
-    .join("\n")
-    .slice(-12000);
-  return [
-    "You are the conversational assistant inside AI Company OS.",
-    "Reply helpfully and directly in the same language as the user. Use prior turns for context.",
-    "Do not claim to have performed actions or accessed data unless that information is present in the conversation.",
-    "Conversation:",
-    transcript,
-    "Assistant:",
-  ].join("\n");
 }
 
 const DATA_LABELS: Record<keyof DataSet, string> = {
@@ -283,10 +279,18 @@ export function OperationsConsole() {
     return result;
   }, [apiBase, apiToken, refresh]);
 
-  const callModel = useCallback(async (body: ApiRecord) => apiRequest<ApiRecord>(apiBase, "/models/generate", {
+  const callChat = useCallback(async (body: ApiRecord) => apiRequest<ApiRecord>(apiBase, "/chat/respond", {
     method: "POST",
     body: JSON.stringify(body),
   }, apiToken), [apiBase, apiToken]);
+
+  const executeChatAction = useCallback(async (proposalId: string) => {
+    const result = await apiRequest<ApiRecord>(apiBase, `/chat/actions/${proposalId}/execute`, {
+      method: "POST",
+    }, apiToken);
+    await refresh();
+    return result;
+  }, [apiBase, apiToken, refresh]);
 
   const saveApiBase = (event: FormEvent) => {
     event.preventDefault();
@@ -351,7 +355,7 @@ export function OperationsConsole() {
 
         {loading && Object.keys(data.summary).length === 0 ? <LoadingState /> : (
           <>
-            {view === "chat" && <ChatView data={data} callModel={callModel} fail={setError} />}
+            {view === "chat" && <ChatView data={data} callChat={callChat} executeChatAction={executeChatAction} fail={setError} />}
             {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} />}
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
@@ -365,9 +369,10 @@ export function OperationsConsole() {
   );
 }
 
-type ModelCall = (body: ApiRecord) => Promise<ApiRecord>;
+type ChatCall = (body: ApiRecord) => Promise<ApiRecord>;
+type ChatActionCall = (proposalId: string) => Promise<ApiRecord>;
 
-function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCall; fail: (v: string) => void }) {
+function ChatView({ data, callChat, executeChatAction, fail }: { data: DataSet; callChat: ChatCall; executeChatAction: ChatActionCall; fail: (v: string) => void }) {
   const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
   const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
   const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
@@ -377,7 +382,9 @@ function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCa
   const [chatReady, setChatReady] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingChatId, setSendingChatId] = useState<string | null>(null);
+  const [chatMode, setChatMode] = useState<"auto" | "chat" | "action">("auto");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const executingActionIds = useRef<Set<string>>(new Set());
   const availableModels = allowedModels[provider] ?? [];
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
 
@@ -451,27 +458,41 @@ function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCa
     } : session));
 
     try {
-      const result = await callModel({
-        prompt: buildChatPrompt(nextMessages),
-        actor_id: "ceo_agent_v1",
-        purpose: "chat_conversation",
+      const result = await callChat({
+        messages: nextMessages.slice(-20).map((message) => ({ role: message.role, content: message.content })),
+        mode: chatMode,
         provider,
         model_name: model,
       });
       const routing = (result.routing as ApiRecord | undefined) ?? {};
       const usage = (result.usage as ApiRecord | undefined) ?? {};
       const cost = (result.cost_log as ApiRecord | undefined) ?? {};
+      const proposed = (result.action as ApiRecord | undefined);
+      const proposedWorkflowId = text(proposed?.workflow_id);
+      const action: ChatAction | undefined = proposed ? {
+        proposalId: text(proposed.proposal_id),
+        workflowId: proposedWorkflowId,
+        workflowName: CATALOG_LABELS[proposedWorkflowId] ?? text(proposed.workflow_name),
+        title: text(proposed.title),
+        description: text(proposed.description),
+        input: (proposed.input as ApiRecord | undefined) ?? {},
+        purpose: text(proposed.purpose),
+        status: "pending",
+      } : undefined;
       const reply: ChatMessage = {
         id: createId("message"),
         role: "assistant",
-        content: result.blocked ? "本次请求被预算策略阻止，请调整预算或模型后重试。" : text(result.output, "模型没有返回内容。"),
+        content: action
+          ? `我可以调用“${action.workflowName}”来${action.purpose}。确认后才会创建任务并执行。`
+          : text(result.message ?? result.output, result.blocked ? "本次请求被预算策略阻止，请调整预算或模型后重试。" : "模型没有返回内容。"),
         createdAt: new Date().toISOString(),
-        provider: text(routing.actual_provider ?? usage.provider, provider),
-        model: text(usage.model_name, model),
-        totalTokens: Number(usage.total_tokens ?? 0),
-        cost: Number(cost.amount ?? 0),
-        fallbackUsed: Boolean(routing.fallback_used),
+        provider: result.type === "conversation" ? text(routing.actual_provider ?? usage.provider, provider) : undefined,
+        model: result.type === "conversation" ? text(usage.model_name, model) : undefined,
+        totalTokens: result.type === "conversation" ? Number(usage.total_tokens ?? 0) : undefined,
+        cost: result.type === "conversation" ? Number(cost.amount ?? 0) : undefined,
+        fallbackUsed: result.type === "conversation" ? Boolean(routing.fallback_used) : undefined,
         failed: Boolean(result.blocked),
+        action,
       };
       setSessions((current) => current.map((session) => session.id === sessionId ? {
         ...session,
@@ -492,6 +513,60 @@ function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCa
     } finally {
       setSendingChatId(null);
     }
+  };
+
+  const updateAction = (sessionId: string, messageId: string, update: Partial<ChatAction>) => {
+    setSessions((current) => current.map((session) => session.id === sessionId ? {
+      ...session,
+      messages: session.messages.map((message) => message.id === messageId && message.action ? {
+        ...message,
+        action: { ...message.action, ...update },
+      } : message),
+      updatedAt: new Date().toISOString(),
+    } : session));
+  };
+
+  const executeAction = async (message: ChatMessage) => {
+    if (!activeSession || !message.action || message.action.status !== "pending" || executingActionIds.current.has(message.action.proposalId)) return;
+    const sessionId = activeSession.id;
+    const action = message.action;
+    executingActionIds.current.add(action.proposalId);
+    updateAction(sessionId, message.id, { status: "executing" });
+    try {
+      const result = await executeChatAction(action.proposalId);
+      const task = (result.task as ApiRecord | undefined) ?? {};
+      const waiting = Boolean(result.approval_required);
+      const blocked = Boolean(result.blocked);
+      const status: ChatAction["status"] = blocked ? "failed" : waiting ? "waiting_approval" : "completed";
+      updateAction(sessionId, message.id, { status, taskId: text(task.task_id) });
+      const resultMessage: ChatMessage = {
+        id: createId("message"),
+        role: "assistant",
+        content: blocked
+          ? `行动未完成：${text(result.output, "工作流被安全策略阻止。")}`
+          : waiting
+            ? `任务已创建，正在等待审批。任务编号：${shortId(task.task_id)}`
+            : `行动已完成。${text(result.output, `任务编号：${shortId(task.task_id)}`)}`,
+        createdAt: new Date().toISOString(),
+        failed: blocked,
+      };
+      setSessions((current) => current.map((session) => session.id === sessionId ? {
+        ...session,
+        messages: [...session.messages, resultMessage],
+        updatedAt: resultMessage.createdAt,
+      } : session));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "行动执行失败";
+      updateAction(sessionId, message.id, { status: "failed" });
+      fail(errorMessage);
+    } finally {
+      executingActionIds.current.delete(action.proposalId);
+    }
+  };
+
+  const cancelAction = (message: ChatMessage) => {
+    if (!activeSession || !message.action || message.action.status !== "pending") return;
+    updateAction(activeSession.id, message.id, { status: "cancelled" });
   };
 
   if (!chatReady || !activeSession) return <LoadingState />;
@@ -520,6 +595,7 @@ function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCa
             <span>对话记录保存在当前浏览器</span>
           </div>
           <div className="chat-model-controls">
+            <label><span>模式</span><select aria-label="对话模式" value={chatMode} onChange={(event) => setChatMode(event.target.value as "auto" | "chat" | "action")}><option value="auto">自动判断</option><option value="chat">只聊天</option><option value="action">计划行动</option></select></label>
             <label><span>服务商</span><select aria-label="对话模型服务商" value={provider} onChange={(event) => setProvider(event.target.value)}>{providerNames.map((name) => <option key={name} value={name}>{formatValue(name)}</option>)}</select></label>
             <label><span>模型</span><select aria-label="对话模型" value={model} onChange={(event) => setModel(event.target.value)}>{availableModels.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           </div>
@@ -533,6 +609,12 @@ function ChatView({ data, callModel, fail }: { data: DataSet; callModel: ModelCa
               <p>{message.content}</p>
               {message.role === "assistant" && message.provider && <div className="chat-message-meta">
                 <span>{formatValue(message.provider)}</span><span>{message.model}</span><span>{message.totalTokens ?? 0} Token</span><span>${(message.cost ?? 0).toFixed(9)}</span>{message.fallbackUsed && <span>已降级</span>}
+              </div>}
+              {message.action && <div className={`chat-action-card ${message.action.status}`}>
+                <div className="chat-action-heading"><Workflow /><div><strong>{message.action.workflowName}</strong><span>{message.action.purpose}</span></div><StatusPill value={message.action.status} /></div>
+                <div className="chat-action-detail"><span>执行后将创建受控任务</span><code>{message.action.workflowId}</code></div>
+                {message.action.status === "pending" && <div className="chat-action-buttons"><button className="small-button" onClick={() => cancelAction(message)}>取消</button><button className="button" onClick={() => void executeAction(message)}><Play />确认执行</button></div>}
+                {message.action.taskId && <div className="muted-line">任务：{shortId(message.action.taskId)}</div>}
               </div>}
             </article>
           ))}

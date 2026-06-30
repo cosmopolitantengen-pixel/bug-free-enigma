@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -126,6 +127,18 @@ class ModelGenerateRequest(BaseModel):
     actor_id: str
     purpose: str = "manual_generation"
     task_id: str | None = None
+    model_name: str | None = None
+    provider: str | None = None
+
+
+class ChatMessageRequest(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=12000)
+
+
+class ChatRespondRequest(BaseModel):
+    messages: list[ChatMessageRequest] = Field(min_length=1, max_length=20)
+    mode: Literal["auto", "chat", "action"] = "auto"
     model_name: str | None = None
     provider: str | None = None
 

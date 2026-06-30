@@ -77,7 +77,8 @@ The suite currently covers:
 - Local auth registration, login, duplicate-user rejection, password hashing, expiring session tokens, TTL validation, and SQLite reload
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
-- Next.js Playwright browser E2E for desktop multi-turn chat generation and reload persistence, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
+- Next.js Playwright browser E2E for desktop multi-turn chat generation, reload persistence, audited action proposal confirmation, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
+- Chat API separation between idea discussion and explicit operational proposals, with no task creation before Human Root confirmation, idempotent duplicate confirmation, and normal Workflow/Memory behavior after confirmation
 - DeepSeek Chat Completions request/response handling, provider error redaction, explicit multi-provider fallback routing, actual-provider usage records, provider-specific pricing, secret-file loading, and console provider/model selection
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence

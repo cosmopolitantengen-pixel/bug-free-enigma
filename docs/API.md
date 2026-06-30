@@ -84,6 +84,8 @@ GET /evaluations
 
 GET /model-usage
 POST /models/generate
+POST /chat/respond
+POST /chat/actions/{id}/execute
 GET /cost-logs
 GET /budget/summary
 POST /budget/policy
@@ -138,6 +140,8 @@ The scheduler API persists one-time and recurring internal jobs, supports pause/
 `GET /deployment/readiness` is stricter than `/health`. It reports whether production-facing requirements are satisfied, including HTTP auth, durable persistence, schema state, audit append-only guards, Redis/RQ scheduler queue configuration, alert delivery metadata, model provider mode, embeddings/vector store status, runbooks, and operator backlog. It exposes booleans, hostnames, counts, and statuses only; raw API tokens, provider keys, Redis URLs, database URLs, and full webhook URLs are not returned.
 
 `GET /models/providers` lists configured provider names, each provider's default and allowlisted models, the explicit fallback order, and non-secret per-million-token pricing metadata. `POST /models/generate` accepts optional `provider` and `model_name` selections. Successful responses include routing metadata for requested, attempted, and actual providers plus a `fallback_used` flag; usage and CostLog records always identify the provider and model that actually completed the request.
+
+`POST /chat/respond` is the governed conversational entrypoint. `chat` mode always returns a Model Gateway response, `action` mode always proposes a Workflow, and `auto` mode proposes work only for explicit operational language. Proposals are audited and do not create tasks. Human Root confirmation calls `POST /chat/actions/{id}/execute`, which consumes the server-held proposal exactly once and runs the existing Workflow boundary, preserving Workflow Skill, approval, Memory, evaluation, and audit behavior. Completed proposal results are cached so retries return the same task instead of creating duplicates.
 
 ## Current Implementation
 
@@ -209,6 +213,8 @@ Current implemented routes include:
 - `GET /evaluations`
 - `GET /model-usage`
 - `POST /models/generate`
+- `POST /chat/respond`
+- `POST /chat/actions/{proposal_id}/execute`
 - `GET /cost-logs`
 - `GET /budget/summary`
 - `POST /budget/policy`

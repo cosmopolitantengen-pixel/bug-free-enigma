@@ -133,6 +133,21 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       return;
     }
 
+    if (request.method() === "POST" && url.pathname.startsWith("/chat/actions/")) {
+      state.actions.push({ method: request.method(), path: url.pathname });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          workflow: { workflow_id: "task_planning_v1", name: "Task Planning" },
+          task: { task_id: "task-created-123456", status: "planned" },
+          output: "# Task Plan\n\n1. Prepare\n2. Launch\n3. Review",
+          approval_required: false,
+          blocked: false,
+        }),
+      });
+      return;
+    }
+
     if (request.method() === "POST" && url.pathname === "/models/generate") {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.actions.push({ method: request.method(), path: url.pathname, body });
@@ -151,6 +166,52 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           blocked: false,
         }),
       });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/chat/respond") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      const messages = body.messages as Array<{ role: string; content: string }>;
+      const latest = messages[messages.length - 1]?.content ?? "";
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      if (latest.includes("请制定")) {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            type: "action_proposal",
+            message: "我可以调用“任务规划”来规划并拆分任务。确认后才会创建任务并执行。",
+            action: {
+              proposal_id: "chat-action-1",
+              workflow_id: "task_planning_v1",
+              workflow_name: "任务规划",
+              title: latest,
+              description: latest,
+              input: {},
+              purpose: "规划并拆分任务",
+              status: "pending",
+            },
+            blocked: false,
+          }),
+        });
+      } else {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({
+            type: "conversation",
+            message: "DeepSeek generated result",
+            output: "DeepSeek generated result",
+            usage: { provider: "deepseek", model_name: body.model_name, total_tokens: 42 },
+            cost_log: { amount: 0.000021 },
+            routing: {
+              requested_provider: body.provider,
+              actual_provider: "deepseek",
+              attempted_providers: ["deepseek"],
+              fallback_used: false,
+            },
+            blocked: false,
+          }),
+        });
+      }
       return;
     }
 
@@ -213,33 +274,53 @@ test.describe("AI Company OS operations console", () => {
 
     await page.getByLabel("对话模型服务商").selectOption("deepseek");
     await page.getByLabel("对话模型", { exact: true }).selectOption("deepseek-v4-pro");
-    await page.getByLabel("聊天消息").fill("帮我设计一个三步发布计划");
+    await page.getByLabel("聊天消息").fill("我在考虑三种发布方向，先陪我梳理一下");
     await page.getByRole("button", { name: "发送消息" }).click();
 
-    await expect(page.locator(".chat-message.user").getByText("帮我设计一个三步发布计划")).toBeVisible();
+    await expect(page.locator(".chat-message.user").getByText("我在考虑三种发布方向，先陪我梳理一下")).toBeVisible();
     await expect(page.getByText("DeepSeek generated result")).toBeVisible();
     await expect(page.getByText("42 Token")).toBeVisible();
-    expect(api.actions.find((item) => item.path === "/models/generate")?.body).toMatchObject({
+    expect(api.actions.find((item) => item.path === "/chat/respond")?.body).toMatchObject({
       provider: "deepseek",
       model_name: "deepseek-v4-pro",
-      actor_id: "ceo_agent_v1",
-      purpose: "chat_conversation",
+      mode: "auto",
     });
-    expect(String(api.actions.find((item) => item.path === "/models/generate")?.body?.prompt)).toContain("帮我设计一个三步发布计划");
+    expect(api.actions.find((item) => item.path === "/chat/respond")?.body?.messages).toEqual([
+      { role: "user", content: "我在考虑三种发布方向，先陪我梳理一下" },
+    ]);
 
-    await page.getByLabel("聊天消息").fill("把第二步再说具体一点");
+    await page.getByLabel("聊天消息").fill("第二个方向的优势是什么");
     await page.getByRole("button", { name: "发送消息" }).click();
-    await expect(page.locator(".chat-message.user").getByText("把第二步再说具体一点")).toBeVisible();
+    await expect(page.locator(".chat-message.user").getByText("第二个方向的优势是什么")).toBeVisible();
     await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
-    const modelCalls = api.actions.filter((item) => item.path === "/models/generate");
-    expect(modelCalls).toHaveLength(2);
-    expect(String(modelCalls[1].body?.prompt)).toContain("DeepSeek generated result");
-    expect(String(modelCalls[1].body?.prompt)).toContain("把第二步再说具体一点");
+    const chatCalls = api.actions.filter((item) => item.path === "/chat/respond");
+    expect(chatCalls).toHaveLength(2);
+    expect(chatCalls[1].body?.messages).toEqual([
+      { role: "user", content: "我在考虑三种发布方向，先陪我梳理一下" },
+      { role: "assistant", content: "DeepSeek generated result" },
+      { role: "user", content: "第二个方向的优势是什么" },
+    ]);
 
     await page.reload();
-    await expect(page.locator(".chat-message.user").getByText("帮我设计一个三步发布计划")).toBeVisible();
-    await expect(page.locator(".chat-message.user").getByText("把第二步再说具体一点")).toBeVisible();
+    await expect(page.locator(".chat-message.user").getByText("我在考虑三种发布方向，先陪我梳理一下")).toBeVisible();
+    await expect(page.locator(".chat-message.user").getByText("第二个方向的优势是什么")).toBeVisible();
     await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
+  });
+
+  test("confirms a chat action before running its workflow", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Chat action smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("聊天消息").fill("请制定一个三步产品发布计划");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await expect(page.getByText("我可以调用“任务规划”来规划并拆分任务。确认后才会创建任务并执行。")).toBeVisible();
+    await expect(page.getByText("task_planning_v1")).toBeVisible();
+    expect(api.actions.filter((item) => item.path.startsWith("/chat/actions/"))).toHaveLength(0);
+
+    await page.getByRole("button", { name: "确认执行" }).click();
+    await expect(page.getByText(/行动已完成/)).toBeVisible();
+    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-action-1/execute")).toHaveLength(1);
   });
 
   test("persists bearer token and submits a controlled workflow", async ({ page }, testInfo) => {

@@ -1290,6 +1290,56 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(dashboard.json()["model_usage_count"], 1)
         self.assertEqual(dashboard.json()["cost_log_count"], 1)
 
+    def test_chat_discusses_ideas_without_creating_operational_work(self):
+        response = self.client.post(
+            "/chat/respond",
+            json={
+                "messages": [
+                    {"role": "user", "content": "帮我分析一下帮助小商家的产品想法，先聊聊方向。"},
+                ],
+                "mode": "auto",
+                "provider": "local",
+                "model_name": "deterministic_mock_v1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["type"], "conversation")
+        self.assertIn("chat_conversation", response.json()["message"])
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(len(self.client.get("/model-usage").json()), 1)
+
+    def test_chat_proposes_workflow_and_waits_for_human_confirmation(self):
+        proposed = self.client.post(
+            "/chat/respond",
+            json={
+                "messages": [
+                    {"role": "user", "content": "请制定一个三步产品发布计划并拆分任务。"},
+                ],
+                "mode": "auto",
+            },
+        )
+        action = proposed.json()["action"]
+
+        self.assertEqual(proposed.status_code, 200)
+        self.assertEqual(proposed.json()["type"], "action_proposal")
+        self.assertEqual(action["workflow_id"], "task_planning_v1")
+        self.assertEqual(action["status"], "pending")
+        self.assertEqual(self.client.get("/tasks").json(), [])
+        self.assertEqual(self.client.get("/audit-logs").json()[-1]["event_type"], "chat_action_proposed")
+
+        executed = self.client.post(f"/chat/actions/{action['proposal_id']}/execute")
+        repeated = self.client.post(f"/chat/actions/{action['proposal_id']}/execute")
+
+        self.assertEqual(executed.status_code, 200)
+        self.assertEqual(executed.json()["workflow"]["workflow_id"], "task_planning_v1")
+        self.assertEqual(executed.json()["task"]["status"], "planned")
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["task"]["task_id"], executed.json()["task"]["task_id"])
+        self.assertEqual(len(self.client.get("/tasks").json()), 1)
+        self.assertEqual(self.client.get("/memory").json()[-1]["memory_type"], "plan")
+        self.assertEqual(self.client.get("/audit-logs").json()[-1]["event_type"], "chat_action_confirmed")
+
     def test_budget_policy_update_is_audited_and_blocks_future_model_calls(self):
         updated = self.client.post(
             "/budget/policy",

@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its Chinese-language seven-view operations console opens on a multi-turn chat workspace and also covers overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. Chat sessions persist in the current browser, support explicit provider/model selection, and show actual routing, fallback, token, and cost metadata returned by the governed Model Gateway. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage runs in CI against mocked API responses for desktop and 390 px mobile viewports, including chat generation and reload persistence, readiness visibility, navigation, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation.
+Its Chinese-language seven-view operations console opens on a multi-turn chat workspace and also covers overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. Chat sessions persist in the current browser, support automatic/chat/action modes and explicit provider/model selection, and show actual routing, fallback, token, and cost metadata returned by the governed Model Gateway. Explicit action requests become audited Workflow cards; no task is created until Human Root presses the confirmation control. It has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage runs in CI against mocked API responses for desktop and 390 px mobile viewports, including conversation persistence, action confirmation, readiness visibility, navigation, bearer-token storage, Workflow submission, approval decisions, schedule controls, Incident response, invalid API-base handling, and auth-required API degradation.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -91,6 +91,8 @@ POST /goals/{goal_id}/improvements/{proposal_id}
 POST /tools/runs/request
 POST /tools/runs/{run_id}/complete
 POST /models/generate
+POST /chat/respond
+POST /chat/actions/{proposal_id}/execute
 GET /skills/proposals
 GET /agents/proposals
 POST /skills/proposals/{proposal_id}/sandbox
@@ -102,6 +104,8 @@ POST /agents/proposals/{proposal_id}/register
 ## Current Capabilities
 
 - Hold multi-turn conversations through the governed Model Gateway, with browser-local session history and provider/model controls.
+- Turn explicit chat instructions into audited Workflow proposals, then create work only after Human Root confirmation.
+- Keep exploratory idea discussion in conversation mode without silently creating tasks.
 - Inspect actual provider, model, fallback, token usage, and estimated cost on each assistant response.
 - View system health and core counts.
 - Create, pause, resume, cancel, and tick durable schedules; inspect execution history, failed executions, Redis/RQ worker counts, queue backlog, failed queue jobs, and domain events.

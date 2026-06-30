@@ -28,9 +28,11 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("暂无任务", console)
         self.assertIn("模型服务商", console)
         self.assertIn("模型路由与价格", console)
-        self.assertIn("chat_conversation", console)
+        self.assertIn("/chat/respond", console)
         self.assertIn("ai-company-os-chat-sessions-v1", console)
         self.assertIn("输入消息，Enter 发送，Shift+Enter 换行", console)
+        self.assertIn("对话模式", console)
+        self.assertIn("确认执行", console)
         self.assertIn("@media (max-width: 760px)", styles)
 
     def test_frontend_dependencies_are_pinned(self):

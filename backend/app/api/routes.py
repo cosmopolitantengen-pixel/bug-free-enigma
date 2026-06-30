@@ -17,6 +17,7 @@ from app.api.schemas import (
     BackupRestoreRequest,
     BackupVerifyRequest,
     BudgetPolicyUpdateRequest,
+    ChatRespondRequest,
     GitHubAbsorptionAnalyzeRequest,
     GitHubAbsorptionImportRequest,
     ImprovementProposalCreateRequest,
@@ -709,6 +710,31 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             raise HTTPException(status_code=404, detail="agent not found") from exc
         except ModelProviderError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/chat/respond")
+    def respond_to_chat(payload: ChatRespondRequest) -> dict:
+        try:
+            return service.respond_to_chat(
+                messages=[message.model_dump() for message in payload.messages],
+                mode=payload.mode,
+                model_name=payload.model_name,
+                provider=payload.provider,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chat capability not found") from exc
+        except ModelProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/chat/actions/{proposal_id}/execute")
+    def execute_chat_action(proposal_id: str) -> dict:
+        try:
+            return service.execute_chat_action(proposal_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chat action proposal not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

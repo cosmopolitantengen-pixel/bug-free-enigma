@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 from app.auth.service import AuthService
 from app.bootstrap import CompanyOS, build_company_os
@@ -11,7 +12,7 @@ from app.connectors.github import GitHubConnector
 from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
 from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, SkillRun, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
 from app.core.enums import ApprovalStatus, PermissionLevel, RiskLevel, SkillRunStatus, TaskStatus, ToolRunStatus
-from app.core.models import ActionRequest, AuditEvent, EvaluationRecord, KnowledgeDoc, MemoryRecord, RiskAssessment, Task, utc_now
+from app.core.models import ActionRequest, AuditEvent, EvaluationRecord, KnowledgeDoc, MemoryRecord, RiskAssessment, Task, new_id, utc_now
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.knowledge_base.embeddings import EmbeddingGateway, EmbeddingProviderError, EmbeddingResult, create_embedding_gateway
 from app.models.providers import ModelProviderError
@@ -34,6 +35,11 @@ ARBITRATION_PRIORITY_AREAS = {
     "efficiency",
 }
 
+CHAT_ACTION_MARKERS = (
+    "创建", "生成", "制定", "安排", "执行", "开始执行", "建立", "提交", "发起",
+    "组织", "召开", "分配", "交给", "写一份", "做一份", "运行",
+)
+
 
 @dataclass
 class CompanyApplicationService:
@@ -54,6 +60,9 @@ class CompanyApplicationService:
     _vector_store: KnowledgeVectorStore | None = field(default=None, init=False, repr=False)
     _indexed_knowledge_ids: set[str] = field(default_factory=set, init=False, repr=False)
     _failed_embedding_ids: set[str] = field(default_factory=set, init=False, repr=False)
+    _chat_action_proposals: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
+    _chat_action_results: dict[str, dict] = field(default_factory=dict, init=False, repr=False)
+    _chat_action_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._bind_workflow_skill_runtime()
@@ -1938,6 +1947,206 @@ class CompanyApplicationService:
                 "fallback_used": response.fallback_used,
             },
         }
+
+    def respond_to_chat(
+        self,
+        messages: list[dict],
+        mode: str = "auto",
+        model_name: str | None = None,
+        provider: str | None = None,
+    ) -> dict:
+        if mode not in {"auto", "chat", "action"}:
+            raise ValueError("chat mode must be auto, chat, or action")
+        cleaned = []
+        for message in messages[-20:]:
+            role = str(message.get("role", "")).strip().lower()
+            content = str(message.get("content", "")).strip()
+            if role not in {"user", "assistant"} or not content:
+                raise ValueError("chat messages require a valid role and content")
+            cleaned.append({"role": role, "content": content[:12000]})
+        if not cleaned or cleaned[-1]["role"] != "user":
+            raise ValueError("the latest chat message must be from the user")
+
+        latest = cleaned[-1]["content"]
+        proposal = self._propose_chat_action(latest, mode)
+        if proposal is not None:
+            self._chat_action_proposals[proposal["proposal_id"]] = proposal
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type="chat_action_proposed",
+                    actor_id="ceo_agent_v1",
+                    action=proposal["workflow_id"],
+                    task_id=None,
+                    risk_level=RiskLevel.LOW,
+                    approval_status=ApprovalStatus.NOT_REQUIRED,
+                    result="awaiting_human_confirmation",
+                    input_ref=hashlib.sha256(latest.encode("utf-8")).hexdigest(),
+                    output_ref=proposal["proposal_id"],
+                )
+            )
+            self.sync()
+            return {
+                "type": "action_proposal",
+                "message": proposal["summary"],
+                "action": proposal,
+                "blocked": False,
+                "usage": None,
+                "cost_log": None,
+                "routing": None,
+            }
+
+        transcript = "\n".join(
+            f"{'User' if item['role'] == 'user' else 'Assistant'}: {item['content']}"
+            for item in cleaned
+        )[-12000:]
+        prompt = "\n".join(
+            [
+                "You are the conversational thinking partner inside AI Company OS.",
+                "Reply naturally and helpfully in the same language as the user.",
+                "Discuss and develop ideas without creating tasks unless the user explicitly asks for action.",
+                "Do not claim that an operational action was executed during ordinary conversation.",
+                "Conversation:",
+                transcript,
+                "Assistant:",
+            ]
+        )
+        result = self.generate_model_response(
+            prompt=prompt,
+            actor_id="ceo_agent_v1",
+            purpose="chat_conversation",
+            model_name=model_name,
+            provider=provider,
+        )
+        return {
+            **result,
+            "type": "conversation",
+            "message": (
+                "本次请求被预算策略阻止，请调整预算或模型后重试。"
+                if result.get("blocked")
+                else result.get("output")
+            ),
+        }
+
+    def _propose_chat_action(self, message: str, mode: str) -> dict | None:
+        normalized = message.lower()
+        if mode == "chat":
+            return None
+        if mode == "auto" and not any(marker in normalized for marker in CHAT_ACTION_MARKERS):
+            return None
+
+        workflow_id = "task_planning_v1"
+        workflow_input: dict = {}
+        purpose = "规划并拆分任务"
+        if any(marker in normalized for marker in ("复盘", "总结经验", "回顾执行")):
+            workflow_id = "retrospective_v1"
+            workflow_input = {"summary": message}
+            purpose = "记录复盘并沉淀经验"
+        elif any(marker in normalized for marker in ("质量", "检查", "审查", "评审", "验收")):
+            workflow_id = "quality_check_v1"
+            purpose = "运行质量检查"
+        elif any(marker in normalized for marker in ("协作", "开会", "召开", "分配给", "交给")):
+            workflow_id = "agent_collaboration_v1"
+            target_agent = "document_agent_v1"
+            if any(marker in normalized for marker in ("产品", "需求")):
+                target_agent = "product_agent_v1"
+            elif any(marker in normalized for marker in ("技术", "开发", "代码")):
+                target_agent = "tech_agent_v1"
+            elif any(marker in normalized for marker in ("项目", "进度")):
+                target_agent = "project_manager_agent_v1"
+            workflow_input = {
+                "target_agent_id": target_agent,
+                "agenda": message,
+                "instructions": message,
+                "handoff_reason": "由聊天入口确认并分配受控执行步骤。",
+            }
+            purpose = "组织智能体协作与任务交接"
+        elif any(marker in normalized for marker in ("缺少技能", "新技能", "没有这个能力")):
+            workflow_id = "skill_missing_v1"
+            workflow_input = {"capability": message, "requested_by_agent": "document_agent_v1"}
+            purpose = "查找或提出所需技能"
+        elif any(marker in normalized for marker in ("审批", "批准", "许可")):
+            workflow_id = "approval_v1"
+            workflow_input = {
+                "action": "chat_requested_action",
+                "actor_id": "ceo_agent_v1",
+                "reason": message,
+            }
+            purpose = "发起受控审批"
+        elif any(marker in normalized for marker in ("文档", "方案", "报告", "说明", "写一份", "做一份")):
+            workflow_id = "document_generation_v1"
+            purpose = "生成并保存文档结果"
+
+        definition = self.company_os.workflows.get(workflow_id)
+        title = message.replace("\n", " ").strip()[:60] or definition.name
+        proposal_id = new_id("chat_action")
+        return {
+            "proposal_id": proposal_id,
+            "workflow_id": workflow_id,
+            "workflow_name": definition.name,
+            "title": title,
+            "description": message,
+            "input": workflow_input,
+            "purpose": purpose,
+            "status": "pending",
+            "summary": f"我可以调用“{definition.name}”来{purpose}。确认后才会创建任务并执行。",
+        }
+
+    def execute_chat_action(self, proposal_id: str) -> dict:
+        with self._chat_action_lock:
+            cached = self._chat_action_results.get(proposal_id)
+            if cached is not None:
+                return cached
+            proposal = self._chat_action_proposals[proposal_id]
+            if proposal["status"] == "executing":
+                raise ValueError("chat action is already executing")
+            if proposal["status"] != "pending":
+                raise ValueError("chat action is not pending")
+            proposal["status"] = "executing"
+
+        try:
+            result = self.run_registered_workflow(
+                workflow_id=proposal["workflow_id"],
+                title=proposal["title"],
+                description=proposal["description"],
+                user_id="human_root",
+                input=proposal["input"],
+            )
+        except Exception:
+            with self._chat_action_lock:
+                proposal["status"] = "failed"
+            raise
+
+        task = result.get("task") or {}
+        status = (
+            "failed"
+            if result.get("blocked")
+            else "waiting_approval"
+            if result.get("approval_required")
+            else "completed"
+        )
+        with self._chat_action_lock:
+            proposal["status"] = status
+            proposal["task_id"] = task.get("task_id")
+            self._chat_action_results[proposal_id] = result
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_action_confirmed",
+                actor_id="human_root",
+                action=proposal["workflow_id"],
+                task_id=task.get("task_id"),
+                risk_level=RiskLevel.LOW,
+                approval_status=(
+                    ApprovalStatus.PENDING
+                    if result.get("approval_required")
+                    else ApprovalStatus.NOT_REQUIRED
+                ),
+                result=status,
+                input_ref=proposal_id,
+                output_ref=task.get("task_id"),
+            )
+        )
+        self.sync()
+        return result
 
     def request_skill_run(
         self,
