@@ -169,6 +169,13 @@ textarea { min-height: 76px; resize: vertical; }
 .chat-approval-block { display: grid; gap: 8px; padding-top: 8px; border-top: 1px solid rgba(11, 122, 90, .18); }
 .chat-approval-block > code { max-height: 96px; overflow: auto; padding: 8px; border-radius: 5px; background: var(--surface); color: var(--text); font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-approval-facts { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 10px; }
+.agent-run-trace { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid rgba(11, 122, 90, .18); }
+.agent-run-summary { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.agent-run-summary strong { margin-right: auto; color: var(--text); font-size: 11px; }
+.agent-run-step { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 7px; min-width: 0; padding: 6px 7px; border-radius: 5px; background: var(--surface); font-size: 10px; }
+.agent-run-step > span { color: var(--muted); text-align: center; }
+.agent-run-step > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-run-step > small { color: var(--muted); }
 .chat-composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 9px; padding: 12px 15px; border-top: 1px solid var(--line); background: var(--surface); }
 .chat-composer textarea { min-height: 48px; max-height: 150px; resize: vertical; }
 .chat-send-button { min-height: 48px; }

@@ -19,6 +19,7 @@ ALLOWED_INTENTS = {
     "code_search",
     "frontend_typecheck",
     "backend_tests",
+    "agent_run",
 }
 
 ALLOWED_TARGET_AGENTS = {
@@ -123,6 +124,7 @@ def build_chat_planner_prompt(message: str) -> str:
             "code_search: search workspace source text; query must contain only the search text",
             "frontend_typecheck: run the fixed frontend TypeScript check",
             "backend_tests: run the fixed backend test suite",
+            "agent_run: investigate or complete a multi-step workspace objective using governed tools",
             "Never return a Tool ID, command, path, URL, shell text, approval decision, or executable input.",
             "target_agent may only be document_agent_v1, product_agent_v1, tech_agent_v1, project_manager_agent_v1, or null.",
             "Use query only for code_search; otherwise return null.",

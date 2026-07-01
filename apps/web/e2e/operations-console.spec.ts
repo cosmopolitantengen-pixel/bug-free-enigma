@@ -125,6 +125,16 @@ function mockChatResponse(latest: string, body: Record<string, unknown>): Record
     action: { proposal_id, workflow_id, workflow_name, title: latest, description: latest, input, purpose, status: "pending" },
     blocked: false,
   });
+  if (body.mode === "agent") {
+    const proposed = action(
+      "chat-agent-1",
+      "agent_run_v1",
+      "Agent Run",
+      { provider: body.provider, model_name: body.model_name, max_steps: 8 },
+      "连续调查并完成多步工作区目标",
+    );
+    return { ...proposed, action: { ...(proposed.action as Record<string, unknown>), kind: "agent_run" } };
+  }
   if (latest === "运行失败测试") {
     return action("chat-command-fail", "tool_call_v1", "工具调用", {
       tool_id: "workspace_command_tool", actor_id: "workspace_agent_v1", reason: latest,
@@ -275,6 +285,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const isToolAction = url.pathname.includes("chat-tool-1");
       const isCommandAction = url.pathname.includes("chat-command-1");
       const isFailedCommandAction = url.pathname.includes("chat-command-fail");
+      const isAgentAction = url.pathname.includes("chat-agent-1");
       const proposalId = url.pathname.split("/")[3];
       const chatSession = state.chatSessions.find((session) =>
         ((session.messages as Array<Record<string, unknown>> | undefined) ?? []).some((message) =>
@@ -283,6 +294,32 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const proposalMessage = chatMessages.find((message) =>
         (message.action as Record<string, unknown> | undefined)?.proposal_id === proposalId);
       const proposal = proposalMessage?.action as Record<string, unknown> | undefined;
+      if (isAgentAction && proposal && chatSession) {
+        const now = new Date().toISOString();
+        const agentRun = {
+          run_id: "agent-run-1",
+          proposal_id: proposalId,
+          objective: proposal.description,
+          status: "completed",
+          error: null,
+          steps: [
+            { step_id: "agent-step-1", sequence: 1, intent: "list_files", status: "completed", task_id: "task-agent-1", observation: "listed workspace", created_at: now, completed_at: now },
+            { step_id: "agent-step-2", sequence: 2, intent: "read_file", status: "completed", task_id: "task-agent-2", observation: "read README", created_at: now, completed_at: now },
+          ],
+          created_at: now,
+          updated_at: now,
+        };
+        proposal.status = "completed";
+        proposal.run_id = agentRun.run_id;
+        chatSession.agent_runs = [agentRun];
+        chatMessages.push({ message_id: `chat-message-${++chatSequence}`, role: "assistant", content: "Agent Run inspected the workspace safely.", created_at: now, failed: false, action: null });
+        chatSession.updated_at = now;
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify({ type: "agent_run", agent_run: agentRun, chat_session: chatSession, output: "Agent Run inspected the workspace safely.", approval_required: false, blocked: false }),
+        });
+        return;
+      }
       if (proposal) {
         const waiting = isCommandAction || isFailedCommandAction;
         proposal.status = waiting ? "waiting_approval" : "completed";
@@ -636,6 +673,25 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.locator(".chat-message.user").getByText("我在考虑三种发布方向，先陪我梳理一下")).toBeVisible();
     await expect(page.locator(".chat-message.user").getByText("第二个方向的优势是什么")).toBeVisible();
     await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
+  });
+
+  test("runs a governed multi-step Agent Run from chat", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Agent Run smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("对话模式").selectOption("agent");
+    await page.getByLabel("聊天消息").fill("Inspect the workspace and summarize the architecture.");
+    await page.getByRole("button", { name: "发送消息" }).click();
+
+    await expect(page.getByText("agent_run_v1")).toBeVisible();
+    await page.getByRole("button", { name: "确认执行" }).click();
+
+    await expect(page.getByText("2 / 8 步")).toBeVisible();
+    await expect(page.getByText("list files", { exact: true })).toBeVisible();
+    await expect(page.getByText("read file", { exact: true })).toBeVisible();
+    await expect(page.getByText("Agent Run inspected the workspace safely.")).toBeVisible();
+    expect(api.actions.find((item) => item.path.endsWith("/messages"))?.body).toMatchObject({ mode: "agent" });
   });
 
   test("confirms a chat action before running its workflow", async ({ page }, testInfo) => {

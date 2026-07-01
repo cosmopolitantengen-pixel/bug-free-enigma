@@ -214,12 +214,14 @@ def _filesystem_read_adapter(input: dict[str, Any], context: ToolAdapterContext)
         return {"operation": operation, "path": _relative_path(path), "entries": entries}
     if operation == "read":
         _ensure_readable_text_file(path)
-        content = path.read_text(encoding="utf-8")
+        raw_content = path.read_bytes()
+        content = raw_content.decode("utf-8")
         inspection = inspect_external_content(content, _relative_path(path), "filesystem")
         return {
             "operation": operation,
             "path": _relative_path(path),
             "size_bytes": path.stat().st_size,
+            "sha256": hashlib.sha256(raw_content).hexdigest(),
             "content": content,
             "external_content_inspection": to_plain(inspection),
         }
@@ -272,32 +274,23 @@ def _filesystem_read_adapter(input: dict[str, Any], context: ToolAdapterContext)
     raise ToolAdapterError(f"unsupported filesystem operation: {operation}")
 
 
-def _workspace_patch_adapter(input: dict[str, Any], context: ToolAdapterContext) -> dict[str, Any]:
-    path = _resolve_workspace_path(input.get("path", ""))
-    _ensure_editable_text_file(path)
-    old_text = input.get("old_text")
-    new_text = input.get("new_text")
-    if not isinstance(old_text, str) or not old_text:
-        raise ToolAdapterError("old_text is required for workspace patch")
-    if not isinstance(new_text, str):
-        raise ToolAdapterError("new_text must be a string")
+def workspace_patch_preview(input: dict[str, Any]) -> dict[str, Any]:
+    prepared = _prepare_workspace_patch(input)
+    return {
+        "path": _relative_path(prepared["path"]),
+        "before_sha256": prepared["before_sha256"],
+        "after_sha256": hashlib.sha256(prepared["encoded"]).hexdigest(),
+        "diff": prepared["diff"],
+    }
 
-    raw_content = path.read_bytes()
-    try:
-        content = raw_content.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ToolAdapterError("file is not valid UTF-8 text") from exc
-    before_sha256 = hashlib.sha256(raw_content).hexdigest()
-    expected_sha256 = str(input.get("expected_sha256", "")).strip()
-    if expected_sha256 and expected_sha256 != before_sha256:
-        raise ToolAdapterError("file changed since the patch was prepared")
-    occurrences = content.count(old_text)
-    if occurrences != 1:
-        raise ToolAdapterError("old_text must match exactly once")
-    updated = content.replace(old_text, new_text, 1)
-    encoded = updated.encode("utf-8")
-    if len(encoded) > MAX_EDIT_FILE_BYTES:
-        raise ToolAdapterError("patched file is too large")
+
+def _workspace_patch_adapter(input: dict[str, Any], context: ToolAdapterContext) -> dict[str, Any]:
+    prepared = _prepare_workspace_patch(input)
+    path = prepared["path"]
+    content = prepared["content"]
+    updated = prepared["updated"]
+    encoded = prepared["encoded"]
+    before_sha256 = prepared["before_sha256"]
 
     temporary_path = None
     original_mode = path.stat().st_mode
@@ -324,6 +317,42 @@ def _workspace_patch_adapter(input: dict[str, Any], context: ToolAdapterContext)
             except OSError:
                 pass
 
+    return {
+        "operation": "patch",
+        "path": _relative_path(path),
+        "before_sha256": before_sha256,
+        "after_sha256": hashlib.sha256(encoded).hexdigest(),
+        "diff": prepared["diff"],
+    }
+
+
+def _prepare_workspace_patch(input: dict[str, Any]) -> dict[str, Any]:
+    path = _resolve_workspace_path(input.get("path", ""))
+    _ensure_editable_text_file(path)
+    old_text = input.get("old_text")
+    new_text = input.get("new_text")
+    if not isinstance(old_text, str) or not old_text:
+        raise ToolAdapterError("old_text is required for workspace patch")
+    if not isinstance(new_text, str):
+        raise ToolAdapterError("new_text must be a string")
+
+    raw_content = path.read_bytes()
+    try:
+        content = raw_content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ToolAdapterError("file is not valid UTF-8 text") from exc
+    before_sha256 = hashlib.sha256(raw_content).hexdigest()
+    expected_sha256 = str(input.get("expected_sha256", "")).strip()
+    if expected_sha256 and expected_sha256 != before_sha256:
+        raise ToolAdapterError("file changed since the patch was prepared")
+    occurrences = content.count(old_text)
+    if occurrences != 1:
+        raise ToolAdapterError("old_text must match exactly once")
+    updated = content.replace(old_text, new_text, 1)
+    encoded = updated.encode("utf-8")
+    if len(encoded) > MAX_EDIT_FILE_BYTES:
+        raise ToolAdapterError("patched file is too large")
+
     diff_lines = list(
         difflib.unified_diff(
             content.splitlines(),
@@ -334,10 +363,11 @@ def _workspace_patch_adapter(input: dict[str, Any], context: ToolAdapterContext)
         )
     )
     return {
-        "operation": "patch",
-        "path": _relative_path(path),
+        "path": path,
+        "content": content,
+        "updated": updated,
+        "encoded": encoded,
         "before_sha256": before_sha256,
-        "after_sha256": hashlib.sha256(encoded).hexdigest(),
         "diff": "\n".join(diff_lines)[:MAX_COMMAND_OUTPUT_BYTES],
     }
 

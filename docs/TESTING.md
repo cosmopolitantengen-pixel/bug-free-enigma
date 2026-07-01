@@ -23,6 +23,7 @@
 - Model Gateway usage and cost logging
 - Rule-first chat intent routing, bounded model-planner parsing, fixed executable mappings, invalid-plan audit, and planner usage/cost reporting
 - Server-owned chat session create/list/delete/message APIs, legacy text-only import, SQLite restart recovery, and pending action continuation after process restart
+- Strict Agent decision parsing, bounded read-only multi-step execution, exact-patch approval preview, rejection without write, and approval continuation after SQLite restart
 - OpenAI Responses and Embeddings request/response contracts through mocked HTTP transports
 - pgvector Knowledge indexing orchestration, semantic search, Root-only reindex, and lexical fallback
 - Budget Guard allowed and blocked model calls
@@ -79,7 +80,7 @@ The suite currently covers:
 - Local auth registration, login, duplicate-user rejection, password hashing, expiring session tokens, TTL validation, and SQLite reload
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
-- Next.js Playwright browser E2E for desktop multi-turn chat generation with server-backed reload persistence, audited action proposal confirmation, inline high-risk command approval and continuation across reload, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
+- Next.js Playwright browser E2E for desktop multi-turn chat generation with server-backed reload persistence, audited action and multi-step Agent Run confirmation, inline execution traces, high-risk command approval and continuation across reload, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
 - Chat API separation between idea discussion and explicit operational proposals, natural workspace request rules, bounded model-assisted intent selection, no task creation before Human Root confirmation, idempotent duplicate confirmation, and normal Workflow/Memory behavior after confirmation
 - DeepSeek Chat Completions request/response handling, provider error redaction, explicit multi-provider fallback routing, actual-provider usage records, provider-specific pricing, secret-file loading, and console provider/model selection
 - Approval request routing for pending and blocked actions

@@ -15,7 +15,14 @@ from app.chat.planner import (
     prefers_conversation,
     should_use_model_planner,
 )
-from app.chat.sessions import ChatMessageRecord, ChatSessionRecord, ChatSessionStore
+from app.chat.agent_loop import AgentRunDecision, build_agent_run_prompt, parse_agent_run_decision
+from app.chat.sessions import (
+    AgentRunStepRecord,
+    ChatAgentRunRecord,
+    ChatMessageRecord,
+    ChatSessionRecord,
+    ChatSessionStore,
+)
 from app.connectors.github import GitHubConnector
 from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
 from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, SkillRun, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
@@ -30,7 +37,12 @@ from app.observability.runbooks import RunbookCatalog
 from app.persistence.store import KnowledgeVectorStore, StateStore
 from app.services.serializers import to_plain
 from app.skills.runtime import SkillRuntimeContext, SkillRuntimeError, execute_skill_adapter
-from app.tools.adapters import ToolAdapterContext, ToolAdapterError, execute_tool_adapter
+from app.tools.adapters import (
+    ToolAdapterContext,
+    ToolAdapterError,
+    execute_tool_adapter,
+    workspace_patch_preview,
+)
 
 
 ARBITRATION_PRIORITY_AREAS = {
@@ -2154,8 +2166,8 @@ class CompanyApplicationService:
         model_name: str | None = None,
         provider: str | None = None,
     ) -> dict:
-        if mode not in {"auto", "chat", "action"}:
-            raise ValueError("chat mode must be auto, chat, or action")
+        if mode not in {"auto", "chat", "action", "agent"}:
+            raise ValueError("chat mode must be auto, chat, action, or agent")
         cleaned = []
         for message in messages[-20:]:
             role = str(message.get("role", "")).strip().lower()
@@ -2167,7 +2179,12 @@ class CompanyApplicationService:
             raise ValueError("the latest chat message must be from the user")
 
         latest = cleaned[-1]["content"]
-        proposal = self._propose_chat_action(latest, mode)
+        if mode == "agent":
+            if not self._model_chat_planner_available(provider):
+                raise ValueError("agent mode requires a configured non-local model provider")
+            proposal = self._build_agent_run_proposal(latest, provider, model_name, "explicit")
+        else:
+            proposal = self._propose_chat_action(latest, mode)
         planner_result = None
         if (
             proposal is None
@@ -2204,12 +2221,16 @@ class CompanyApplicationService:
                     )
                 )
             elif plan.intent != "conversation":
-                proposal = self._proposal_from_chat_plan(latest, plan, "model")
+                proposal = self._proposal_from_chat_plan(
+                    latest, plan, "model", provider, model_name
+                )
         if proposal is None and mode == "action":
             proposal = self._proposal_from_chat_plan(
                 latest,
                 ChatActionPlan("task_plan"),
                 "fallback",
+                provider,
+                model_name,
             )
         if proposal is not None:
             self._chat_action_proposals[proposal["proposal_id"]] = proposal
@@ -2306,10 +2327,11 @@ class CompanyApplicationService:
                 }
                 if not required.issubset(action) or not isinstance(action.get("input"), dict):
                     continue
-                try:
-                    self.company_os.workflows.get(str(action["workflow_id"]))
-                except KeyError:
-                    continue
+                if action.get("kind") != "agent_run":
+                    try:
+                        self.company_os.workflows.get(str(action["workflow_id"]))
+                    except KeyError:
+                        continue
                 restored = json.loads(json.dumps(action, ensure_ascii=False))
                 restored["status"] = "pending"
                 message.action["status"] = "pending"
@@ -2384,6 +2406,101 @@ class CompanyApplicationService:
         self.sync()
         return {**result, "chat_session": to_plain(session)}
 
+    def _resume_chat_agent_run_after_decision(
+        self,
+        task_id: str,
+        result: dict,
+        decision: ApprovalStatus,
+    ) -> dict | None:
+        match = self.chat_sessions.find_agent_run_by_task(task_id)
+        if match is None:
+            return None
+        session, run, step = match
+        action_match = self.chat_sessions.find_by_proposal(run.proposal_id)
+        if action_match is None:
+            raise ValueError("agent run action message is missing")
+        _, action_message = action_match
+        proposal = action_message.action or {}
+        if run.status in {"completed", "cancelled", "failed"}:
+            return {
+                **result,
+                "type": "agent_run",
+                "agent_run": to_plain(run),
+                "chat_session": to_plain(session),
+            }
+        if step.status != "waiting_approval":
+            raise ValueError("agent run step is not waiting for approval")
+
+        step.observation = self._agent_tool_observation(result)
+        step.completed_at = utc_now()
+        if decision == ApprovalStatus.REJECTED or result.get("outcome") == "rejected":
+            step.status = "cancelled"
+            run.status = "cancelled"
+            run.error = "Human Root rejected the controlled Agent Run step."
+            run.updated_at = utc_now()
+            proposal["status"] = "cancelled"
+            self.chat_sessions.update_action(run.proposal_id, status="cancelled")
+            self.chat_sessions.append_message(
+                session.session_id,
+                ChatMessageRecord(
+                    role="assistant",
+                    content="Human Root rejected the controlled step. Agent Run was cancelled.",
+                ),
+            )
+            self._audit_chat_agent_step(run, step, "cancelled")
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type="chat_agent_run_cancelled",
+                    actor_id="human_root",
+                    action="agent_run_v1",
+                    task_id=task_id,
+                    risk_level=RiskLevel.MEDIUM,
+                    approval_status=ApprovalStatus.REJECTED,
+                    result="cancelled",
+                    input_ref=run.run_id,
+                    output_ref=step.step_id,
+                    model_name=run.model,
+                )
+            )
+            response = {
+                **result,
+                "type": "agent_run",
+                "agent_run": to_plain(run),
+                "chat_session": to_plain(session),
+            }
+            with self._chat_action_lock:
+                self._chat_action_results[run.proposal_id] = response
+            self.sync()
+            return response
+
+        task = result.get("task") or {}
+        tool_run = result.get("tool_run") or {}
+        failed = (
+            bool(result.get("blocked"))
+            or task.get("status") in {"failed", "blocked"}
+            or tool_run.get("status") in {"failed", "blocked"}
+        )
+        step.status = "failed" if failed else "completed"
+        self._audit_chat_agent_step(run, step, step.status)
+        if failed:
+            return self._fail_chat_agent_run(
+                session,
+                run,
+                proposal,
+                step.observation or "Approved Agent Run step failed.",
+            )
+
+        run.status = "running"
+        run.updated_at = utc_now()
+        proposal["status"] = "executing"
+        proposal.pop("task_id", None)
+        self.chat_sessions.update_action(run.proposal_id, status="executing")
+        with self._chat_action_lock:
+            self._chat_action_proposals[run.proposal_id] = proposal
+            self._chat_action_results.pop(run.proposal_id, None)
+        self.sync()
+        return self._drive_chat_agent_run(session, run, proposal)
+
     def _propose_chat_action(self, message: str, mode: str) -> dict | None:
         normalized = message.lower()
         if mode == "chat":
@@ -2452,7 +2569,15 @@ class CompanyApplicationService:
         message: str,
         plan: ChatActionPlan,
         planner: str,
+        provider: str | None = None,
+        model_name: str | None = None,
     ) -> dict | None:
+        if plan.intent == "agent_run":
+            if not self._model_chat_planner_available(provider):
+                return None
+            return self._build_agent_run_proposal(
+                message, provider, model_name, planner
+            )
         workflow_id = "task_planning_v1"
         workflow_input: dict = {}
         purpose = "规划并拆分任务"
@@ -2572,6 +2697,41 @@ class CompanyApplicationService:
             "summary": f"我可以调用“{definition.name}”来{purpose}。确认后才会创建任务并执行。",
         }
 
+    def _build_agent_run_proposal(
+        self,
+        message: str,
+        provider: str | None,
+        model_name: str | None,
+        planner: str,
+    ) -> dict:
+        status = self.company_os.models.provider_status()
+        selected_provider = str(provider or status["default_provider"]).lower()
+        details = status["provider_details"]
+        selected_details = details.get(selected_provider, {}) if isinstance(details, dict) else {}
+        selected_model = str(model_name or selected_details.get("default_model") or status["default_model"])
+        title = message.replace("\n", " ").strip()[:60] or "Agent Run"
+        return {
+            "proposal_id": new_id("chat_action"),
+            "kind": "agent_run",
+            "workflow_id": "agent_run_v1",
+            "workflow_name": "Agent Run",
+            "title": title,
+            "description": message,
+            "input": {
+                "provider": selected_provider,
+                "model_name": selected_model,
+                "max_steps": 8,
+            },
+            "purpose": "连续调查并完成多步工作区目标",
+            "status": "pending",
+            "planner": planner,
+            "summary": (
+                f"我可以启动 Agent Run，最多连续执行 8 步来处理“{title}”。"
+                f"低风险读取会自动继续；补丁和命令会暂停等待 Human Root 审批。"
+                f"读取到的工作区片段可能发送给 {selected_provider} 模型。"
+            ),
+        }
+
     def _model_chat_planner_available(self, provider: str | None) -> bool:
         status = self.company_os.models.provider_status()
         selected = (provider or str(status["default_provider"])).lower()
@@ -2643,6 +2803,14 @@ class CompanyApplicationService:
                 raise ValueError("chat action is not pending")
             proposal["status"] = "executing"
 
+        if proposal.get("kind") == "agent_run":
+            try:
+                return self._start_chat_agent_run(proposal)
+            except Exception:
+                with self._chat_action_lock:
+                    proposal["status"] = "failed"
+                raise
+
         try:
             result = self.run_registered_workflow(
                 workflow_id=proposal["workflow_id"],
@@ -2689,6 +2857,410 @@ class CompanyApplicationService:
         )
         self.sync()
         return result
+
+    def _start_chat_agent_run(self, proposal: dict) -> dict:
+        match = self.chat_sessions.find_by_proposal(proposal["proposal_id"])
+        if match is None:
+            raise ValueError("agent run proposal is not attached to a persisted chat session")
+        session, action_message = match
+        existing = self.chat_sessions.find_agent_run_by_proposal(proposal["proposal_id"])
+        created = existing is None
+        if existing is None:
+            run = ChatAgentRunRecord(
+                session_id=session.session_id,
+                proposal_id=proposal["proposal_id"],
+                objective=proposal["description"],
+                provider=str(proposal["input"]["provider"]),
+                model=str(proposal["input"]["model_name"]),
+                max_steps=int(proposal["input"].get("max_steps", 8)),
+            )
+            self.chat_sessions.add_agent_run(session.session_id, run)
+        else:
+            _, run = existing
+            if run.status not in {"running", "failed"}:
+                raise ValueError(f"agent run cannot start from status {run.status}")
+            run.status = "running"
+            run.error = None
+            run.updated_at = utc_now()
+        if action_message.action is not None:
+            action_message.action["run_id"] = run.run_id
+            action_message.action["status"] = "executing"
+        if created:
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type="chat_agent_run_started",
+                    actor_id="human_root",
+                    action="agent_run_v1",
+                    task_id=None,
+                    risk_level=RiskLevel.LOW,
+                    approval_status=ApprovalStatus.NOT_REQUIRED,
+                    result="running",
+                    input_ref=hashlib.sha256(run.objective.encode("utf-8")).hexdigest(),
+                    output_ref=run.run_id,
+                    model_name=run.model,
+                )
+            )
+        self.sync()
+        return self._drive_chat_agent_run(session, run, proposal)
+
+    def _drive_chat_agent_run(
+        self,
+        session: ChatSessionRecord,
+        run: ChatAgentRunRecord,
+        proposal: dict,
+    ) -> dict:
+        while len(run.steps) < run.max_steps:
+            observations = [
+                {
+                    "sequence": step.sequence,
+                    "intent": step.intent,
+                    "status": step.status,
+                    "observation": step.observation,
+                }
+                for step in run.steps
+                if step.observation
+            ]
+            model_result = self.generate_model_response(
+                prompt=build_agent_run_prompt(run.objective, observations, len(run.steps) + 1),
+                actor_id="workspace_agent_v1",
+                purpose="chat_agent_next_action",
+                model_name=run.model,
+                provider=run.provider,
+            )
+            if model_result.get("blocked"):
+                return self._fail_chat_agent_run(
+                    session,
+                    run,
+                    proposal,
+                    "Agent Run was blocked by the model budget policy.",
+                )
+            decision = parse_agent_run_decision(str(model_result.get("output") or ""))
+            if decision is None:
+                usage = model_result.get("usage") or {}
+                self.company_os.audit.append(
+                    AuditEvent(
+                        event_type="chat_agent_decision_rejected",
+                        actor_id="workspace_agent_v1",
+                        action="agent_run_v1",
+                        task_id=None,
+                        risk_level=RiskLevel.MEDIUM,
+                        approval_status=ApprovalStatus.NOT_REQUIRED,
+                        result="invalid_structured_decision",
+                        input_ref=run.run_id,
+                        output_ref=usage.get("output_ref"),
+                        model_name=run.model,
+                    )
+                )
+                return self._fail_chat_agent_run(
+                    session,
+                    run,
+                    proposal,
+                    "The model returned an invalid Agent Run decision.",
+                )
+            if decision.intent == "finish":
+                return self._complete_chat_agent_run(
+                    session,
+                    run,
+                    proposal,
+                    decision.answer or "Agent Run completed.",
+                )
+
+            tool_id, tool_input = self._agent_decision_tool_input(decision)
+            step = AgentRunStepRecord(
+                sequence=len(run.steps) + 1,
+                intent=decision.intent,
+                status="running",
+                tool_id=tool_id,
+                tool_input=tool_input,
+                usage=model_result.get("usage"),
+            )
+            run.steps.append(step)
+            run.updated_at = utc_now()
+            session.updated_at = run.updated_at
+            self.sync()
+            try:
+                result = self.run_registered_workflow(
+                    workflow_id="tool_call_v1",
+                    title=f"Agent Run step {step.sequence}: {decision.intent}",
+                    description=run.objective,
+                    user_id="human_root",
+                    input={
+                        "tool_id": tool_id,
+                        "actor_id": "workspace_agent_v1",
+                        "tool_input": tool_input,
+                        "reason": f"Agent Run {run.run_id}: {run.objective}",
+                    },
+                )
+            except Exception as exc:
+                step.status = "failed"
+                step.observation = f"Tool workflow failed before completion: {exc.__class__.__name__}"
+                step.completed_at = utc_now()
+                return self._fail_chat_agent_run(
+                    session,
+                    run,
+                    proposal,
+                    step.observation,
+                )
+
+            task = result.get("task") or {}
+            approval = result.get("approval") or {}
+            step.task_id = task.get("task_id")
+            step.approval_id = approval.get("approval_id")
+            step.observation = self._agent_tool_observation(result)
+            if result.get("approval_required"):
+                step.status = "waiting_approval"
+                run.status = "waiting_approval"
+                run.updated_at = utc_now()
+                proposal["status"] = "waiting_approval"
+                proposal["task_id"] = step.task_id
+                request = approval.get("request") or {}
+                metadata = request.get("metadata") or {}
+                risk = approval.get("risk") or {}
+                tool_run = result.get("tool_run") or {}
+                self.chat_sessions.update_action(
+                    proposal["proposal_id"],
+                    status="waiting_approval",
+                    task_id=step.task_id,
+                    approval_id=step.approval_id,
+                    risk_level=risk.get("level") or tool_run.get("risk_level"),
+                    approval_input=(
+                        metadata.get("tool_input")
+                        if isinstance(metadata.get("tool_input"), dict)
+                        else None
+                    ),
+                )
+                self.chat_sessions.append_message(
+                    session.session_id,
+                    ChatMessageRecord(
+                        role="assistant",
+                        content=(
+                            f"Agent Run completed {len(run.steps) - 1} step(s) and paused before "
+                            f"{decision.intent}. Human Root approval is required."
+                        ),
+                    ),
+                )
+                self._audit_chat_agent_step(run, step, "waiting_approval")
+                self.sync()
+                return {
+                    **result,
+                    "type": "agent_run",
+                    "agent_run": to_plain(run),
+                    "chat_session": to_plain(session),
+                }
+
+            step.completed_at = utc_now()
+            failed = (
+                bool(result.get("blocked"))
+                or task.get("status") in {"failed", "blocked"}
+                or (result.get("tool_run") or {}).get("status") in {"failed", "blocked"}
+            )
+            step.status = "failed" if failed else "completed"
+            self._audit_chat_agent_step(run, step, step.status)
+            self.sync()
+            if failed:
+                return self._fail_chat_agent_run(
+                    session,
+                    run,
+                    proposal,
+                    step.observation or "Agent Run tool step failed.",
+                )
+
+        return self._fail_chat_agent_run(
+            session,
+            run,
+            proposal,
+            f"Agent Run reached the maximum of {run.max_steps} steps without finishing.",
+        )
+
+    @staticmethod
+    def _agent_decision_tool_input(decision: AgentRunDecision) -> tuple[str, dict]:
+        if decision.intent in {"git_status", "git_diff", "git_log"}:
+            operation = decision.intent.removeprefix("git_")
+            tool_input = {"operation": operation}
+            if decision.path:
+                tool_input["path"] = decision.path
+            if operation == "log":
+                tool_input["limit"] = 10
+            return "git_read_tool", tool_input
+        if decision.intent == "list_files":
+            return "filesystem_read_tool", {
+                "operation": "list",
+                "path": decision.path,
+                "limit": 100,
+            }
+        if decision.intent == "read_file":
+            return "filesystem_read_tool", {
+                "operation": "read",
+                "path": decision.path,
+            }
+        if decision.intent == "search_code":
+            return "filesystem_read_tool", {
+                "operation": "search",
+                "path": decision.path or ".",
+                "query": decision.query,
+                "limit": 50,
+            }
+        if decision.intent == "frontend_typecheck":
+            return "workspace_command_tool", {
+                "argv": ["npm", "run", "typecheck"],
+                "cwd": "apps/web",
+                "timeout_seconds": 120,
+            }
+        if decision.intent == "backend_tests":
+            return "workspace_command_tool", {
+                "argv": ["python", "-m", "unittest", "discover", "-s", "backend/tests"],
+                "cwd": ".",
+                "timeout_seconds": 120,
+            }
+        if decision.intent == "patch_file":
+            return "workspace_patch_tool", {
+                "path": decision.path,
+                "old_text": decision.old_text,
+                "new_text": decision.new_text,
+                "expected_sha256": decision.expected_sha256,
+            }
+        raise ValueError(f"unsupported Agent Run decision: {decision.intent}")
+
+    @staticmethod
+    def _agent_tool_observation(result: dict) -> str:
+        task = result.get("task") or {}
+        tool_run = result.get("tool_run") or {}
+        raw = tool_run.get("result")
+        if isinstance(raw, str) and raw.strip():
+            try:
+                payload: object = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = raw
+        else:
+            payload = {
+                "output": result.get("output"),
+                "tool_status": tool_run.get("status"),
+                "error": tool_run.get("error"),
+            }
+        observation = {
+            "task_id": task.get("task_id"),
+            "task_status": task.get("status"),
+            "tool_id": tool_run.get("tool_id"),
+            "result": payload,
+        }
+        return json.dumps(observation, ensure_ascii=False, sort_keys=True)[:6000]
+
+    def _complete_chat_agent_run(
+        self,
+        session: ChatSessionRecord,
+        run: ChatAgentRunRecord,
+        proposal: dict,
+        answer: str,
+    ) -> dict:
+        run.status = "completed"
+        run.final_answer = answer[:12000]
+        run.error = None
+        run.updated_at = utc_now()
+        proposal["status"] = "completed"
+        self.chat_sessions.update_action(proposal["proposal_id"], status="completed")
+        self.chat_sessions.append_message(
+            session.session_id,
+            ChatMessageRecord(role="assistant", content=run.final_answer),
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_agent_run_completed",
+                actor_id="workspace_agent_v1",
+                action="agent_run_v1",
+                task_id=run.steps[-1].task_id if run.steps else None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=f"{len(run.steps)} steps completed",
+                input_ref=run.run_id,
+                output_ref=hashlib.sha256(run.final_answer.encode("utf-8")).hexdigest(),
+                model_name=run.model,
+            )
+        )
+        result = {
+            "type": "agent_run",
+            "agent_run": to_plain(run),
+            "chat_session": to_plain(session),
+            "output": run.final_answer,
+            "approval_required": False,
+            "blocked": False,
+        }
+        with self._chat_action_lock:
+            self._chat_action_results[proposal["proposal_id"]] = result
+        self.sync()
+        return result
+
+    def _fail_chat_agent_run(
+        self,
+        session: ChatSessionRecord,
+        run: ChatAgentRunRecord,
+        proposal: dict,
+        error: str,
+    ) -> dict:
+        run.status = "failed"
+        run.error = error[:2000]
+        run.updated_at = utc_now()
+        proposal["status"] = "failed"
+        self.chat_sessions.update_action(proposal["proposal_id"], status="failed")
+        self.chat_sessions.append_message(
+            session.session_id,
+            ChatMessageRecord(role="assistant", content=f"Agent Run stopped: {run.error}", failed=True),
+        )
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_agent_run_failed",
+                actor_id="workspace_agent_v1",
+                action="agent_run_v1",
+                task_id=run.steps[-1].task_id if run.steps else None,
+                risk_level=RiskLevel.MEDIUM,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result="failed",
+                input_ref=run.run_id,
+                output_ref=None,
+                error=run.error,
+                model_name=run.model,
+            )
+        )
+        result = {
+            "type": "agent_run",
+            "agent_run": to_plain(run),
+            "chat_session": to_plain(session),
+            "output": run.error,
+            "approval_required": False,
+            "blocked": True,
+        }
+        with self._chat_action_lock:
+            self._chat_action_results[proposal["proposal_id"]] = result
+        self.sync()
+        return result
+
+    def _audit_chat_agent_step(
+        self,
+        run: ChatAgentRunRecord,
+        step: AgentRunStepRecord,
+        result: str,
+    ) -> None:
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_agent_step_updated",
+                actor_id="workspace_agent_v1",
+                action=step.intent,
+                task_id=step.task_id,
+                risk_level=(
+                    RiskLevel.MEDIUM
+                    if step.status in {"waiting_approval", "failed"}
+                    else RiskLevel.LOW
+                ),
+                approval_status=(
+                    ApprovalStatus.PENDING
+                    if step.status == "waiting_approval"
+                    else ApprovalStatus.NOT_REQUIRED
+                ),
+                result=result,
+                input_ref=run.run_id,
+                output_ref=step.step_id,
+                model_name=run.model,
+            )
+        )
 
     def request_skill_run(
         self,
@@ -2940,12 +3512,20 @@ class CompanyApplicationService:
         if tool_id == "workspace_patch_tool":
             old_text = input.get("old_text")
             new_text = input.get("new_text")
-            return {
+            preview_input = dict(input)
+            preview_input.pop("expected_sha256", None)
+            approval_input = {
                 "path": input.get("path"),
                 "expected_sha256": input.get("expected_sha256"),
                 "old_text_sha256": hashlib.sha256(old_text.encode("utf-8")).hexdigest() if isinstance(old_text, str) else None,
                 "new_text_sha256": hashlib.sha256(new_text.encode("utf-8")).hexdigest() if isinstance(new_text, str) else None,
             }
+            try:
+                approval_input["diff_preview"] = workspace_patch_preview(preview_input)["diff"]
+            except ToolAdapterError as exc:
+                approval_input["diff_preview"] = None
+                approval_input["preview_error"] = str(exc)
+            return approval_input
         return {"keys": sorted(str(key) for key in input)}
 
     @classmethod
@@ -3247,6 +3827,11 @@ class CompanyApplicationService:
             if task.status == TaskStatus.NEEDS_APPROVAL:
                 result = self.resume_task(task_id)
                 response = {**result, "decision": to_plain(approval), "already_resolved": False}
+                agent_response = self._resume_chat_agent_run_after_decision(
+                    task_id, response, status
+                )
+                if agent_response is not None:
+                    return agent_response
                 return self._record_chat_task_decision(task_id, response, status)
             if task.status in {
                 TaskStatus.COMPLETED,
@@ -3264,6 +3849,11 @@ class CompanyApplicationService:
                     "blocked": task.status == TaskStatus.BLOCKED,
                     "already_resolved": True,
                 }
+                agent_response = self._resume_chat_agent_run_after_decision(
+                    task_id, response, status
+                )
+                if agent_response is not None:
+                    return agent_response
                 return self._record_chat_task_decision(task_id, response, status)
             raise ValueError(f"task is not waiting for approval: {task.status.value}")
 

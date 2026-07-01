@@ -44,6 +44,22 @@ type ChatAction = {
   approvalId?: string;
   riskLevel?: string;
   approvalInput?: ApiRecord;
+  runId?: string;
+};
+type AgentRunStep = {
+  id: string;
+  sequence: number;
+  intent: string;
+  status: string;
+  taskId?: string;
+  observation?: string;
+};
+type AgentRun = {
+  id: string;
+  status: string;
+  objective: string;
+  steps: AgentRunStep[];
+  error?: string;
 };
 type ChatMessage = {
   id: string;
@@ -63,6 +79,7 @@ type ChatSession = {
   title: string;
   messages: ChatMessage[];
   updatedAt: string;
+  agentRuns: AgentRun[];
 };
 type DataSet = {
   summary: ApiRecord;
@@ -152,6 +169,7 @@ function chatActionFromApi(value: ApiRecord | undefined): ChatAction | undefined
     approvalId: text(value.approval_id, "") || undefined,
     riskLevel: text(value.risk_level, "") || undefined,
     approvalInput: (value.approval_input as ApiRecord | undefined) ?? undefined,
+    runId: text(value.run_id, "") || undefined,
   };
 }
 
@@ -177,6 +195,20 @@ function chatSessionFromApi(value: ApiRecord): ChatSession {
     title: text(value.title, "新对话"),
     messages: ((value.messages as ApiRecord[] | undefined) ?? []).map(chatMessageFromApi),
     updatedAt: text(value.updated_at),
+    agentRuns: ((value.agent_runs as ApiRecord[] | undefined) ?? []).map((run) => ({
+      id: text(run.run_id),
+      status: text(run.status),
+      objective: text(run.objective),
+      error: text(run.error, "") || undefined,
+      steps: ((run.steps as ApiRecord[] | undefined) ?? []).map((step) => ({
+        id: text(step.step_id),
+        sequence: Number(step.sequence),
+        intent: text(step.intent),
+        status: text(step.status),
+        taskId: text(step.task_id, "") || undefined,
+        observation: text(step.observation, "") || undefined,
+      })),
+    })),
   };
 }
 
@@ -197,6 +229,8 @@ function chatActionResult(result: ApiRecord): string {
 
 function chatApprovalPreview(action: ChatAction): string {
   const input = action.approvalInput ?? {};
+  const diff = text(input.diff_preview, "");
+  if (diff) return diff.slice(0, 12000);
   const argv = input.argv;
   if (Array.isArray(argv)) return argv.map((item) => String(item)).join(" ").slice(0, 1000);
   const path = text(input.path, "");
@@ -285,6 +319,7 @@ const CATALOG_LABELS: Record<string, string> = {
   retrospective_v1: "任务复盘",
   github_project_analysis_v1: "GitHub 项目分析",
   tool_call_v1: "工具调用",
+  agent_run_v1: "连续 Agent",
 };
 
 export function OperationsConsole() {
@@ -373,6 +408,7 @@ export function OperationsConsole() {
   const executeChatAction = useCallback(async (proposalId: string) => {
     const result = await apiRequest<ApiRecord>(apiBase, `/chat/actions/${proposalId}/execute`, {
       method: "POST",
+      signal: AbortSignal.timeout(130_000),
     }, apiToken);
     await refresh();
     return result;
@@ -492,7 +528,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
   const [chatReady, setChatReady] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingChatId, setSendingChatId] = useState<string | null>(null);
-  const [chatMode, setChatMode] = useState<"auto" | "chat" | "action">("auto");
+  const [chatMode, setChatMode] = useState<"auto" | "chat" | "action" | "agent">("auto");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const executingActionIds = useRef<Set<string>>(new Set());
   const availableModels = allowedModels[provider] ?? [];
@@ -789,7 +825,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
             <span>对话、模型用量和行动状态已由服务端持久保存</span>
           </div>
           <div className="chat-model-controls">
-            <label><span>模式</span><select aria-label="对话模式" value={chatMode} onChange={(event) => setChatMode(event.target.value as "auto" | "chat" | "action")}><option value="auto">自动判断</option><option value="chat">只聊天</option><option value="action">计划行动</option></select></label>
+            <label><span>模式</span><select aria-label="对话模式" value={chatMode} onChange={(event) => setChatMode(event.target.value as "auto" | "chat" | "action" | "agent")}><option value="auto">自动判断</option><option value="chat">只聊天</option><option value="action">计划行动</option><option value="agent">连续 Agent</option></select></label>
             <label><span>服务商</span><select aria-label="对话模型服务商" value={provider} onChange={(event) => setProvider(event.target.value)}>{providerNames.map((name) => <option key={name} value={name}>{formatValue(name)}</option>)}</select></label>
             <label><span>模型</span><select aria-label="对话模型" value={model} onChange={(event) => setModel(event.target.value)}>{availableModels.map((name) => <option key={name} value={name}>{name}</option>)}</select></label>
           </div>
@@ -807,6 +843,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
               {message.action && <div className={`chat-action-card ${message.action.status}`}>
                 <div className="chat-action-heading"><Workflow /><div><strong>{message.action.workflowName}</strong><span>{message.action.purpose}</span></div><StatusPill value={message.action.status} /></div>
                 <div className="chat-action-detail"><span>执行后将创建受控任务</span><code>{message.action.workflowId}</code></div>
+                {message.action.runId && <AgentRunTrace run={activeSession.agentRuns.find((run) => run.id === message.action?.runId)} />}
                 {message.action.status === "pending" && <div className="chat-action-buttons"><button className="small-button" onClick={() => void cancelAction(message)}>取消</button><button className="button" onClick={() => void executeAction(message)}><Play />确认执行</button></div>}
                 {message.action.status === "waiting_approval" && <div className="chat-approval-block">
                   <div className="chat-approval-facts"><span>风险：{formatValue(message.action.riskLevel, "待评估")}</span><span>审批：{shortId(message.action.approvalId)}</span></div>
@@ -838,6 +875,24 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
         </form>
       </div>
     </section>
+  );
+}
+
+function AgentRunTrace({ run }: { run?: AgentRun }) {
+  if (!run) return null;
+  return (
+    <div className="agent-run-trace">
+      <div className="agent-run-summary"><strong>Agent Run</strong><span>{run.steps.length} / 8 步</span><StatusPill value={run.status} /></div>
+      {run.steps.map((step) => (
+        <div className="agent-run-step" key={step.id}>
+          <span>{step.sequence}</span>
+          <strong>{formatValue(step.intent)}</strong>
+          <small>{step.taskId ? shortId(step.taskId) : "--"}</small>
+          <StatusPill value={step.status} />
+        </div>
+      ))}
+      {run.error && <div className="muted-line">{run.error}</div>}
+    </div>
   );
 }
 

@@ -56,7 +56,7 @@ from app.core.models import (
     WorkflowRun,
     WorkflowStep,
 )
-from app.chat.sessions import ChatMessageRecord, ChatSessionRecord
+from app.chat.sessions import AgentRunStepRecord, ChatAgentRunRecord, ChatMessageRecord, ChatSessionRecord
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.services.serializers import to_plain
 
@@ -1237,6 +1237,42 @@ def _chat_session_from_plain(payload: dict[str, Any]) -> ChatSessionRecord:
         created_at=_dt(payload["created_at"]) or datetime.min,
         updated_at=_dt(payload["updated_at"]) or datetime.min,
         import_key=payload.get("import_key"),
+        agent_runs=[_chat_agent_run_from_plain(item) for item in payload.get("agent_runs", [])],
+    )
+
+
+def _agent_run_step_from_plain(payload: dict[str, Any]) -> AgentRunStepRecord:
+    return AgentRunStepRecord(
+        sequence=int(payload["sequence"]),
+        intent=payload["intent"],
+        status=payload.get("status", "planned"),
+        tool_id=payload.get("tool_id"),
+        tool_input=dict(payload.get("tool_input", {})),
+        task_id=payload.get("task_id"),
+        approval_id=payload.get("approval_id"),
+        observation=payload.get("observation"),
+        usage=dict(payload["usage"]) if payload.get("usage") else None,
+        step_id=payload["step_id"],
+        created_at=_dt(payload["created_at"]) or datetime.min,
+        completed_at=_dt(payload.get("completed_at")),
+    )
+
+
+def _chat_agent_run_from_plain(payload: dict[str, Any]) -> ChatAgentRunRecord:
+    return ChatAgentRunRecord(
+        session_id=payload["session_id"],
+        proposal_id=payload["proposal_id"],
+        objective=payload["objective"],
+        provider=payload["provider"],
+        model=payload["model"],
+        max_steps=int(payload.get("max_steps", 8)),
+        status=payload.get("status", "running"),
+        steps=[_agent_run_step_from_plain(item) for item in payload.get("steps", [])],
+        final_answer=payload.get("final_answer"),
+        error=payload.get("error"),
+        run_id=payload["run_id"],
+        created_at=_dt(payload["created_at"]) or datetime.min,
+        updated_at=_dt(payload["updated_at"]) or datetime.min,
     )
 
 

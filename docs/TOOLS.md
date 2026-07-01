@@ -56,7 +56,7 @@ The first implementation includes a small controlled adapter layer for safe inte
 - `audit_read_tool` returns recent append-only audit events.
 - `database_read_tool` returns aggregate state counts for core tables and stores, without accepting raw SQL.
 - `filesystem_read_tool` lists directories, reads small text files, and searches allowed text files inside the workspace.
-- `workspace_patch_tool` atomically applies one exact replacement, optionally checks the expected file SHA-256, and returns a unified diff.
+- `workspace_patch_tool` previews and atomically applies one exact replacement, requires current file SHA-256 for Agent-driven changes, and returns a unified diff.
 - `workspace_command_tool` runs an argument array without a shell, limits executable names, workspace `cwd`, timeout, output size, and inherited environment variables.
 - `git_read_tool` exposes read-only status, diff, and recent log operations without allowing arbitrary Git subcommands.
 
@@ -75,8 +75,10 @@ The filesystem read adapter is intentionally narrow:
 - file reads are capped at 64 KiB
 - delete, upload, and external send operations remain unavailable
 
-Workspace writes use a separate approval-gated patch tool. It only edits existing allowed text files, requires `old_text` to match exactly once, can reject stale `expected_sha256` state, writes atomically, and never exposes patch contents in approval metadata. The command tool always requires Human Root approval, executes without a shell, resolves approved executable names through the sanitized platform PATH, allows only development executables, strips provider keys and unrelated environment variables, caps output, and enforces a 120-second maximum timeout. A non-zero process exit marks the Tool Run as failed while retaining bounded stdout and stderr evidence.
+Workspace writes use a separate approval-gated patch tool. It only edits existing allowed text files, requires `old_text` to match exactly once, rejects stale `expected_sha256` state, computes a bounded unified-diff preview without writing, and then applies the approved replacement atomically after rechecking the same state. The command tool always requires Human Root approval, executes without a shell, resolves approved executable names through the sanitized platform PATH, allows only development executables, strips provider keys and unrelated environment variables, caps output, and enforces a 120-second maximum timeout. A non-zero process exit marks the Tool Run as failed while retaining bounded stdout and stderr evidence.
 
 Chat auto mode recognizes explicit and natural workspace requests such as `git status`, `帮我看看仓库改了什么`, `看看最近提交`, `搜索代码：...`, `检查前端类型`, and `运行后端测试`. Rules map known language directly. A configured non-local model may classify otherwise ambiguous operational language into the same bounded intent catalog, but it cannot provide Tool IDs, commands, paths, or approval decisions. Every result still creates a `tool_call_v1` proposal first; no tool executes until Human Root confirms the chat action. Command actions then show their risk, approval ID, and exact argument array inside chat. Human Root can reject or approve and continue without leaving the conversation, and the waiting approval card survives a browser reload.
+
+Chat Agent mode can sequence up to eight server-mapped steps from read-only Git inspection, workspace listing/reading/search, fixed frontend type-check, fixed backend tests, and exact workspace patching. Low-risk reads continue automatically after the initial run confirmation. Tests, type-checks, and patches enter the existing Tool Call approval boundary and pause the Agent Run until Human Root approves or rejects. The run, step observations, linked tasks, and waiting approval survive process restart; model output never bypasses Tool registration or chooses arbitrary commands.
 
 Real browser, computer-control, or external API adapters should only be added after their permission boundaries, sandbox behavior, approval flow, and audit output are covered by tests.

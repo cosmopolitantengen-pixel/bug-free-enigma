@@ -5,7 +5,14 @@ from app.chat.planner import (
     prefers_conversation,
     should_use_model_planner,
 )
-from app.chat.sessions import ChatMessageRecord, ChatSessionRecord, ChatSessionStore
+from app.chat.sessions import (
+    AgentRunStepRecord,
+    ChatAgentRunRecord,
+    ChatMessageRecord,
+    ChatSessionRecord,
+    ChatSessionStore,
+)
+from app.chat.agent_loop import AgentRunDecision, build_agent_run_prompt, parse_agent_run_decision
 
 __all__ = [
     "ChatActionPlan",
@@ -16,4 +23,9 @@ __all__ = [
     "ChatMessageRecord",
     "ChatSessionRecord",
     "ChatSessionStore",
+    "AgentRunStepRecord",
+    "ChatAgentRunRecord",
+    "AgentRunDecision",
+    "build_agent_run_prompt",
+    "parse_agent_run_decision",
 ]

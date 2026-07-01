@@ -138,7 +138,7 @@ class ChatMessageRequest(BaseModel):
 
 class ChatRespondRequest(BaseModel):
     messages: list[ChatMessageRequest] = Field(min_length=1, max_length=20)
-    mode: Literal["auto", "chat", "action"] = "auto"
+    mode: Literal["auto", "chat", "action", "agent"] = "auto"
     model_name: str | None = None
     provider: str | None = None
 
@@ -150,7 +150,7 @@ class ChatSessionCreateRequest(BaseModel):
 
 class ChatSessionMessageCreateRequest(BaseModel):
     content: str = Field(min_length=1, max_length=12000)
-    mode: Literal["auto", "chat", "action"] = "auto"
+    mode: Literal["auto", "chat", "action", "agent"] = "auto"
     model_name: str | None = None
     provider: str | None = None
     owner_id: str = "human_root"
