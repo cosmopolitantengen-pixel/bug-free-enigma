@@ -95,6 +95,7 @@ Current status:
 - GitHub project analysis is the ninth native Workflow. It uses one task-scoped Human Root approval, executes registered analysis/risk Skills only after approval, preserves the external-content boundary, blocks failed sandbox evidence, and registers passed analyses as Knowledge only across SQLite restarts.
 - Tool Call is the tenth native Workflow. It preserves the authoritative Tool Runtime, links three control Skills and the Tool Run to one task, resumes approvals across SQLite restarts, enforces rejection without execution, and separates adapter failure from permission/risk blocks.
 - Approval-gated chat actions now expose risk and command context inline. Human Root can reject or approve-and-resume through one idempotent persisted-task endpoint, including after browser reload or SQLite process restart.
+- Chat action selection is rule-first and model-assisted only for ambiguous operational language. Structured model output is restricted to a bounded intent catalog, while executable parameters remain fixed server mappings and planner usage stays inside Budget and Audit controls.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence

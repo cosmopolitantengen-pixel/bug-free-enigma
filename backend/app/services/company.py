@@ -8,6 +8,13 @@ from threading import Lock
 
 from app.auth.service import AuthService
 from app.bootstrap import CompanyOS, build_company_os
+from app.chat.planner import (
+    ChatActionPlan,
+    build_chat_planner_prompt,
+    parse_chat_action_plan,
+    prefers_conversation,
+    should_use_model_planner,
+)
 from app.connectors.github import GitHubConnector
 from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
 from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, SkillRun, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
@@ -39,6 +46,11 @@ CHAT_ACTION_MARKERS = (
     "创建", "生成", "制定", "安排", "执行", "开始执行", "建立", "提交", "发起",
     "组织", "召开", "分配", "交给", "写一份", "做一份", "运行", "查看 git",
     "git status", "git diff", "git log", "仓库状态", "搜索代码", "查找代码",
+    "当前改动", "哪些文件变了", "仓库改了什么", "最近提交", "提交记录",
+    "前端类型", "类型检查", "后端测试",
+    "检查", "审查", "评审", "验收", "质量", "复盘", "总结经验", "回顾执行",
+    "协作", "开会", "分配给", "缺少技能", "新技能", "没有这个能力",
+    "审批", "批准", "许可", "文档", "方案", "报告", "说明",
 )
 
 
@@ -1975,6 +1987,49 @@ class CompanyApplicationService:
 
         latest = cleaned[-1]["content"]
         proposal = self._propose_chat_action(latest, mode)
+        planner_result = None
+        if (
+            proposal is None
+            and should_use_model_planner(latest, mode)
+            and self._model_chat_planner_available(provider)
+        ):
+            planner_result = self.generate_model_response(
+                prompt=build_chat_planner_prompt(latest),
+                actor_id="ceo_agent_v1",
+                purpose="chat_action_planning",
+                model_name=model_name,
+                provider=provider,
+            )
+            if planner_result.get("blocked"):
+                return {
+                    **planner_result,
+                    "type": "conversation",
+                    "message": "本次行动规划被预算策略阻止，请调整预算或模型后重试。",
+                }
+            plan = parse_chat_action_plan(str(planner_result.get("output") or ""))
+            if plan is None:
+                usage = planner_result.get("usage") or {}
+                self.company_os.audit.append(
+                    AuditEvent(
+                        event_type="chat_action_plan_rejected",
+                        actor_id="ceo_agent_v1",
+                        action="classify_chat_action",
+                        task_id=None,
+                        risk_level=RiskLevel.LOW,
+                        approval_status=ApprovalStatus.NOT_REQUIRED,
+                        result="invalid_structured_plan",
+                        input_ref=hashlib.sha256(latest.encode("utf-8")).hexdigest(),
+                        output_ref=usage.get("output_ref"),
+                    )
+                )
+            elif plan.intent != "conversation":
+                proposal = self._proposal_from_chat_plan(latest, plan, "model")
+        if proposal is None and mode == "action":
+            proposal = self._proposal_from_chat_plan(
+                latest,
+                ChatActionPlan("task_plan"),
+                "fallback",
+            )
         if proposal is not None:
             self._chat_action_proposals[proposal["proposal_id"]] = proposal
             self.company_os.audit.append(
@@ -1985,7 +2040,7 @@ class CompanyApplicationService:
                     task_id=None,
                     risk_level=RiskLevel.LOW,
                     approval_status=ApprovalStatus.NOT_REQUIRED,
-                    result="awaiting_human_confirmation",
+                    result=f"awaiting_human_confirmation:{proposal['planner']}",
                     input_ref=hashlib.sha256(latest.encode("utf-8")).hexdigest(),
                     output_ref=proposal["proposal_id"],
                 )
@@ -1996,9 +2051,9 @@ class CompanyApplicationService:
                 "message": proposal["summary"],
                 "action": proposal,
                 "blocked": False,
-                "usage": None,
-                "cost_log": None,
-                "routing": None,
+                "usage": planner_result.get("usage") if planner_result else None,
+                "cost_log": planner_result.get("cost_log") if planner_result else None,
+                "routing": planner_result.get("routing") if planner_result else None,
             }
 
         transcript = "\n".join(
@@ -2037,7 +2092,9 @@ class CompanyApplicationService:
         normalized = message.lower()
         if mode == "chat":
             return None
-        if mode == "auto" and not any(marker in normalized for marker in CHAT_ACTION_MARKERS):
+        if mode == "auto" and prefers_conversation(message):
+            return None
+        if not any(marker in normalized for marker in CHAT_ACTION_MARKERS):
             return None
 
         workflow_id = "task_planning_v1"
@@ -2086,6 +2143,123 @@ class CompanyApplicationService:
             workflow_id = "document_generation_v1"
             purpose = "生成并保存文档结果"
 
+        return self._build_chat_proposal(
+            message,
+            workflow_id,
+            workflow_input,
+            purpose,
+            "rules",
+        )
+
+    def _proposal_from_chat_plan(
+        self,
+        message: str,
+        plan: ChatActionPlan,
+        planner: str,
+    ) -> dict | None:
+        workflow_id = "task_planning_v1"
+        workflow_input: dict = {}
+        purpose = "规划并拆分任务"
+        if plan.intent == "conversation":
+            return None
+        if plan.intent in {"git_status", "git_diff", "git_log"}:
+            operation = plan.intent.removeprefix("git_")
+            workflow_id = "tool_call_v1"
+            workflow_input = {
+                "tool_id": "git_read_tool",
+                "actor_id": "workspace_agent_v1",
+                "reason": message,
+                "tool_input": {
+                    "operation": operation,
+                    **({"limit": 10} if operation == "log" else {}),
+                },
+            }
+            purpose = {
+                "status": "读取 Git 工作区状态",
+                "diff": "读取 Git 未提交差异",
+                "log": "读取 Git 提交历史",
+            }[operation]
+        elif plan.intent == "code_search":
+            workflow_id = "tool_call_v1"
+            workflow_input = {
+                "tool_id": "filesystem_read_tool",
+                "actor_id": "workspace_agent_v1",
+                "reason": message,
+                "tool_input": {
+                    "operation": "search",
+                    "path": ".",
+                    "query": plan.query,
+                    "limit": 50,
+                },
+            }
+            purpose = f"在工作区搜索代码“{str(plan.query)[:40]}”"
+        elif plan.intent in {"frontend_typecheck", "backend_tests"}:
+            workflow_id = "tool_call_v1"
+            frontend = plan.intent == "frontend_typecheck"
+            workflow_input = {
+                "tool_id": "workspace_command_tool",
+                "actor_id": "workspace_agent_v1",
+                "reason": message,
+                "tool_input": (
+                    {"argv": ["npm", "run", "typecheck"], "cwd": "apps/web", "timeout_seconds": 120}
+                    if frontend
+                    else {
+                        "argv": ["python", "-m", "unittest", "discover", "-s", "backend/tests"],
+                        "cwd": ".",
+                        "timeout_seconds": 120,
+                    }
+                ),
+            }
+            purpose = "运行前端 TypeScript 检查" if frontend else "运行后端测试套件"
+        elif plan.intent == "document":
+            workflow_id = "document_generation_v1"
+            purpose = "生成并保存文档结果"
+        elif plan.intent == "quality":
+            workflow_id = "quality_check_v1"
+            purpose = "运行质量检查"
+        elif plan.intent == "retrospective":
+            workflow_id = "retrospective_v1"
+            workflow_input = {"summary": message}
+            purpose = "记录复盘并沉淀经验"
+        elif plan.intent == "collaboration":
+            workflow_id = "agent_collaboration_v1"
+            workflow_input = {
+                "target_agent_id": plan.target_agent or "document_agent_v1",
+                "agenda": message,
+                "instructions": message,
+                "handoff_reason": "由受约束聊天规划器提出并等待 Human Root 确认。",
+            }
+            purpose = "组织智能体协作与任务交接"
+        elif plan.intent == "skill_gap":
+            workflow_id = "skill_missing_v1"
+            workflow_input = {"capability": message, "requested_by_agent": "document_agent_v1"}
+            purpose = "查找或提出所需技能"
+        elif plan.intent == "approval":
+            workflow_id = "approval_v1"
+            workflow_input = {
+                "action": "chat_requested_action",
+                "actor_id": "ceo_agent_v1",
+                "reason": message,
+            }
+            purpose = "发起受控审批"
+        elif plan.intent != "task_plan":
+            return None
+        return self._build_chat_proposal(
+            message,
+            workflow_id,
+            workflow_input,
+            purpose,
+            planner,
+        )
+
+    def _build_chat_proposal(
+        self,
+        message: str,
+        workflow_id: str,
+        workflow_input: dict,
+        purpose: str,
+        planner: str,
+    ) -> dict:
         definition = self.company_os.workflows.get(workflow_id)
         title = message.replace("\n", " ").strip()[:60] or definition.name
         proposal_id = new_id("chat_action")
@@ -2098,20 +2272,26 @@ class CompanyApplicationService:
             "input": workflow_input,
             "purpose": purpose,
             "status": "pending",
+            "planner": planner,
             "summary": f"我可以调用“{definition.name}”来{purpose}。确认后才会创建任务并执行。",
         }
 
+    def _model_chat_planner_available(self, provider: str | None) -> bool:
+        status = self.company_os.models.provider_status()
+        selected = (provider or str(status["default_provider"])).lower()
+        return selected != "local" and selected in status["providers"]
+
     @staticmethod
     def _chat_workspace_tool(message: str, normalized: str) -> tuple[dict, str] | None:
-        if any(marker in normalized for marker in ("git status", "查看 git 状态", "查看git状态", "仓库状态")):
+        if any(marker in normalized for marker in ("git status", "查看 git 状态", "查看git状态", "仓库状态", "哪些文件变了")):
             tool_input = {"operation": "status"}
             purpose = "读取 Git 工作区状态"
             tool_id = "git_read_tool"
-        elif any(marker in normalized for marker in ("git diff", "查看 git 差异", "查看git差异", "查看代码差异")):
+        elif any(marker in normalized for marker in ("git diff", "查看 git 差异", "查看git差异", "查看代码差异", "当前改动", "仓库改了什么")):
             tool_input = {"operation": "diff"}
             purpose = "读取 Git 未提交差异"
             tool_id = "git_read_tool"
-        elif any(marker in normalized for marker in ("git log", "查看 git 历史", "查看git历史", "提交历史")):
+        elif any(marker in normalized for marker in ("git log", "查看 git 历史", "查看git历史", "提交历史", "最近提交", "提交记录")):
             tool_input = {"operation": "log", "limit": 10}
             purpose = "读取 Git 提交历史"
             tool_id = "git_read_tool"
@@ -2127,7 +2307,11 @@ class CompanyApplicationService:
             tool_input = {"operation": "search", "path": ".", "query": query, "limit": 50}
             purpose = f"在工作区搜索代码“{query[:40]}”"
             tool_id = "filesystem_read_tool"
-        elif "运行" in normalized and "测试" in normalized:
+        elif any(marker in normalized for marker in ("前端类型", "类型检查", "typescript 检查", "typecheck")):
+            tool_input = {"argv": ["npm", "run", "typecheck"], "cwd": "apps/web", "timeout_seconds": 120}
+            purpose = "运行前端 TypeScript 检查"
+            tool_id = "workspace_command_tool"
+        elif ("运行" in normalized and "测试" in normalized) or "后端测试" in normalized:
             if any(marker in normalized for marker in ("前端", "typescript", "typecheck")):
                 tool_input = {"argv": ["npm", "run", "typecheck"], "cwd": "apps/web", "timeout_seconds": 120}
                 purpose = "运行前端 TypeScript 检查"

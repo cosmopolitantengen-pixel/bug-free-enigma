@@ -217,7 +217,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           task: { task_id: "task-command-123456", status: "completed" },
           output: "Tool Call completed",
           outcome: "completed",
-          tool_run: { status: "completed", result: JSON.stringify({ exit_code: 0, stdout: "Ran 221 tests in 62.0s\nOK", stderr: "" }) },
+          tool_run: { status: "completed", result: JSON.stringify({ exit_code: 0, stdout: "Ran 229 tests in 58.9s\nOK", stderr: "" }) },
           approval_required: false,
           blocked: false,
         }),
@@ -324,6 +324,9 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
               purpose: "规划并拆分任务",
               status: "pending",
             },
+            usage: { provider: "deepseek", model_name: "deepseek-v4-flash", total_tokens: 18 },
+            cost_log: { amount: 0.000009 },
+            routing: { requested_provider: "deepseek", actual_provider: "deepseek", attempted_providers: ["deepseek"], fallback_used: false },
             blocked: false,
           }),
         });
@@ -450,6 +453,7 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "发送消息" }).click();
     await expect(page.getByText("我可以调用“任务规划”来规划并拆分任务。确认后才会创建任务并执行。")).toBeVisible();
     await expect(page.getByText("task_planning_v1")).toBeVisible();
+    await expect(page.getByText("18 Token")).toBeVisible();
     expect(api.actions.filter((item) => item.path.startsWith("/chat/actions/"))).toHaveLength(0);
 
     await page.getByRole("button", { name: "确认执行" }).click();
@@ -488,7 +492,7 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.getByRole("button", { name: "批准并继续" })).toBeVisible();
     await page.getByRole("button", { name: "批准并继续" }).click();
 
-    await expect(page.getByText(/Ran 221 tests in 62\.0s/)).toBeVisible();
+    await expect(page.getByText(/Ran 229 tests in 58\.9s/)).toBeVisible();
     expect(api.actions.filter((item) => item.path === "/tasks/task-command-123456/decision")).toHaveLength(1);
     expect(api.actions.find((item) => item.path === "/tasks/task-command-123456/decision")?.body).toMatchObject({ status: "approved", decided_by: "human_root" });
   });

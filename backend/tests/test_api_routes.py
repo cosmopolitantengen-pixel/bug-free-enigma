@@ -1458,6 +1458,29 @@ class ApiRouteTests(unittest.TestCase):
         self.assertEqual(tool_result["operation"], "status")
         self.assertIn("##", tool_result["output"])
 
+    def test_chat_rules_understand_natural_workspace_requests(self):
+        changed = self.client.post(
+            "/chat/respond",
+            json={"messages": [{"role": "user", "content": "帮我看看仓库改了什么"}], "mode": "auto"},
+        ).json()
+        typed = self.client.post(
+            "/chat/respond",
+            json={"messages": [{"role": "user", "content": "检查前端类型有没有问题"}], "mode": "auto"},
+        ).json()
+        history = self.client.post(
+            "/chat/respond",
+            json={"messages": [{"role": "user", "content": "看看最近提交"}], "mode": "auto"},
+        ).json()
+
+        self.assertEqual(changed["action"]["planner"], "rules")
+        self.assertEqual(changed["action"]["input"]["tool_input"], {"operation": "diff"})
+        self.assertEqual(
+            typed["action"]["input"]["tool_input"],
+            {"argv": ["npm", "run", "typecheck"], "cwd": "apps/web", "timeout_seconds": 120},
+        )
+        self.assertEqual(history["action"]["input"]["tool_input"], {"operation": "log", "limit": 10})
+        self.assertEqual(self.client.get("/tasks").json(), [])
+
     def test_budget_policy_update_is_audited_and_blocks_future_model_calls(self):
         updated = self.client.post(
             "/budget/policy",

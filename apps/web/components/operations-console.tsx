@@ -513,6 +513,7 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
       const routing = (result.routing as ApiRecord | undefined) ?? {};
       const usage = (result.usage as ApiRecord | undefined) ?? {};
       const cost = (result.cost_log as ApiRecord | undefined) ?? {};
+      const hasUsage = Boolean(result.usage);
       const proposed = (result.action as ApiRecord | undefined);
       const proposedWorkflowId = text(proposed?.workflow_id);
       const action: ChatAction | undefined = proposed ? {
@@ -532,11 +533,11 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
           ? `我可以调用“${action.workflowName}”来${action.purpose}。确认后才会创建任务并执行。`
           : text(result.message ?? result.output, result.blocked ? "本次请求被预算策略阻止，请调整预算或模型后重试。" : "模型没有返回内容。"),
         createdAt: new Date().toISOString(),
-        provider: result.type === "conversation" ? text(routing.actual_provider ?? usage.provider, provider) : undefined,
-        model: result.type === "conversation" ? text(usage.model_name, model) : undefined,
-        totalTokens: result.type === "conversation" ? Number(usage.total_tokens ?? 0) : undefined,
-        cost: result.type === "conversation" ? Number(cost.amount ?? 0) : undefined,
-        fallbackUsed: result.type === "conversation" ? Boolean(routing.fallback_used) : undefined,
+        provider: hasUsage ? text(routing.actual_provider ?? usage.provider, provider) : undefined,
+        model: hasUsage ? text(usage.model_name, model) : undefined,
+        totalTokens: hasUsage ? Number(usage.total_tokens ?? 0) : undefined,
+        cost: hasUsage ? Number(cost.amount ?? 0) : undefined,
+        fallbackUsed: hasUsage ? Boolean(routing.fallback_used) : undefined,
         failed: Boolean(result.blocked),
         action,
       };

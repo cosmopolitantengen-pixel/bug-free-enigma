@@ -45,13 +45,14 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 221 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 229 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions runs the release gate for API contract, readiness redaction, core Workflow smoke, console endpoint wiring, and secret-like committed values.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
 - FastAPI application startup smoke check passes.
 - Dashboard JavaScript syntax check passes.
 - Next.js desktop and 390 px mobile Playwright browser acceptance checks cover loading, navigation, bearer-token storage, production readiness visibility, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident response, invalid API-base handling, and auth-required API degradation in CI.
+- Chat action planning is rule-first and restricts model output to a validated intent catalog. Tests reject executable-field smuggling and preserve explicit conversation-only requests; live DeepSeek acceptance showed planner usage/cost, zero tasks before confirmation, an audited model-planned proposal, and controlled Git execution only after confirmation.
 - Git diff whitespace validation passes.
 - SQLite tests cover restart continuation for approval-gated native Workflows.
 - Safety tests cover forbidden Root actions, authorization boundaries, approval enforcement, external-content handling, blocked Tool/Skill Runs, and append-only audit behavior.
