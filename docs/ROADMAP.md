@@ -96,6 +96,7 @@ Current status:
 - Tool Call is the tenth native Workflow. It preserves the authoritative Tool Runtime, links three control Skills and the Tool Run to one task, resumes approvals across SQLite restarts, enforces rejection without execution, and separates adapter failure from permission/risk blocks.
 - Approval-gated chat actions now expose risk and command context inline. Human Root can reject or approve-and-resume through one idempotent persisted-task endpoint, including after browser reload or SQLite process restart.
 - Chat action selection is rule-first and model-assisted only for ambiguous operational language. Structured model output is restricted to a bounded intent catalog, while executable parameters remain fixed server mappings and planner usage stays inside Budget and Audit controls.
+- Human Root chat sessions, messages, model metadata, and action-card state are now server-persisted, included in verified backup/restore state, and recover pending confirmation after browser or backend restart. Legacy browser transcripts import as text only.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence

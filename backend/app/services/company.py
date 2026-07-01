@@ -15,6 +15,7 @@ from app.chat.planner import (
     prefers_conversation,
     should_use_model_planner,
 )
+from app.chat.sessions import ChatMessageRecord, ChatSessionRecord, ChatSessionStore
 from app.connectors.github import GitHubConnector
 from app.core.enums import ActionDecision, GoalStatus, ProposalStatus, SandboxStatus, ScheduleAction, ScheduleExecutionStatus, ScheduleStatus
 from app.core.models import Agent, AgentBroadcast, AgentConflict, AgentMeeting, AgentMessage, BackupRecord, DomainEvent, Incident, ScheduledExecution, ScheduledJob, Skill, SkillRun, StrategicGoal, TaskHandoff, TaskReview, Tool, ToolRun
@@ -70,6 +71,7 @@ class CompanyApplicationService:
     github_absorptions: dict[str, GitHubAbsorption] = field(default_factory=dict)
     tool_runs: dict[str, ToolRun] = field(default_factory=dict)
     skill_runs: dict[str, SkillRun] = field(default_factory=dict)
+    chat_sessions: ChatSessionStore = field(default_factory=ChatSessionStore)
     _vector_store: KnowledgeVectorStore | None = field(default=None, init=False, repr=False)
     _indexed_knowledge_ids: set[str] = field(default_factory=set, init=False, repr=False)
     _failed_embedding_ids: set[str] = field(default_factory=set, init=False, repr=False)
@@ -116,6 +118,7 @@ class CompanyApplicationService:
         loaded_domain_events = self.persistence.load_domain_events()
         loaded_scheduled_jobs = self.persistence.load_scheduled_jobs()
         loaded_scheduled_executions = self.persistence.load_scheduled_executions()
+        loaded_chat_sessions = self.persistence.load_chat_sessions()
         self.auth = AuthService.from_env(users={user.email: user for user in loaded_users})
         self.tasks = {task.task_id: task for task in loaded_tasks}
         self.skill_proposals = {proposal.proposal_id: proposal for proposal in loaded_skill_proposals}
@@ -126,6 +129,7 @@ class CompanyApplicationService:
         self.github_absorptions = {proposal.proposal_id: proposal for proposal in loaded_github_absorptions}
         self.tool_runs = {run.run_id: run for run in loaded_tool_runs}
         self.skill_runs = {run.run_id: run for run in loaded_skill_runs}
+        self.chat_sessions = ChatSessionStore(loaded_chat_sessions)
         self.company_os = build_company_os(
             approvals=loaded_approvals,
             audit_events=loaded_audit,
@@ -156,6 +160,7 @@ class CompanyApplicationService:
         )
         self._bind_workflow_skill_runtime()
         self._configure_knowledge_vectors()
+        self._restore_chat_action_proposals()
 
     def sync(self) -> None:
         if self.persistence is None:
@@ -201,6 +206,7 @@ class CompanyApplicationService:
             domain_events=list(self.company_os.events.list()),
             scheduled_jobs=list(self.company_os.scheduler.list()),
             scheduled_executions=list(self.company_os.scheduler.list_executions()),
+            chat_sessions=list(self.chat_sessions.list()),
         )
 
     def register_user(self, email: str, password: str) -> dict:
@@ -1966,6 +1972,181 @@ class CompanyApplicationService:
             },
         }
 
+    def list_chat_sessions(self, owner_id: str = "human_root") -> list[dict]:
+        return [to_plain(session) for session in self.chat_sessions.list(owner_id)]
+
+    def create_chat_session(
+        self,
+        owner_id: str = "human_root",
+        title: str = "New chat",
+    ) -> dict:
+        if owner_id != "human_root":
+            raise PermissionError("only human_root can create chat sessions")
+        session = self.chat_sessions.create(owner_id, title)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_session_created",
+                actor_id=owner_id,
+                action="create_chat_session",
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result="created",
+                output_ref=session.session_id,
+            )
+        )
+        self.sync()
+        return to_plain(session)
+
+    def import_chat_sessions(self, sessions: list[dict], owner_id: str = "human_root") -> list[dict]:
+        if owner_id != "human_root":
+            raise PermissionError("only human_root can import chat sessions")
+        imported: list[ChatSessionRecord] = []
+        for item in sessions[:50]:
+            if not isinstance(item, dict):
+                continue
+            import_payload = {
+                "legacy_id": str(item.get("legacy_id") or ""),
+                "title": str(item.get("title") or "Imported chat"),
+                "messages": item.get("messages", []),
+            }
+            import_key = "legacy:" + hashlib.sha256(
+                json.dumps(import_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            session = ChatSessionRecord(
+                owner_id=owner_id,
+                title=str(item.get("title") or "Imported chat").strip()[:80] or "Imported chat",
+                import_key=import_key,
+            )
+            for raw_message in item.get("messages", [])[:200]:
+                if not isinstance(raw_message, dict):
+                    continue
+                try:
+                    message = ChatMessageRecord(
+                        role=str(raw_message.get("role") or ""),
+                        content=str(raw_message.get("content") or "")[:12000],
+                    )
+                except ValueError:
+                    continue
+                session.messages.append(message)
+                session.updated_at = message.created_at
+            imported.append(self.chat_sessions.import_session(session))
+        if imported:
+            self.company_os.audit.append(
+                AuditEvent(
+                    event_type="chat_sessions_imported",
+                    actor_id=owner_id,
+                    action="import_chat_sessions",
+                    task_id=None,
+                    risk_level=RiskLevel.LOW,
+                    approval_status=ApprovalStatus.NOT_REQUIRED,
+                    result=f"{len(imported)} imported",
+                    output_ref=imported[0].session_id,
+                )
+            )
+            self.sync()
+        return [to_plain(session) for session in imported]
+
+    def delete_chat_session(self, session_id: str, owner_id: str = "human_root") -> dict:
+        session = self.chat_sessions.delete(session_id, owner_id)
+        if self.persistence is not None:
+            self.persistence.delete_chat_session(session_id)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_session_deleted",
+                actor_id=owner_id,
+                action="delete_chat_session",
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result="deleted",
+                output_ref=session_id,
+            )
+        )
+        self.sync()
+        return {"session_id": session_id, "deleted": True}
+
+    def send_chat_session_message(
+        self,
+        session_id: str,
+        content: str,
+        mode: str = "auto",
+        model_name: str | None = None,
+        provider: str | None = None,
+        owner_id: str = "human_root",
+    ) -> dict:
+        session = self.chat_sessions.get(session_id)
+        if session.owner_id != owner_id:
+            raise PermissionError("chat session belongs to another owner")
+        user_message = ChatMessageRecord(role="user", content=content)
+        self.chat_sessions.append_message(session_id, user_message)
+        self.sync()
+        history = [
+            {"role": message.role, "content": message.content}
+            for message in session.messages[-20:]
+        ]
+        try:
+            response = self.respond_to_chat(history, mode, model_name, provider)
+        except ModelProviderError:
+            failed = ChatMessageRecord(
+                role="assistant",
+                content="Model request failed. Review the recorded incident before retrying.",
+                failed=True,
+            )
+            self.chat_sessions.append_message(session_id, failed)
+            self.sync()
+            raise
+        assistant_message = self._chat_message_from_response(response)
+        self.chat_sessions.append_message(session_id, assistant_message)
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_exchange_recorded",
+                actor_id=owner_id,
+                action="record_chat_exchange",
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result=response.get("type", "conversation"),
+                input_ref=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                output_ref=assistant_message.message_id,
+                model_name=assistant_message.model,
+            )
+        )
+        self.sync()
+        return {
+            "session": to_plain(session),
+            "message": to_plain(assistant_message),
+            "response": response,
+        }
+
+    def cancel_chat_action(self, proposal_id: str, owner_id: str = "human_root") -> dict:
+        if owner_id != "human_root":
+            raise PermissionError("only human_root can cancel a chat action")
+        proposal = self._chat_action_proposals[proposal_id]
+        if proposal.get("status") != "pending":
+            raise ValueError("chat action is not pending")
+        proposal["status"] = "cancelled"
+        session = self.chat_sessions.update_action(proposal_id, status="cancelled")
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_action_cancelled",
+                actor_id=owner_id,
+                action=proposal["workflow_id"],
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result="cancelled",
+                input_ref=proposal_id,
+                output_ref=session.session_id if session else None,
+            )
+        )
+        self.sync()
+        return {
+            "proposal_id": proposal_id,
+            "status": "cancelled",
+            "session": to_plain(session) if session else None,
+        }
+
     def respond_to_chat(
         self,
         messages: list[dict],
@@ -2087,6 +2268,121 @@ class CompanyApplicationService:
                 else result.get("output")
             ),
         }
+
+    @staticmethod
+    def _chat_message_from_response(response: dict) -> ChatMessageRecord:
+        usage = response.get("usage") or {}
+        routing = response.get("routing") or {}
+        cost_log = response.get("cost_log") or {}
+        action = response.get("action")
+        return ChatMessageRecord(
+            role="assistant",
+            content=str(response.get("message") or response.get("output") or "No response was returned."),
+            provider=str(routing.get("actual_provider") or usage.get("provider")) if usage else None,
+            model=str(usage.get("model_name")) if usage.get("model_name") else None,
+            total_tokens=int(usage.get("total_tokens", 0)) if usage else None,
+            cost=float(cost_log.get("amount", 0)) if usage else None,
+            fallback_used=bool(routing.get("fallback_used")) if usage else None,
+            failed=bool(response.get("blocked")),
+            action=json.loads(json.dumps(action, ensure_ascii=False)) if isinstance(action, dict) else None,
+        )
+
+    def _restore_chat_action_proposals(self) -> None:
+        self._chat_action_proposals.clear()
+        self._chat_action_results.clear()
+        for session in self.chat_sessions.list():
+            for message in session.messages:
+                action = message.action
+                if not action or action.get("status") not in {"pending", "executing"}:
+                    continue
+                required = {
+                    "proposal_id",
+                    "workflow_id",
+                    "title",
+                    "description",
+                    "input",
+                    "purpose",
+                    "summary",
+                }
+                if not required.issubset(action) or not isinstance(action.get("input"), dict):
+                    continue
+                try:
+                    self.company_os.workflows.get(str(action["workflow_id"]))
+                except KeyError:
+                    continue
+                restored = json.loads(json.dumps(action, ensure_ascii=False))
+                restored["status"] = "pending"
+                message.action["status"] = "pending"
+                self._chat_action_proposals[str(restored["proposal_id"])] = restored
+
+    @staticmethod
+    def _chat_action_result_message(result: dict, status: str) -> tuple[str, bool]:
+        task = result.get("task") or {}
+        if status == "waiting_approval":
+            return f"Task created and waiting for Human Root approval: {task.get('task_id', 'unknown')}", False
+        if status == "failed":
+            return f"Action did not complete: {result.get('output') or 'blocked by the control path'}", True
+        tool_run = result.get("tool_run") or {}
+        raw_result = tool_run.get("result")
+        if isinstance(raw_result, str) and raw_result.strip():
+            try:
+                parsed = json.loads(raw_result)
+                detail = parsed.get("output") or parsed.get("stdout") or parsed.get("content")
+                if not isinstance(detail, str):
+                    detail = json.dumps(parsed, ensure_ascii=False, indent=2)
+            except json.JSONDecodeError:
+                detail = raw_result
+        else:
+            detail = str(result.get("output") or "Task completed.")
+        return f"Action completed.\n{detail[:12000]}", False
+
+    def _record_chat_action_result(self, proposal_id: str, result: dict, status: str) -> dict:
+        task = result.get("task") or {}
+        approval = result.get("approval") or {}
+        request = approval.get("request") or {}
+        metadata = request.get("metadata") or {}
+        risk = approval.get("risk") or {}
+        tool_run = result.get("tool_run") or {}
+        session = self.chat_sessions.update_action(
+            proposal_id,
+            status=status,
+            task_id=task.get("task_id"),
+            approval_id=approval.get("approval_id"),
+            risk_level=risk.get("level") or tool_run.get("risk_level"),
+            approval_input=metadata.get("tool_input") if isinstance(metadata.get("tool_input"), dict) else None,
+        )
+        if session is None:
+            return result
+        content, failed = self._chat_action_result_message(result, status)
+        self.chat_sessions.append_message(
+            session.session_id,
+            ChatMessageRecord(role="assistant", content=content, failed=failed),
+        )
+        return {**result, "chat_session": to_plain(session)}
+
+    def _record_chat_task_decision(self, task_id: str, result: dict, decision: ApprovalStatus) -> dict:
+        match = self.chat_sessions.find_by_task(task_id)
+        if match is None:
+            return result
+        session, message = match
+        action = message.action or {}
+        if action.get("status") in {"completed", "cancelled", "failed"}:
+            return {**result, "chat_session": to_plain(session)}
+        rejected = decision == ApprovalStatus.REJECTED or result.get("outcome") == "rejected"
+        task = result.get("task") or {}
+        failed = bool(result.get("blocked")) or task.get("status") in {"failed", "blocked"}
+        status = "cancelled" if rejected else "failed" if failed else "completed"
+        self.chat_sessions.update_action(str(action.get("proposal_id")), status=status)
+        if rejected:
+            content = "Human Root rejected the action. Nothing was executed."
+        else:
+            content, _ = self._chat_action_result_message(result, status)
+        self.chat_sessions.append_message(
+            session.session_id,
+            ChatMessageRecord(role="assistant", content=content, failed=failed),
+        )
+        self.sync()
+        return {**result, "chat_session": to_plain(session)}
 
     def _propose_chat_action(self, message: str, mode: str) -> dict | None:
         normalized = message.lower()
@@ -2371,6 +2667,8 @@ class CompanyApplicationService:
         with self._chat_action_lock:
             proposal["status"] = status
             proposal["task_id"] = task.get("task_id")
+        result = self._record_chat_action_result(proposal_id, result, status)
+        with self._chat_action_lock:
             self._chat_action_results[proposal_id] = result
         self.company_os.audit.append(
             AuditEvent(
@@ -2948,14 +3246,15 @@ class CompanyApplicationService:
 
             if task.status == TaskStatus.NEEDS_APPROVAL:
                 result = self.resume_task(task_id)
-                return {**result, "decision": to_plain(approval), "already_resolved": False}
+                response = {**result, "decision": to_plain(approval), "already_resolved": False}
+                return self._record_chat_task_decision(task_id, response, status)
             if task.status in {
                 TaskStatus.COMPLETED,
                 TaskStatus.CANCELLED,
                 TaskStatus.FAILED,
                 TaskStatus.BLOCKED,
             }:
-                return {
+                response = {
                     "task": to_plain(task),
                     "output": task.result,
                     "outcome": "already_resolved",
@@ -2965,6 +3264,7 @@ class CompanyApplicationService:
                     "blocked": task.status == TaskStatus.BLOCKED,
                     "already_resolved": True,
                 }
+                return self._record_chat_task_decision(task_id, response, status)
             raise ValueError(f"task is not waiting for approval: {task.status.value}")
 
     def pause_task(self, task_id: str) -> dict:
@@ -3800,6 +4100,7 @@ class CompanyApplicationService:
         domain_events = self.company_os.events.list()
         scheduled_jobs = self.company_os.scheduler.list()
         scheduled_executions = self.company_os.scheduler.list_executions()
+        chat_sessions = self.chat_sessions.list()
         budget = self.company_os.budget.summary()
         agents = self.company_os.agents.list()
         skills = self.company_os.skills.list()
@@ -3881,6 +4182,17 @@ class CompanyApplicationService:
                     if execution.status == ScheduleExecutionStatus.FAILED
                 ]
             ),
+            "chat_session_count": len(chat_sessions),
+            "chat_message_count": sum(len(session.messages) for session in chat_sessions),
+            "recent_chat_sessions": [
+                {
+                    "session_id": session.session_id,
+                    "title": session.title,
+                    "message_count": len(session.messages),
+                    "updated_at": session.updated_at.isoformat(),
+                }
+                for session in chat_sessions[:10]
+            ],
             "failed_scheduled_job_count": len(
                 [job for job in scheduled_jobs if job.status == ScheduleStatus.FAILED]
             ),
@@ -4626,6 +4938,7 @@ class CompanyApplicationService:
             "agent_conflicts": to_plain(self.company_os.communication.list_conflicts()),
             "task_reviews": to_plain(self.company_os.reviews.list()),
             "scheduled_jobs": to_plain(self.company_os.scheduler.list()),
+            "chat_sessions": to_plain(self.chat_sessions.list()),
         }
 
     def _backup_checksum(self, snapshot: dict) -> str:

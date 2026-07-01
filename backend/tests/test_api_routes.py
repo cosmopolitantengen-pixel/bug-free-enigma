@@ -1057,7 +1057,7 @@ class ApiRouteTests(unittest.TestCase):
 
             self.assertEqual(sqlite_schema.status_code, 200)
             self.assertEqual(sqlite_schema.json()["backend"], "sqlite")
-            self.assertEqual(sqlite_schema.json()["schema_version"], 6)
+            self.assertEqual(sqlite_schema.json()["schema_version"], 7)
             self.assertEqual(sqlite_schema.json()["migrations"][0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(sqlite_schema.json()["migrations"][1]["migration_id"], "0002_audit_append_only_guards")
             self.assertEqual(
@@ -1073,6 +1073,7 @@ class ApiRouteTests(unittest.TestCase):
                 "0005_agent_skill_catalogs",
             )
             self.assertEqual(sqlite_schema.json()["migrations"][5]["migration_id"], "0006_skill_runtime")
+            self.assertEqual(sqlite_schema.json()["migrations"][6]["migration_id"], "0007_chat_sessions")
 
     def test_catalog_registration_rejects_unknown_references(self):
         bad_agent = self.client.post(
@@ -1480,6 +1481,72 @@ class ApiRouteTests(unittest.TestCase):
         )
         self.assertEqual(history["action"]["input"]["tool_input"], {"operation": "log", "limit": 10})
         self.assertEqual(self.client.get("/tasks").json(), [])
+
+    def test_server_chat_sessions_store_multi_turn_context_and_model_metadata(self):
+        created = self.client.post("/chat/sessions", json={"title": "Product ideas"})
+        session_id = created.json()["session_id"]
+        first = self.client.post(
+            f"/chat/sessions/{session_id}/messages",
+            json={
+                "content": "Help me compare three product directions without executing anything.",
+                "mode": "chat",
+                "provider": "local",
+                "model_name": "deterministic_mock_v1",
+            },
+        )
+        second = self.client.post(
+            f"/chat/sessions/{session_id}/messages",
+            json={
+                "content": "What is the strongest reason for the second direction?",
+                "mode": "chat",
+                "provider": "local",
+                "model_name": "deterministic_mock_v1",
+            },
+        )
+        listed = self.client.get("/chat/sessions").json()
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(len(listed[0]["messages"]), 4)
+        self.assertEqual(listed[0]["messages"][0]["role"], "user")
+        self.assertEqual(listed[0]["messages"][-1]["model"], "deterministic_mock_v1")
+        self.assertGreater(listed[0]["messages"][-1]["total_tokens"], 0)
+        self.assertEqual(len(self.client.get("/model-usage").json()), 2)
+
+    def test_legacy_chat_import_discards_untrusted_action_fields(self):
+        payload = {
+            "sessions": [
+                {
+                    "legacy_id": "browser-chat-1",
+                    "title": "Legacy browser chat",
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": "Old proposal text",
+                            "action": {
+                                "proposal_id": "untrusted",
+                                "workflow_id": "tool_call_v1",
+                                "input": {"argv": ["dangerous"]},
+                            },
+                        }
+                    ],
+                }
+            ]
+        }
+        imported = self.client.post(
+            "/chat/sessions/import",
+            json=payload,
+        )
+        repeated = self.client.post("/chat/sessions/import", json=payload)
+
+        self.assertEqual(imported.status_code, 200)
+        self.assertEqual(len(imported.json()), 1)
+        self.assertEqual(repeated.json()[0]["session_id"], imported.json()[0]["session_id"])
+        self.assertEqual(len(self.client.get("/chat/sessions").json()), 1)
+        self.assertIsNone(imported.json()[0]["messages"][0]["action"])
+        self.assertEqual(self.client.post("/chat/actions/untrusted/execute").status_code, 404)
 
     def test_budget_policy_update_is_audited_and_blocks_future_model_calls(self):
         updated = self.client.post(
@@ -2407,6 +2474,9 @@ class ApiRouteTests(unittest.TestCase):
         self.assertIn("scheduled_execution_count", payload)
         self.assertIn("failed_scheduled_job_count", payload)
         self.assertIn("failed_scheduled_execution_count", payload)
+        self.assertIn("chat_session_count", payload)
+        self.assertIn("chat_message_count", payload)
+        self.assertIn("recent_chat_sessions", payload)
         self.assertIn("recent_agent_messages", payload)
         self.assertIn("recent_agent_meetings", payload)
         self.assertIn("recent_task_handoffs", payload)

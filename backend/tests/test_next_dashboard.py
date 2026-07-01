@@ -28,7 +28,8 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("暂无任务", console)
         self.assertIn("模型服务商", console)
         self.assertIn("模型路由与价格", console)
-        self.assertIn("/chat/respond", console)
+        self.assertIn("/chat/sessions", console)
+        self.assertIn("/messages", console)
         self.assertIn("ai-company-os-chat-sessions-v1", console)
         self.assertIn("输入消息，Enter 发送，Shift+Enter 换行", console)
         self.assertIn("对话模式", console)
@@ -54,6 +55,7 @@ class NextDashboardTests(unittest.TestCase):
             "playwright": os.path.join(ROOT_DIR, "apps", "web", "playwright.config.ts"),
             "e2e": os.path.join(ROOT_DIR, "apps", "web", "e2e", "operations-console.spec.ts"),
             "e2e_runner": os.path.join(ROOT_DIR, "apps", "web", "scripts", "run-e2e.mjs"),
+            "local_starter": os.path.join(ROOT_DIR, "scripts", "start-local.ps1"),
         }
         contents = {}
         for name, path in paths.items():
@@ -82,6 +84,9 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("Not authenticated", contents["e2e"])
         self.assertIn("taskkill", contents["e2e_runner"])
         self.assertIn("@playwright/test/cli.js", contents["e2e_runner"])
+        self.assertIn("AI_COMPANY_OS_SQLITE_PATH", contents["local_starter"])
+        self.assertIn("/database/schema", contents["local_starter"])
+        self.assertIn("-WindowStyle Hidden", contents["local_starter"])
 
 
 if __name__ == "__main__":

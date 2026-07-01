@@ -56,11 +56,12 @@ from app.core.models import (
     WorkflowRun,
     WorkflowStep,
 )
+from app.chat.sessions import ChatMessageRecord, ChatSessionRecord
 from app.factory.proposals import AgentProposal, GitHubAbsorption, ImprovementProposal, SkillProposal
 from app.services.serializers import to_plain
 
 
-SQLITE_SCHEMA_VERSION = 6
+SQLITE_SCHEMA_VERSION = 7
 BASELINE_MIGRATION_VERSION = 1
 BASELINE_MIGRATION_ID = "0001_initial_local_state"
 BASELINE_MIGRATION_DESCRIPTION = "Create initial local AI Company OS state tables."
@@ -79,6 +80,9 @@ CATALOG_PERSISTENCE_MIGRATION_DESCRIPTION = "Persist registered Agent and Skill 
 SKILL_RUNTIME_MIGRATION_VERSION = 6
 SKILL_RUNTIME_MIGRATION_ID = "0006_skill_runtime"
 SKILL_RUNTIME_MIGRATION_DESCRIPTION = "Persist controlled Skill execution runs."
+CHAT_SESSION_MIGRATION_VERSION = 7
+CHAT_SESSION_MIGRATION_ID = "0007_chat_sessions"
+CHAT_SESSION_MIGRATION_DESCRIPTION = "Persist Human Root chat sessions and action state."
 
 
 class SQLiteStateStore:
@@ -424,6 +428,10 @@ class SQLiteStateStore:
         rows = self._select_payloads("scheduled_executions", "started_at")
         return [_scheduled_execution_from_plain(row) for row in rows]
 
+    def load_chat_sessions(self) -> list[ChatSessionRecord]:
+        rows = self._select_payloads("chat_sessions", "updated_at")
+        return [_chat_session_from_plain(row) for row in rows]
+
     def load_github_absorptions(self) -> list[GitHubAbsorption]:
         rows = self._select_payloads("github_absorptions", "proposal_id")
         return [_github_absorption_from_plain(row) for row in rows]
@@ -675,6 +683,22 @@ class SQLiteStateStore:
             )
             connection.commit()
 
+    def save_chat_session(self, session: ChatSessionRecord) -> None:
+        payload = _json(to_plain(session))
+        with closing(self._connect()) as connection:
+            connection.execute(
+                "INSERT INTO chat_sessions (session_id, updated_at, payload_json) VALUES (?, ?, ?) "
+                "ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at, "
+                "payload_json = excluded.payload_json",
+                (session.session_id, session.updated_at.isoformat(), payload),
+            )
+            connection.commit()
+
+    def delete_chat_session(self, session_id: str) -> None:
+        with closing(self._connect()) as connection:
+            connection.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+            connection.commit()
+
     def sync_state(
         self,
         users: list[User],
@@ -710,6 +734,7 @@ class SQLiteStateStore:
         domain_events: list[DomainEvent],
         scheduled_jobs: list[ScheduledJob],
         scheduled_executions: list[ScheduledExecution],
+        chat_sessions: list[ChatSessionRecord],
     ) -> None:
         for user in users:
             self.save_user(user)
@@ -776,6 +801,8 @@ class SQLiteStateStore:
             self.save_scheduled_job(job)
         for execution in scheduled_executions:
             self.save_scheduled_execution(execution)
+        for session in chat_sessions:
+            self.save_chat_session(session)
 
     def restore_snapshot(
         self,
@@ -868,10 +895,16 @@ class SQLiteStateStore:
                 "scheduled_jobs",
                 (("schedule_id", "schedule_id"), ("next_run_at", "next_run_at")),
             ),
+            "chat_sessions": (
+                "chat_sessions",
+                (("session_id", "session_id"), ("updated_at", "updated_at")),
+            ),
         }
 
         prepared: dict[str, tuple[str, tuple[tuple[str, str], ...], list[dict[str, Any]]]] = {}
-        optional_legacy_collections = {"agents", "skills", "skill_runs", "scheduled_jobs"}
+        optional_legacy_collections = {
+            "agents", "skills", "skill_runs", "scheduled_jobs", "chat_sessions"
+        }
         for snapshot_key, (table, columns) in collection_specs.items():
             records = snapshot.get(
                 snapshot_key,
@@ -992,6 +1025,8 @@ class SQLiteStateStore:
             self._apply_catalog_persistence(connection)
         if self._current_schema_version(connection) < SKILL_RUNTIME_MIGRATION_VERSION:
             self._apply_skill_runtime(connection)
+        if self._current_schema_version(connection) < CHAT_SESSION_MIGRATION_VERSION:
+            self._apply_chat_sessions(connection)
 
     def _apply_audit_append_only_guards(self, connection: sqlite3.Connection) -> None:
         connection.executescript(
@@ -1140,6 +1175,28 @@ class SQLiteStateStore:
         )
         connection.execute(f"PRAGMA user_version = {SKILL_RUNTIME_MIGRATION_VERSION}")
 
+    def _apply_chat_sessions(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                session_id TEXT PRIMARY KEY,
+                updated_at TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO schema_migrations (migration_id, version, description, applied_at) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                CHAT_SESSION_MIGRATION_ID,
+                CHAT_SESSION_MIGRATION_VERSION,
+                CHAT_SESSION_MIGRATION_DESCRIPTION,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        connection.execute(f"PRAGMA user_version = {CHAT_SESSION_MIGRATION_VERSION}")
+
     def _current_schema_version(self, connection: sqlite3.Connection) -> int:
         cursor = connection.execute("PRAGMA user_version")
         return int(cursor.fetchone()[0])
@@ -1153,6 +1210,34 @@ def _dt(value: str | None) -> datetime | None:
     if value is None:
         return None
     return datetime.fromisoformat(value)
+
+
+def _chat_message_from_plain(payload: dict[str, Any]) -> ChatMessageRecord:
+    return ChatMessageRecord(
+        role=payload["role"],
+        content=payload["content"],
+        message_id=payload["message_id"],
+        created_at=_dt(payload["created_at"]) or datetime.min,
+        provider=payload.get("provider"),
+        model=payload.get("model"),
+        total_tokens=payload.get("total_tokens"),
+        cost=payload.get("cost"),
+        fallback_used=payload.get("fallback_used"),
+        failed=payload.get("failed", False),
+        action=dict(payload["action"]) if payload.get("action") else None,
+    )
+
+
+def _chat_session_from_plain(payload: dict[str, Any]) -> ChatSessionRecord:
+    return ChatSessionRecord(
+        owner_id=payload.get("owner_id", "human_root"),
+        title=payload.get("title", "New chat"),
+        messages=[_chat_message_from_plain(item) for item in payload.get("messages", [])],
+        session_id=payload["session_id"],
+        created_at=_dt(payload["created_at"]) or datetime.min,
+        updated_at=_dt(payload["updated_at"]) or datetime.min,
+        import_key=payload.get("import_key"),
+    )
 
 
 def _task_from_plain(payload: dict[str, Any]) -> Task:

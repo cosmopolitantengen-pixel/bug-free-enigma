@@ -112,13 +112,150 @@ function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
   return fixtures[pathname] ?? {};
 }
 
+function mockChatResponse(latest: string, body: Record<string, unknown>): Record<string, unknown> {
+  const action = (
+    proposal_id: string,
+    workflow_id: string,
+    workflow_name: string,
+    input: Record<string, unknown>,
+    purpose: string,
+  ) => ({
+    type: "action_proposal",
+    message: `我可以调用“${workflow_name}”来${purpose}。确认后才会创建任务并执行。`,
+    action: { proposal_id, workflow_id, workflow_name, title: latest, description: latest, input, purpose, status: "pending" },
+    blocked: false,
+  });
+  if (latest === "运行失败测试") {
+    return action("chat-command-fail", "tool_call_v1", "工具调用", {
+      tool_id: "workspace_command_tool", actor_id: "workspace_agent_v1", reason: latest,
+      tool_input: { argv: ["python", "-c", "raise SystemExit(1)"], cwd: "." },
+    }, "验证失败状态");
+  }
+  if (latest === "运行后端测试") {
+    return action("chat-command-1", "tool_call_v1", "工具调用", {
+      tool_id: "workspace_command_tool", actor_id: "workspace_agent_v1", reason: latest,
+      tool_input: { argv: ["python", "-m", "unittest", "discover", "-s", "backend/tests"], cwd: "." },
+    }, "运行后端测试套件");
+  }
+  if (latest.toLowerCase() === "git status") {
+    return action("chat-tool-1", "tool_call_v1", "工具调用", {
+      tool_id: "git_read_tool", actor_id: "workspace_agent_v1", reason: latest, tool_input: { operation: "status" },
+    }, "读取 Git 工作区状态");
+  }
+  if (latest.includes("请制定")) {
+    return {
+      ...action("chat-action-1", "task_planning_v1", "任务规划", {}, "规划并拆分任务"),
+      usage: { provider: "deepseek", model_name: "deepseek-v4-flash", total_tokens: 18 },
+      cost_log: { amount: 0.000009 },
+      routing: { requested_provider: "deepseek", actual_provider: "deepseek", attempted_providers: ["deepseek"], fallback_used: false },
+    };
+  }
+  return {
+    type: "conversation",
+    message: "DeepSeek generated result",
+    output: "DeepSeek generated result",
+    usage: { provider: "deepseek", model_name: body.model_name, total_tokens: 42 },
+    cost_log: { amount: 0.000021 },
+    routing: { requested_provider: body.provider, actual_provider: "deepseek", attempted_providers: ["deepseek"], fallback_used: false },
+    blocked: false,
+  };
+}
+
 async function mockApi(page: Page, options: MockApiOptions = {}) {
-  const state: { authHeaders: string[]; workflowRequest?: WorkflowRequest; actions: MutatingRequest[] } = { authHeaders: [], actions: [] };
+  const state: { authHeaders: string[]; workflowRequest?: WorkflowRequest; actions: MutatingRequest[]; chatSessions: Array<Record<string, unknown>> } = { authHeaders: [], actions: [], chatSessions: [] };
+  let chatSequence = 0;
   await page.route(`${apiBase}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const auth = request.headers().authorization;
     if (auth) state.authHeaders.push(auth);
+
+    if (options.failReads && request.method() === "GET" && url.pathname !== "/health") {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Not authenticated" }),
+      });
+      return;
+    }
+
+    if (request.method() === "GET" && url.pathname === "/chat/sessions") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(state.chatSessions) });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/chat/sessions") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      const now = new Date().toISOString();
+      const session = { session_id: `chat-session-${++chatSequence}`, title: body.title || "新对话", messages: [], created_at: now, updated_at: now };
+      state.chatSessions.unshift(session);
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(session) });
+      return;
+    }
+
+    if (request.method() === "POST" && url.pathname === "/chat/sessions/import") {
+      const body = request.postDataJSON() as { sessions?: Array<Record<string, unknown>> };
+      const now = new Date().toISOString();
+      const imported = (body.sessions ?? []).map((item) => ({
+        session_id: `chat-session-${++chatSequence}`,
+        title: item.title || "导入的对话",
+        messages: Array.isArray(item.messages) ? item.messages : [],
+        created_at: now,
+        updated_at: now,
+      }));
+      state.chatSessions.unshift(...imported);
+      state.actions.push({ method: request.method(), path: url.pathname, body: body as unknown as Record<string, unknown> });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(imported) });
+      return;
+    }
+
+    if (request.method() === "DELETE" && url.pathname.startsWith("/chat/sessions/")) {
+      const sessionId = url.pathname.split("/").pop();
+      state.chatSessions = state.chatSessions.filter((item) => item.session_id !== sessionId);
+      state.actions.push({ method: request.method(), path: url.pathname });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ session_id: sessionId, deleted: true }) });
+      return;
+    }
+
+    if (request.method() === "POST" && /^\/chat\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      const sessionId = url.pathname.split("/")[3];
+      const session = state.chatSessions.find((item) => item.session_id === sessionId);
+      const messages = (session?.messages as Array<Record<string, unknown>> | undefined) ?? [];
+      const latest = String(body.content ?? "");
+      const now = new Date().toISOString();
+      messages.push({ message_id: `chat-message-${++chatSequence}`, role: "user", content: latest, created_at: now, failed: false, action: null });
+      const response = mockChatResponse(latest, body);
+      const usage = (response.usage as Record<string, unknown> | undefined) ?? {};
+      const routing = (response.routing as Record<string, unknown> | undefined) ?? {};
+      const cost = (response.cost_log as Record<string, unknown> | undefined) ?? {};
+      const assistant = {
+        message_id: `chat-message-${++chatSequence}`,
+        role: "assistant",
+        content: response.message,
+        created_at: new Date().toISOString(),
+        provider: response.usage ? routing.actual_provider || usage.provider : null,
+        model: response.usage ? usage.model_name : null,
+        total_tokens: response.usage ? usage.total_tokens : null,
+        cost: response.usage ? cost.amount : null,
+        fallback_used: response.usage ? Boolean(routing.fallback_used) : null,
+        failed: Boolean(response.blocked),
+        action: response.action ?? null,
+      };
+      messages.push(assistant);
+      if (session) {
+        session.messages = messages;
+        if (messages.length === 2) session.title = latest.slice(0, 28);
+        session.updated_at = assistant.created_at;
+      }
+      state.actions.push({ method: request.method(), path: url.pathname, body });
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ session, message: assistant, response }),
+      });
+      return;
+    }
 
     if (request.method() === "POST" && url.pathname === "/workflows/run") {
       state.workflowRequest = request.postDataJSON() as WorkflowRequest;
@@ -138,6 +275,33 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const isToolAction = url.pathname.includes("chat-tool-1");
       const isCommandAction = url.pathname.includes("chat-command-1");
       const isFailedCommandAction = url.pathname.includes("chat-command-fail");
+      const proposalId = url.pathname.split("/")[3];
+      const chatSession = state.chatSessions.find((session) =>
+        ((session.messages as Array<Record<string, unknown>> | undefined) ?? []).some((message) =>
+          (message.action as Record<string, unknown> | undefined)?.proposal_id === proposalId));
+      const chatMessages = (chatSession?.messages as Array<Record<string, unknown>> | undefined) ?? [];
+      const proposalMessage = chatMessages.find((message) =>
+        (message.action as Record<string, unknown> | undefined)?.proposal_id === proposalId);
+      const proposal = proposalMessage?.action as Record<string, unknown> | undefined;
+      if (proposal) {
+        const waiting = isCommandAction || isFailedCommandAction;
+        proposal.status = waiting ? "waiting_approval" : "completed";
+        proposal.task_id = isFailedCommandAction ? "task-command-failed" : isCommandAction ? "task-command-123456" : isToolAction ? "task-tool-123456" : "task-created-123456";
+        if (waiting) {
+          proposal.approval_id = isFailedCommandAction ? "approval-command-failed" : "approval-command-1";
+          proposal.risk_level = "high";
+          proposal.approval_input = isFailedCommandAction
+            ? { argv: ["python", "-c", "raise SystemExit(1)"], cwd: ".", timeout_seconds: 30 }
+            : { argv: ["python", "-m", "unittest", "discover", "-s", "backend/tests"], cwd: ".", timeout_seconds: 120 };
+        }
+        const content = waiting
+          ? `任务已创建，正在等待审批。任务编号：${proposal.task_id}`
+          : isToolAction
+            ? "行动已完成。\n## main...origin/main\n M apps/web/example.ts"
+            : "行动已完成。\n# Task Plan\n\n1. Prepare\n2. Launch\n3. Review";
+        chatMessages.push({ message_id: `chat-message-${++chatSequence}`, role: "assistant", content, created_at: new Date().toISOString(), failed: false, action: null });
+        if (chatSession) chatSession.updated_at = new Date().toISOString();
+      }
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(isFailedCommandAction ? {
@@ -153,6 +317,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           },
           approval_required: true,
           blocked: false,
+          chat_session: chatSession,
         } : isCommandAction ? {
           workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
           task: { task_id: "task-command-123456", status: "needs_approval" },
@@ -166,6 +331,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           },
           approval_required: true,
           blocked: false,
+          chat_session: chatSession,
         } : isToolAction ? {
           workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
           task: { task_id: "task-tool-123456", status: "completed" },
@@ -173,12 +339,14 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           tool_run: { status: "completed", result: JSON.stringify({ operation: "status", output: "## main...origin/main\n M apps/web/example.ts" }) },
           approval_required: false,
           blocked: false,
+          chat_session: chatSession,
         } : {
           workflow: { workflow_id: "task_planning_v1", name: "Task Planning" },
           task: { task_id: "task-created-123456", status: "planned" },
           output: "# Task Plan\n\n1. Prepare\n2. Launch\n3. Review",
           approval_required: false,
           blocked: false,
+          chat_session: chatSession,
         }),
       });
       return;
@@ -187,6 +355,14 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
     if (request.method() === "POST" && url.pathname === "/tasks/task-command-failed/decision") {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.actions.push({ method: request.method(), path: url.pathname, body });
+      const chatSession = state.chatSessions.find((session) =>
+        ((session.messages as Array<Record<string, unknown>> | undefined) ?? []).some((message) =>
+          (message.action as Record<string, unknown> | undefined)?.task_id === "task-command-failed"));
+      const chatMessages = (chatSession?.messages as Array<Record<string, unknown>> | undefined) ?? [];
+      const proposalMessage = chatMessages.find((message) =>
+        (message.action as Record<string, unknown> | undefined)?.task_id === "task-command-failed");
+      if (proposalMessage?.action) (proposalMessage.action as Record<string, unknown>).status = "failed";
+      chatMessages.push({ message_id: `chat-message-${++chatSequence}`, role: "assistant", content: "行动执行失败：command exited with status 1", created_at: new Date().toISOString(), failed: true, action: null });
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
@@ -196,6 +372,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           tool_run: { status: "failed", error: "command exited with status 1", result: null },
           approval_required: false,
           blocked: false,
+          chat_session: chatSession,
         }),
       });
       return;
@@ -205,6 +382,21 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const body = request.postDataJSON() as Record<string, unknown>;
       state.actions.push({ method: request.method(), path: url.pathname, body });
       const rejected = body.status === "rejected";
+      const chatSession = state.chatSessions.find((session) =>
+        ((session.messages as Array<Record<string, unknown>> | undefined) ?? []).some((message) =>
+          (message.action as Record<string, unknown> | undefined)?.task_id === "task-command-123456"));
+      const chatMessages = (chatSession?.messages as Array<Record<string, unknown>> | undefined) ?? [];
+      const proposalMessage = chatMessages.find((message) =>
+        (message.action as Record<string, unknown> | undefined)?.task_id === "task-command-123456");
+      if (proposalMessage?.action) (proposalMessage.action as Record<string, unknown>).status = rejected ? "cancelled" : "completed";
+      chatMessages.push({
+        message_id: `chat-message-${++chatSequence}`,
+        role: "assistant",
+        content: rejected ? "Human Root 已拒绝，本次行动没有执行。" : "审批通过，行动已完成。\nRan 229 tests in 58.9s\nOK",
+        created_at: new Date().toISOString(),
+        failed: false,
+        action: null,
+      });
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(rejected ? {
@@ -213,6 +405,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           outcome: "rejected",
           approval_required: false,
           blocked: false,
+          chat_session: chatSession,
         } : {
           task: { task_id: "task-command-123456", status: "completed" },
           output: "Tool Call completed",
@@ -220,6 +413,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           tool_run: { status: "completed", result: JSON.stringify({ exit_code: 0, stdout: "Ran 229 tests in 58.9s\nOK", stderr: "" }) },
           approval_required: false,
           blocked: false,
+          chat_session: chatSession,
         }),
       });
       return;
@@ -417,25 +611,25 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.locator(".chat-message.user").getByText("我在考虑三种发布方向，先陪我梳理一下")).toBeVisible();
     await expect(page.getByText("DeepSeek generated result")).toBeVisible();
     await expect(page.getByText("42 Token")).toBeVisible();
-    expect(api.actions.find((item) => item.path === "/chat/respond")?.body).toMatchObject({
+    expect(api.actions.find((item) => item.path.endsWith("/messages"))?.body).toMatchObject({
+      content: "我在考虑三种发布方向，先陪我梳理一下",
       provider: "deepseek",
       model_name: "deepseek-v4-pro",
       mode: "auto",
     });
-    expect(api.actions.find((item) => item.path === "/chat/respond")?.body?.messages).toEqual([
-      { role: "user", content: "我在考虑三种发布方向，先陪我梳理一下" },
-    ]);
 
     await page.getByLabel("聊天消息").fill("第二个方向的优势是什么");
     await page.getByRole("button", { name: "发送消息" }).click();
     await expect(page.locator(".chat-message.user").getByText("第二个方向的优势是什么")).toBeVisible();
     await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
-    const chatCalls = api.actions.filter((item) => item.path === "/chat/respond");
+    const chatCalls = api.actions.filter((item) => item.path.endsWith("/messages"));
     expect(chatCalls).toHaveLength(2);
-    expect(chatCalls[1].body?.messages).toEqual([
-      { role: "user", content: "我在考虑三种发布方向，先陪我梳理一下" },
-      { role: "assistant", content: "DeepSeek generated result" },
-      { role: "user", content: "第二个方向的优势是什么" },
+    expect(chatCalls[1].body).toMatchObject({ content: "第二个方向的优势是什么" });
+    expect((api.chatSessions[0].messages as Array<Record<string, unknown>>).map((message) => message.content)).toEqual([
+      "我在考虑三种发布方向，先陪我梳理一下",
+      "DeepSeek generated result",
+      "第二个方向的优势是什么",
+      "DeepSeek generated result",
     ]);
 
     await page.reload();

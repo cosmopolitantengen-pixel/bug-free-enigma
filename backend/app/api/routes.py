@@ -18,6 +18,9 @@ from app.api.schemas import (
     BackupVerifyRequest,
     BudgetPolicyUpdateRequest,
     ChatRespondRequest,
+    ChatSessionCreateRequest,
+    ChatSessionMessageCreateRequest,
+    ChatSessionsImportRequest,
     GitHubAbsorptionAnalyzeRequest,
     GitHubAbsorptionImportRequest,
     ImprovementProposalCreateRequest,
@@ -729,12 +732,76 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @router.get("/chat/sessions")
+    def list_chat_sessions(owner_id: str = "human_root") -> list[dict]:
+        return service.list_chat_sessions(owner_id)
+
+    @router.post("/chat/sessions")
+    def create_chat_session(payload: ChatSessionCreateRequest) -> dict:
+        try:
+            return service.create_chat_session(payload.owner_id, payload.title)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @router.post("/chat/sessions/import")
+    def import_chat_sessions(payload: ChatSessionsImportRequest) -> list[dict]:
+        try:
+            return service.import_chat_sessions(
+                [session.model_dump() for session in payload.sessions],
+                payload.owner_id,
+            )
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @router.delete("/chat/sessions/{session_id}")
+    def delete_chat_session(session_id: str, owner_id: str = "human_root") -> dict:
+        try:
+            return service.delete_chat_session(session_id, owner_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chat session not found") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    @router.post("/chat/sessions/{session_id}/messages")
+    def send_chat_session_message(
+        session_id: str,
+        payload: ChatSessionMessageCreateRequest,
+    ) -> dict:
+        try:
+            return service.send_chat_session_message(
+                session_id=session_id,
+                content=payload.content,
+                mode=payload.mode,
+                model_name=payload.model_name,
+                provider=payload.provider,
+                owner_id=payload.owner_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chat session not found") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ModelProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     @router.post("/chat/actions/{proposal_id}/execute")
     def execute_chat_action(proposal_id: str) -> dict:
         try:
             return service.execute_chat_action(proposal_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="chat action proposal not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/chat/actions/{proposal_id}/cancel")
+    def cancel_chat_action(proposal_id: str) -> dict:
+        try:
+            return service.cancel_chat_action(proposal_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="chat action proposal not found") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

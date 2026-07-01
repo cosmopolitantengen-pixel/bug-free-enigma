@@ -143,6 +143,35 @@ class ChatRespondRequest(BaseModel):
     provider: str | None = None
 
 
+class ChatSessionCreateRequest(BaseModel):
+    title: str = Field(default="New chat", max_length=80)
+    owner_id: str = "human_root"
+
+
+class ChatSessionMessageCreateRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=12000)
+    mode: Literal["auto", "chat", "action"] = "auto"
+    model_name: str | None = None
+    provider: str | None = None
+    owner_id: str = "human_root"
+
+
+class ChatSessionImportMessageRequest(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=12000)
+
+
+class ChatSessionImportItemRequest(BaseModel):
+    title: str = Field(default="Imported chat", max_length=80)
+    legacy_id: str | None = Field(default=None, max_length=200)
+    messages: list[ChatSessionImportMessageRequest] = Field(default_factory=list, max_length=200)
+
+
+class ChatSessionsImportRequest(BaseModel):
+    sessions: list[ChatSessionImportItemRequest] = Field(max_length=50)
+    owner_id: str = "human_root"
+
+
 class IncidentUpdateRequest(BaseModel):
     actor_id: str = "human_root"
     note: str | None = None

@@ -5,6 +5,7 @@ from app.chat.planner import (
     prefers_conversation,
     should_use_model_planner,
 )
+from app.chat.sessions import ChatMessageRecord, ChatSessionRecord, ChatSessionStore
 
 __all__ = [
     "ChatActionPlan",
@@ -12,4 +13,7 @@ __all__ = [
     "parse_chat_action_plan",
     "prefers_conversation",
     "should_use_model_planner",
+    "ChatMessageRecord",
+    "ChatSessionRecord",
+    "ChatSessionStore",
 ]

@@ -136,9 +136,48 @@ function createId(prefix: string) {
   return `${prefix}-${suffix}`;
 }
 
-function createChatSession(): ChatSession {
-  const now = new Date().toISOString();
-  return { id: createId("chat"), title: "新对话", messages: [], updatedAt: now };
+function chatActionFromApi(value: ApiRecord | undefined): ChatAction | undefined {
+  if (!value) return undefined;
+  const workflowId = text(value.workflow_id);
+  return {
+    proposalId: text(value.proposal_id),
+    workflowId,
+    workflowName: CATALOG_LABELS[workflowId] ?? text(value.workflow_name),
+    title: text(value.title),
+    description: text(value.description),
+    input: (value.input as ApiRecord | undefined) ?? {},
+    purpose: text(value.purpose),
+    status: text(value.status, "pending") as ChatAction["status"],
+    taskId: text(value.task_id, "") || undefined,
+    approvalId: text(value.approval_id, "") || undefined,
+    riskLevel: text(value.risk_level, "") || undefined,
+    approvalInput: (value.approval_input as ApiRecord | undefined) ?? undefined,
+  };
+}
+
+function chatMessageFromApi(value: ApiRecord): ChatMessage {
+  return {
+    id: text(value.message_id),
+    role: text(value.role) as ChatMessage["role"],
+    content: text(value.content),
+    createdAt: text(value.created_at),
+    provider: text(value.provider, "") || undefined,
+    model: text(value.model, "") || undefined,
+    totalTokens: value.total_tokens == null ? undefined : Number(value.total_tokens),
+    cost: value.cost == null ? undefined : Number(value.cost),
+    fallbackUsed: value.fallback_used == null ? undefined : Boolean(value.fallback_used),
+    failed: Boolean(value.failed),
+    action: chatActionFromApi(value.action as ApiRecord | undefined),
+  };
+}
+
+function chatSessionFromApi(value: ApiRecord): ChatSession {
+  return {
+    id: text(value.session_id),
+    title: text(value.title, "新对话"),
+    messages: ((value.messages as ApiRecord[] | undefined) ?? []).map(chatMessageFromApi),
+    updatedAt: text(value.updated_at),
+  };
 }
 
 function chatActionResult(result: ApiRecord): string {
@@ -310,7 +349,23 @@ export function OperationsConsole() {
     return result;
   }, [apiBase, apiToken, refresh]);
 
-  const callChat = useCallback(async (body: ApiRecord) => apiRequest<ApiRecord>(apiBase, "/chat/respond", {
+  const listChatSessions = useCallback(async () => apiRequest<ApiRecord[]>(apiBase, "/chat/sessions", {}, apiToken), [apiBase, apiToken]);
+
+  const createChatSession = useCallback(async () => apiRequest<ApiRecord>(apiBase, "/chat/sessions", {
+    method: "POST",
+    body: JSON.stringify({ title: "新对话" }),
+  }, apiToken), [apiBase, apiToken]);
+
+  const importChatSessions = useCallback(async (sessions: ApiRecord[]) => apiRequest<ApiRecord[]>(apiBase, "/chat/sessions/import", {
+    method: "POST",
+    body: JSON.stringify({ sessions }),
+  }, apiToken), [apiBase, apiToken]);
+
+  const deleteChatSession = useCallback(async (sessionId: string) => apiRequest<ApiRecord>(apiBase, `/chat/sessions/${sessionId}`, {
+    method: "DELETE",
+  }, apiToken), [apiBase, apiToken]);
+
+  const callChat = useCallback(async (sessionId: string, body: ApiRecord) => apiRequest<ApiRecord>(apiBase, `/chat/sessions/${sessionId}/messages`, {
     method: "POST",
     body: JSON.stringify(body),
   }, apiToken), [apiBase, apiToken]);
@@ -336,6 +391,10 @@ export function OperationsConsole() {
     await refresh();
     return result;
   }, [apiBase, apiToken, refresh]);
+
+  const cancelChatAction = useCallback(async (proposalId: string) => apiRequest<ApiRecord>(apiBase, `/chat/actions/${proposalId}/cancel`, {
+    method: "POST",
+  }, apiToken), [apiBase, apiToken]);
 
   const saveApiBase = (event: FormEvent) => {
     event.preventDefault();
@@ -400,7 +459,7 @@ export function OperationsConsole() {
 
         {loading && Object.keys(data.summary).length === 0 ? <LoadingState /> : (
           <>
-            {view === "chat" && <ChatView data={data} callChat={callChat} executeChatAction={executeChatAction} decideChatAction={decideChatAction} fail={setError} />}
+            {view === "chat" && <ChatView data={data} listChatSessions={listChatSessions} createChatSession={createChatSession} importChatSessions={importChatSessions} deleteChatSession={deleteChatSession} callChat={callChat} executeChatAction={executeChatAction} decideChatAction={decideChatAction} cancelChatAction={cancelChatAction} fail={setError} />}
             {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} />}
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
@@ -414,11 +473,16 @@ export function OperationsConsole() {
   );
 }
 
-type ChatCall = (body: ApiRecord) => Promise<ApiRecord>;
+type ChatListCall = () => Promise<ApiRecord[]>;
+type ChatCreateCall = () => Promise<ApiRecord>;
+type ChatImportCall = (sessions: ApiRecord[]) => Promise<ApiRecord[]>;
+type ChatDeleteCall = (sessionId: string) => Promise<ApiRecord>;
+type ChatCall = (sessionId: string, body: ApiRecord) => Promise<ApiRecord>;
 type ChatActionCall = (proposalId: string) => Promise<ApiRecord>;
 type ChatDecisionCall = (taskId: string, decision: "approved" | "rejected") => Promise<ApiRecord>;
+type ChatCancelCall = (proposalId: string) => Promise<ApiRecord>;
 
-function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }: { data: DataSet; callChat: ChatCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; fail: (v: string) => void }) {
+function ChatView({ data, listChatSessions, createChatSession, importChatSessions, deleteChatSession, callChat, executeChatAction, decideChatAction, cancelChatAction, fail }: { data: DataSet; listChatSessions: ChatListCall; createChatSession: ChatCreateCall; importChatSessions: ChatImportCall; deleteChatSession: ChatDeleteCall; callChat: ChatCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; cancelChatAction: ChatCancelCall; fail: (v: string) => void }) {
   const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
   const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
   const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
@@ -434,24 +498,57 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
   const availableModels = allowedModels[provider] ?? [];
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
 
-  useEffect(() => {
-    let loaded: ChatSession[] = [];
-    try {
-      const stored = window.localStorage.getItem(CHAT_STORAGE_KEY);
-      const parsed = stored ? JSON.parse(stored) : [];
-      if (Array.isArray(parsed)) loaded = parsed as ChatSession[];
-    } catch {
-      window.localStorage.removeItem(CHAT_STORAGE_KEY);
-    }
-    const next = loaded.length ? loaded : [createChatSession()];
+  const loadServerSessions = useCallback(async (preferredId?: string) => {
+    const records = await listChatSessions();
+    const next = records.map(chatSessionFromApi);
     setSessions(next);
-    setActiveSessionId(next[0].id);
-    setChatReady(true);
-  }, []);
+    setActiveSessionId((current) => {
+      const preferred = preferredId || current;
+      return next.some((session) => session.id === preferred) ? preferred : next[0]?.id ?? "";
+    });
+    return next;
+  }, [listChatSessions]);
 
   useEffect(() => {
-    if (chatReady) window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(sessions));
-  }, [chatReady, sessions]);
+    let cancelled = false;
+    const initialize = async () => {
+      try {
+        let records = await listChatSessions();
+        if (!records.length) {
+          let legacy: ApiRecord[] = [];
+          try {
+            const stored = window.localStorage.getItem(CHAT_STORAGE_KEY);
+            const parsed = stored ? JSON.parse(stored) : [];
+            if (Array.isArray(parsed)) {
+              legacy = parsed.map((session) => ({
+                legacy_id: text(session?.id, ""),
+                title: text(session?.title, "导入的对话"),
+                messages: Array.isArray(session?.messages)
+                  ? session.messages.map((message: ApiRecord) => ({ role: message.role, content: message.content }))
+                  : [],
+              }));
+            }
+          } catch {
+            legacy = [];
+          }
+          if (legacy.length) records = await importChatSessions(legacy);
+        }
+        window.localStorage.removeItem(CHAT_STORAGE_KEY);
+        if (!records.length) records = [await createChatSession()];
+        if (!cancelled) {
+          const next = records.map(chatSessionFromApi);
+          setSessions(next);
+          setActiveSessionId(next[0].id);
+        }
+      } catch {
+        // The parent console already reports API read failures with endpoint context.
+      } finally {
+        if (!cancelled) setChatReady(true);
+      }
+    };
+    void initialize();
+    return () => { cancelled = true; };
+  }, [createChatSession, importChatSessions, listChatSessions]);
 
   useEffect(() => {
     if (!providerNames.includes(provider)) {
@@ -468,20 +565,30 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
     chatEndRef.current?.scrollIntoView({ block: "end" });
   }, [activeSession?.messages.length, sendingChatId]);
 
-  const startNewChat = () => {
-    const next = createChatSession();
-    setSessions((current) => [next, ...current]);
-    setActiveSessionId(next.id);
-    setDraft("");
+  const startNewChat = async () => {
+    try {
+      const next = chatSessionFromApi(await createChatSession());
+      setSessions((current) => [next, ...current]);
+      setActiveSessionId(next.id);
+      setDraft("");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "新建对话失败");
+    }
   };
 
-  const deleteChat = (sessionId: string) => {
-    setSessions((current) => {
-      const remaining = current.filter((session) => session.id !== sessionId);
-      const next = remaining.length ? remaining : [createChatSession()];
-      if (sessionId === activeSessionId) setActiveSessionId(next[0].id);
-      return next;
-    });
+  const deleteChat = async (sessionId: string) => {
+    try {
+      await deleteChatSession(sessionId);
+      let next = await loadServerSessions();
+      if (!next.length) {
+        const created = chatSessionFromApi(await createChatSession());
+        next = [created];
+        setSessions(next);
+        setActiveSessionId(created.id);
+      }
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "删除对话失败");
+    }
   };
 
   const sendMessage = async (event: FormEvent) => {
@@ -490,72 +597,28 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
     if (!content || !activeSession || sendingChatId || !model) return;
 
     fail("");
-    const now = new Date().toISOString();
-    const userMessage: ChatMessage = { id: createId("message"), role: "user", content, createdAt: now };
-    const nextMessages = [...activeSession.messages, userMessage];
     const sessionId = activeSession.id;
     setDraft("");
     setSendingChatId(sessionId);
-    setSessions((current) => current.map((session) => session.id === sessionId ? {
-      ...session,
-      title: session.messages.length ? session.title : content.slice(0, 28),
-      messages: nextMessages,
-      updatedAt: now,
-    } : session));
 
     try {
-      const result = await callChat({
-        messages: nextMessages.slice(-20).map((message) => ({ role: message.role, content: message.content })),
+      const result = await callChat(sessionId, {
+        content,
         mode: chatMode,
         provider,
         model_name: model,
       });
-      const routing = (result.routing as ApiRecord | undefined) ?? {};
-      const usage = (result.usage as ApiRecord | undefined) ?? {};
-      const cost = (result.cost_log as ApiRecord | undefined) ?? {};
-      const hasUsage = Boolean(result.usage);
-      const proposed = (result.action as ApiRecord | undefined);
-      const proposedWorkflowId = text(proposed?.workflow_id);
-      const action: ChatAction | undefined = proposed ? {
-        proposalId: text(proposed.proposal_id),
-        workflowId: proposedWorkflowId,
-        workflowName: CATALOG_LABELS[proposedWorkflowId] ?? text(proposed.workflow_name),
-        title: text(proposed.title),
-        description: text(proposed.description),
-        input: (proposed.input as ApiRecord | undefined) ?? {},
-        purpose: text(proposed.purpose),
-        status: "pending",
-      } : undefined;
-      const reply: ChatMessage = {
-        id: createId("message"),
-        role: "assistant",
-        content: action
-          ? `我可以调用“${action.workflowName}”来${action.purpose}。确认后才会创建任务并执行。`
-          : text(result.message ?? result.output, result.blocked ? "本次请求被预算策略阻止，请调整预算或模型后重试。" : "模型没有返回内容。"),
-        createdAt: new Date().toISOString(),
-        provider: hasUsage ? text(routing.actual_provider ?? usage.provider, provider) : undefined,
-        model: hasUsage ? text(usage.model_name, model) : undefined,
-        totalTokens: hasUsage ? Number(usage.total_tokens ?? 0) : undefined,
-        cost: hasUsage ? Number(cost.amount ?? 0) : undefined,
-        fallbackUsed: hasUsage ? Boolean(routing.fallback_used) : undefined,
-        failed: Boolean(result.blocked),
-        action,
-      };
-      setSessions((current) => current.map((session) => session.id === sessionId ? {
-        ...session,
-        messages: [...session.messages, reply],
-        updatedAt: reply.createdAt,
-      } : session));
+      const serverSession = result.session as ApiRecord | undefined;
+      if (serverSession) {
+        const next = chatSessionFromApi(serverSession);
+        setSessions((current) => [next, ...current.filter((session) => session.id !== next.id)]);
+        setActiveSessionId(next.id);
+      } else {
+        await loadServerSessions(sessionId);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "模型调用失败";
-      const failedReply: ChatMessage = {
-        id: createId("message"), role: "assistant", content: `发送失败：${message}`, createdAt: new Date().toISOString(), failed: true,
-      };
-      setSessions((current) => current.map((session) => session.id === sessionId ? {
-        ...session,
-        messages: [...session.messages, failedReply],
-        updatedAt: failedReply.createdAt,
-      } : session));
+      try { await loadServerSessions(sessionId); } catch { /* Keep the last visible state. */ }
       fail(message);
     } finally {
       setSendingChatId(null);
@@ -581,6 +644,13 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
     updateAction(sessionId, message.id, { status: "executing" });
     try {
       const result = await executeChatAction(action.proposalId);
+      const serverSession = result.chat_session as ApiRecord | undefined;
+      if (serverSession) {
+        const next = chatSessionFromApi(serverSession);
+        setSessions((current) => [next, ...current.filter((session) => session.id !== next.id)]);
+        setActiveSessionId(next.id);
+        return;
+      }
       const task = (result.task as ApiRecord | undefined) ?? {};
       const approval = (result.approval as ApiRecord | undefined) ?? {};
       const approvalRequest = (approval.request as ApiRecord | undefined) ?? {};
@@ -634,6 +704,13 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
     updateAction(sessionId, message.id, { status: "deciding" });
     try {
       const result = await decideChatAction(taskId, decision);
+      const serverSession = result.chat_session as ApiRecord | undefined;
+      if (serverSession) {
+        const next = chatSessionFromApi(serverSession);
+        setSessions((current) => [next, ...current.filter((session) => session.id !== next.id)]);
+        setActiveSessionId(next.id);
+        return;
+      }
       const task = (result.task as ApiRecord | undefined) ?? {};
       const resumedToolRun = (result.tool_run as ApiRecord | undefined) ?? {};
       const rejected = decision === "rejected" || text(result.outcome) === "rejected" || text(task.status) === "cancelled";
@@ -666,17 +743,32 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
     }
   };
 
-  const cancelAction = (message: ChatMessage) => {
+  const cancelAction = async (message: ChatMessage) => {
     if (!activeSession || !message.action || message.action.status !== "pending") return;
-    updateAction(activeSession.id, message.id, { status: "cancelled" });
+    const sessionId = activeSession.id;
+    updateAction(sessionId, message.id, { status: "cancelled" });
+    try {
+      const result = await cancelChatAction(message.action.proposalId);
+      const serverSession = result.session as ApiRecord | undefined;
+      if (serverSession) {
+        const next = chatSessionFromApi(serverSession);
+        setSessions((current) => [next, ...current.filter((session) => session.id !== next.id)]);
+      } else {
+        await loadServerSessions(sessionId);
+      }
+    } catch (error) {
+      updateAction(sessionId, message.id, { status: "pending" });
+      fail(error instanceof Error ? error.message : "取消行动失败");
+    }
   };
 
-  if (!chatReady || !activeSession) return <LoadingState />;
+  if (!chatReady) return <LoadingState />;
+  if (!activeSession) return <EmptyState message="服务端对话暂不可用，请检查 API 连接后重试。" />;
 
   return (
     <section className="chat-layout" aria-label="AI 对话工作区">
       <aside className="chat-sidebar">
-        <button className="button chat-new-button" onClick={startNewChat}><Plus />新对话</button>
+        <button className="button chat-new-button" onClick={() => void startNewChat()}><Plus />新对话</button>
         <div className="chat-session-list" aria-label="对话列表">
           {sessions.map((session) => (
             <div className={`chat-session ${session.id === activeSession.id ? "active" : ""}`} key={session.id}>
@@ -684,7 +776,7 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
                 <strong>{session.title || "新对话"}</strong>
                 <span>{session.messages.length ? `${session.messages.length} 条消息` : "尚未开始"}</span>
               </button>
-              <button className="icon-button" onClick={() => deleteChat(session.id)} aria-label={`删除对话 ${session.title}`} title="删除对话"><Trash2 /></button>
+              <button className="icon-button" onClick={() => void deleteChat(session.id)} aria-label={`删除对话 ${session.title}`} title="删除对话"><Trash2 /></button>
             </div>
           ))}
         </div>
@@ -694,7 +786,7 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
         <div className="chat-toolbar">
           <div>
             <strong>{activeSession.title}</strong>
-            <span>对话记录保存在当前浏览器</span>
+            <span>对话、模型用量和行动状态已由服务端持久保存</span>
           </div>
           <div className="chat-model-controls">
             <label><span>模式</span><select aria-label="对话模式" value={chatMode} onChange={(event) => setChatMode(event.target.value as "auto" | "chat" | "action")}><option value="auto">自动判断</option><option value="chat">只聊天</option><option value="action">计划行动</option></select></label>
@@ -715,7 +807,7 @@ function ChatView({ data, callChat, executeChatAction, decideChatAction, fail }:
               {message.action && <div className={`chat-action-card ${message.action.status}`}>
                 <div className="chat-action-heading"><Workflow /><div><strong>{message.action.workflowName}</strong><span>{message.action.purpose}</span></div><StatusPill value={message.action.status} /></div>
                 <div className="chat-action-detail"><span>执行后将创建受控任务</span><code>{message.action.workflowId}</code></div>
-                {message.action.status === "pending" && <div className="chat-action-buttons"><button className="small-button" onClick={() => cancelAction(message)}>取消</button><button className="button" onClick={() => void executeAction(message)}><Play />确认执行</button></div>}
+                {message.action.status === "pending" && <div className="chat-action-buttons"><button className="small-button" onClick={() => void cancelAction(message)}>取消</button><button className="button" onClick={() => void executeAction(message)}><Play />确认执行</button></div>}
                 {message.action.status === "waiting_approval" && <div className="chat-approval-block">
                   <div className="chat-approval-facts"><span>风险：{formatValue(message.action.riskLevel, "待评估")}</span><span>审批：{shortId(message.action.approvalId)}</span></div>
                   <code>{chatApprovalPreview(message.action)}</code>

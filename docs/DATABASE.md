@@ -101,9 +101,11 @@ It currently stores:
 
 Schema migration `0006_skill_runtime` adds durable Skill Run lifecycle records, including input, result or error, risk, approval linkage, and completion timestamps.
 
+Schema migration `0007_chat_sessions` adds durable Human Root conversations. A session stores bounded display messages, model usage/cost metadata, and governed action-card state so pending confirmation can recover after a process restart. Legacy browser imports never restore executable action parameters.
+
 User records store PBKDF2 password hashes, not plaintext passwords.
 
-SQLite initialization records the baseline migration `0001_initial_local_state`, applies migrations through `0006_skill_runtime`, and sets `PRAGMA user_version` to `6`. The migrations protect append-only history, add the unique restore-approval ledger, durable schedules and events, formal Agent and Skill catalogs, and Skill Run lifecycle records. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
+SQLite initialization records the baseline migration `0001_initial_local_state`, applies migrations through `0007_chat_sessions`, and sets `PRAGMA user_version` to `7`. The migrations protect append-only history, add the unique restore-approval ledger, durable schedules and events, formal Agent and Skill catalogs, Skill Run lifecycle records, and server-owned chat sessions. PostgreSQL records the corresponding chat-session migration as schema version `4`. The `GET /database/schema` API exposes the active backend, schema version, and applied migration ledger for operational checks.
 
 Skill and Agent proposal payloads include approval state plus sandbox status, notes, and sandbox timestamp. The first implementation stores proposal state as JSON so the future migration layer can promote fields into relational columns when needed.
 

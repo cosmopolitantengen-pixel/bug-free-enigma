@@ -10,7 +10,7 @@ from app.persistence import sqlite_store as codecs
 from app.services.serializers import to_plain
 
 
-POSTGRES_SCHEMA_VERSION = 3
+POSTGRES_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -108,6 +108,9 @@ _SPECS = {
         codecs._scheduled_execution_from_plain,
         append_only=True,
     ),
+    "chat_sessions": _RecordSpec(
+        "chat_sessions", "session_id", "updated_at", codecs._chat_session_from_plain
+    ),
 }
 
 _RESTORE_COLLECTIONS = {
@@ -136,9 +139,12 @@ _RESTORE_COLLECTIONS = {
     "agent_conflicts": "agent_conflicts",
     "task_reviews": "task_reviews",
     "scheduled_jobs": "scheduled_jobs",
+    "chat_sessions": "chat_sessions",
 }
 
-_OPTIONAL_LEGACY_COLLECTIONS = {"agents", "skills", "skill_runs", "scheduled_jobs"}
+_OPTIONAL_LEGACY_COLLECTIONS = {
+    "agents", "skills", "skill_runs", "scheduled_jobs", "chat_sessions"
+}
 
 
 class PostgresStateStore:
@@ -202,6 +208,14 @@ class PostgresStateStore:
                     "0003_pgvector_knowledge",
                     3,
                     "Enable pgvector and create indexed knowledge embeddings.",
+                )
+            if "0004_chat_sessions" not in applied:
+                self._apply_chat_session_schema(connection)
+                self._record_migration(
+                    connection,
+                    "0004_chat_sessions",
+                    4,
+                    "Persist Human Root chat sessions and action state.",
                 )
 
     def _apply_state_schema(self, connection: Any) -> None:
@@ -282,6 +296,20 @@ class PostgresStateStore:
             CREATE INDEX IF NOT EXISTS knowledge_embeddings_cosine_idx
             ON knowledge_embeddings USING hnsw (embedding vector_cosine_ops)
             """
+        )
+
+    def _apply_chat_session_schema(self, connection: Any) -> None:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                record_id TEXT PRIMARY KEY,
+                sort_key TEXT NOT NULL,
+                payload_json JSONB NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS chat_sessions_sort_key_idx ON chat_sessions (sort_key)"
         )
 
     def _record_migration(
@@ -390,6 +418,7 @@ class PostgresStateStore:
     def load_domain_events(self): return self._load("domain_events")
     def load_scheduled_jobs(self): return self._load("scheduled_jobs")
     def load_scheduled_executions(self): return self._load("scheduled_executions")
+    def load_chat_sessions(self): return self._load("chat_sessions")
 
     def load_budget_policy(self):
         with self._connect() as connection:
@@ -430,6 +459,11 @@ class PostgresStateStore:
     def save_domain_event(self, value): self._save("domain_events", value)
     def save_scheduled_job(self, value): self._save("scheduled_jobs", value)
     def save_scheduled_execution(self, value): self._save("scheduled_executions", value)
+    def save_chat_session(self, value): self._save("chat_sessions", value)
+
+    def delete_chat_session(self, session_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM chat_sessions WHERE record_id = %s", (session_id,))
 
     def save_budget_policy(self, policy: Any) -> None:
         with self._connect() as connection:

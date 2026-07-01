@@ -28,9 +28,9 @@ class PersistenceTests(unittest.TestCase):
             store = SQLiteStateStore(db_path)
             reloaded = SQLiteStateStore(db_path)
 
-            self.assertEqual(store.schema_version(), 6)
-            self.assertEqual(reloaded.schema_version(), 6)
-            self.assertEqual(len(reloaded.list_schema_migrations()), 6)
+            self.assertEqual(store.schema_version(), 7)
+            self.assertEqual(reloaded.schema_version(), 7)
+            self.assertEqual(len(reloaded.list_schema_migrations()), 7)
             self.assertEqual(reloaded.list_schema_migrations()[0]["migration_id"], "0001_initial_local_state")
             self.assertEqual(reloaded.list_schema_migrations()[0]["version"], 1)
             self.assertEqual(reloaded.list_schema_migrations()[1]["migration_id"], "0002_audit_append_only_guards")
@@ -52,6 +52,8 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(reloaded.list_schema_migrations()[4]["version"], 5)
             self.assertEqual(reloaded.list_schema_migrations()[5]["migration_id"], "0006_skill_runtime")
             self.assertEqual(reloaded.list_schema_migrations()[5]["version"], 6)
+            self.assertEqual(reloaded.list_schema_migrations()[6]["migration_id"], "0007_chat_sessions")
+            self.assertEqual(reloaded.list_schema_migrations()[6]["version"], 7)
 
             with closing(sqlite3.connect(db_path)) as connection:
                 user_version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -68,7 +70,7 @@ class PersistenceTests(unittest.TestCase):
                     ).fetchall()
                 }
 
-            self.assertEqual(user_version, 6)
+            self.assertEqual(user_version, 7)
             self.assertIn("schema_migrations", table_names)
             self.assertIn("audit_logs", table_names)
             self.assertIn("workflow_runs", table_names)
@@ -79,6 +81,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("agents", table_names)
             self.assertIn("skills", table_names)
             self.assertIn("skill_runs", table_names)
+            self.assertIn("chat_sessions", table_names)
             self.assertIn("audit_logs_no_update", trigger_names)
             self.assertIn("audit_logs_no_delete", trigger_names)
             self.assertIn("domain_events_no_update", trigger_names)
@@ -159,6 +162,48 @@ class PersistenceTests(unittest.TestCase):
             self.assertIn("training_outline_skill_v1", agents["training_agent_v1"]["allowed_skills"])
             self.assertIn("skill_registered", audit_types)
             self.assertIn("agent_registered", audit_types)
+
+    def test_chat_session_and_pending_action_survive_sqlite_restart(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "chat.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            session = first.post("/chat/sessions", json={"title": "Persistent chat"}).json()
+            proposed = first.post(
+                f"/chat/sessions/{session['session_id']}/messages",
+                json={"content": "git status", "mode": "auto"},
+            ).json()
+            proposal_id = proposed["message"]["action"]["proposal_id"]
+
+            self.assertEqual(first.get("/tasks").json(), [])
+
+            second = TestClient(create_app(sqlite_path=db_path))
+            restored = second.get("/chat/sessions").json()
+            executed = second.post(f"/chat/actions/{proposal_id}/execute")
+
+            self.assertEqual(len(restored), 1)
+            self.assertEqual(len(restored[0]["messages"]), 2)
+            self.assertEqual(restored[0]["messages"][-1]["action"]["status"], "pending")
+            self.assertEqual(executed.status_code, 200)
+            self.assertEqual(executed.json()["task"]["status"], "completed")
+            self.assertEqual(executed.json()["chat_session"]["messages"][1]["action"]["status"], "completed")
+            self.assertEqual(len(executed.json()["chat_session"]["messages"]), 3)
+
+            third = TestClient(create_app(sqlite_path=db_path))
+            final_session = third.get("/chat/sessions").json()[0]
+            self.assertEqual(final_session["messages"][1]["action"]["status"], "completed")
+            self.assertIn("Action completed", final_session["messages"][2]["content"])
+
+    def test_deleted_chat_session_stays_deleted_after_restart(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "deleted_chat.db")
+            first = TestClient(create_app(sqlite_path=db_path))
+            session_id = first.post("/chat/sessions", json={}).json()["session_id"]
+
+            deleted = first.delete(f"/chat/sessions/{session_id}")
+            second = TestClient(create_app(sqlite_path=db_path))
+
+            self.assertEqual(deleted.status_code, 200)
+            self.assertEqual(second.get("/chat/sessions").json(), [])
 
     def test_sqlite_audit_logs_are_append_only_at_database_layer(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -615,6 +660,7 @@ class PersistenceTests(unittest.TestCase):
             db_path = os.path.join(tmpdir, "backups.db")
             first = TestClient(create_app(sqlite_path=db_path))
             task = first.post("/tasks", json={"title": "Snapshot task", "description": "Persist backup snapshot."})
+            chat = first.post("/chat/sessions", json={"title": "Snapshot chat"})
             created = first.post(
                 "/backups",
                 json={"actor_id": "human_root", "reason": "Persist backup."},
@@ -630,6 +676,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(len(backups.json()), 1)
             self.assertEqual(backups.json()[0]["backup_id"], created.json()["backup_id"])
             self.assertEqual(backups.json()[0]["snapshot"]["tasks"][0]["task_id"], task.json()["task_id"])
+            self.assertEqual(backups.json()[0]["snapshot"]["chat_sessions"][0]["session_id"], chat.json()["session_id"])
             self.assertEqual(backups.json()[0]["backup_checksum"], created.json()["backup_checksum"])
             self.assertEqual(dashboard.json()["backup_count"], 1)
             self.assertEqual(audit_logs.json()[-1]["event_type"], "backup_created")
