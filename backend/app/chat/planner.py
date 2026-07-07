@@ -20,6 +20,7 @@ ALLOWED_INTENTS = {
     "frontend_typecheck",
     "backend_tests",
     "agent_run",
+    "create_goal",
 }
 
 ALLOWED_TARGET_AGENTS = {
@@ -125,6 +126,7 @@ def build_chat_planner_prompt(message: str) -> str:
             "frontend_typecheck: run the fixed frontend TypeScript check",
             "backend_tests: run the fixed backend test suite",
             "agent_run: investigate or complete a multi-step workspace objective using governed tools",
+            "create_goal: create a persistent strategic goal from the user's message after confirmation",
             "Never return a Tool ID, command, path, URL, shell text, approval decision, or executable input.",
             "target_agent may only be document_agent_v1, product_agent_v1, tech_agent_v1, project_manager_agent_v1, or null.",
             "Use query only for code_search; otherwise return null.",

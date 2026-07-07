@@ -68,6 +68,16 @@ CHAT_ACTION_MARKERS = (
     "审批", "批准", "许可", "文档", "方案", "报告", "说明",
 )
 
+GOAL_CREATE_MARKERS = (
+    "set goal",
+    "create goal",
+    "new goal",
+    "\u8bbe\u7f6e\u76ee\u6807",
+    "\u8bbe\u5b9a\u76ee\u6807",
+    "\u521b\u5efa\u76ee\u6807",
+    "\u65b0\u76ee\u6807",
+)
+
 
 @dataclass
 class CompanyApplicationService:
@@ -2334,6 +2344,7 @@ class CompanyApplicationService:
                 "Reply naturally and helpfully in the same language as the user.",
                 "Discuss and develop ideas without creating tasks unless the user explicitly asks for action.",
                 "Do not claim that an operational action was executed during ordinary conversation.",
+                self._active_goal_context(),
                 "Conversation:",
                 transcript,
                 "Assistant:",
@@ -2356,6 +2367,21 @@ class CompanyApplicationService:
                 else result.get("output")
             ),
         }
+
+    def _active_goal_context(self) -> str:
+        active_goals = self.company_os.goals.list(status=GoalStatus.ACTIVE.value)
+        if not active_goals:
+            return "Active strategic goals: none."
+        encoded = [
+            {
+                "goal_id": goal.goal_id,
+                "title": goal.title,
+                "target_metric": goal.target_metric,
+                "progress": f"{goal.current_value}/{goal.target_value}",
+            }
+            for goal in active_goals[-5:]
+        ]
+        return f"Active strategic goals: {json.dumps(encoded, ensure_ascii=False)}"
 
     @staticmethod
     def _chat_message_from_response(response: dict) -> ChatMessageRecord:
@@ -2394,7 +2420,9 @@ class CompanyApplicationService:
                 }
                 if not required.issubset(action) or not isinstance(action.get("input"), dict):
                     continue
-                if action.get("kind") != "agent_run":
+                if action.get("kind") == "strategic_goal":
+                    pass
+                elif action.get("kind") != "agent_run":
                     try:
                         self.company_os.workflows.get(str(action["workflow_id"]))
                     except KeyError:
@@ -2406,6 +2434,17 @@ class CompanyApplicationService:
 
     @staticmethod
     def _chat_action_result_message(result: dict, status: str) -> tuple[str, bool]:
+        goal = result.get("goal") or {}
+        if goal:
+            if status == "failed":
+                return f"Goal action did not complete: {result.get('output') or 'goal creation failed'}", True
+            return (
+                "Strategic goal created.\n"
+                f"{goal.get('title', 'Untitled goal')} ({goal.get('goal_id', 'unknown')})\n"
+                f"Metric: {goal.get('target_metric', 'milestones_completed')} "
+                f"{goal.get('current_value', 0)}/{goal.get('target_value', 1)}",
+                False,
+            )
         task = result.get("task") or {}
         if status == "waiting_approval":
             return f"Task created and waiting for Human Root approval: {task.get('task_id', 'unknown')}", False
@@ -2574,13 +2613,15 @@ class CompanyApplicationService:
             return None
         if mode == "auto" and prefers_conversation(message):
             return None
-        if not any(marker in normalized for marker in CHAT_ACTION_MARKERS):
+        if not any(marker in normalized for marker in (*CHAT_ACTION_MARKERS, *GOAL_CREATE_MARKERS)):
             return None
 
         workflow_id = "task_planning_v1"
         workflow_input: dict = {}
         purpose = "规划并拆分任务"
         workspace_tool = self._chat_workspace_tool(message, normalized)
+        if any(marker in normalized for marker in GOAL_CREATE_MARKERS):
+            return self._build_goal_create_proposal(message, "rules")
         if workspace_tool is not None:
             workflow_id = "tool_call_v1"
             workflow_input, purpose = workspace_tool
@@ -2645,6 +2686,8 @@ class CompanyApplicationService:
             return self._build_agent_run_proposal(
                 message, provider, model_name, planner
             )
+        if plan.intent == "create_goal":
+            return self._build_goal_create_proposal(message, planner)
         workflow_id = "task_planning_v1"
         workflow_input: dict = {}
         purpose = "规划并拆分任务"
@@ -2739,6 +2782,50 @@ class CompanyApplicationService:
             purpose,
             planner,
         )
+
+    def _build_goal_create_proposal(self, message: str, planner: str) -> dict:
+        title = self._extract_goal_title(message)
+        return {
+            "proposal_id": new_id("chat_action"),
+            "kind": "strategic_goal",
+            "workflow_id": "strategic_goal_v1",
+            "workflow_name": "Strategic Goal",
+            "title": title,
+            "description": message,
+            "input": {
+                "title": title,
+                "description": message,
+                "owner_agent": "ceo_agent_v1",
+                "target_metric": "milestones_completed",
+                "target_value": 1,
+                "current_value": 0,
+            },
+            "purpose": "create a persistent strategic goal for Human Root tracking",
+            "status": "pending",
+            "planner": planner,
+            "summary": (
+                f"I can create a persistent strategic goal named \"{title}\". "
+                "It will be audited and shown in the Goals/Dashboard state after confirmation."
+            ),
+        }
+
+    @staticmethod
+    def _extract_goal_title(message: str) -> str:
+        compact = " ".join(message.split()).strip()
+        lowered = compact.lower()
+        for marker in GOAL_CREATE_MARKERS:
+            index = lowered.find(marker)
+            if index < 0:
+                continue
+            candidate = compact[index + len(marker):].strip(" \t:-:\uff1a")
+            if candidate:
+                return candidate[:80]
+        for separator in ("\uff1a", ":", "-", "\n"):
+            if separator in compact:
+                candidate = compact.split(separator, 1)[1].strip()
+                if candidate:
+                    return candidate[:80]
+        return (compact or "AI Company OS operating goal")[:80]
 
     def _build_chat_proposal(
         self,
@@ -2881,6 +2968,8 @@ class CompanyApplicationService:
                 with self._chat_action_lock:
                     proposal["status"] = "failed"
                 raise
+        if proposal.get("kind") == "strategic_goal":
+            return self._execute_chat_goal_creation(proposal_id, proposal)
 
         try:
             result = self.run_registered_workflow(
@@ -2924,6 +3013,55 @@ class CompanyApplicationService:
                 result=status,
                 input_ref=proposal_id,
                 output_ref=task.get("task_id"),
+            )
+        )
+        self.sync()
+        return result
+
+    def _execute_chat_goal_creation(self, proposal_id: str, proposal: dict) -> dict:
+        goal_input = proposal.get("input")
+        if not isinstance(goal_input, dict):
+            with self._chat_action_lock:
+                proposal["status"] = "failed"
+            raise ValueError("strategic goal proposal input is invalid")
+        try:
+            goal = self.create_strategic_goal(
+                title=str(goal_input.get("title") or proposal.get("title") or "AI Company OS operating goal"),
+                description=str(goal_input.get("description") or proposal.get("description") or ""),
+                owner_agent=str(goal_input.get("owner_agent") or "ceo_agent_v1"),
+                target_metric=str(goal_input.get("target_metric") or "milestones_completed"),
+                target_value=float(goal_input.get("target_value") or 1),
+                current_value=float(goal_input.get("current_value") or 0),
+            )
+        except Exception:
+            with self._chat_action_lock:
+                proposal["status"] = "failed"
+            raise
+
+        result = {
+            "type": "strategic_goal",
+            "goal": goal,
+            "output": f"Strategic goal created: {goal['title']}",
+            "approval_required": False,
+            "blocked": False,
+        }
+        with self._chat_action_lock:
+            proposal["status"] = "completed"
+            proposal["goal_id"] = goal.get("goal_id")
+        result = self._record_chat_action_result(proposal_id, result, "completed")
+        with self._chat_action_lock:
+            self._chat_action_results[proposal_id] = result
+        self.company_os.audit.append(
+            AuditEvent(
+                event_type="chat_action_confirmed",
+                actor_id="human_root",
+                action=proposal["workflow_id"],
+                task_id=None,
+                risk_level=RiskLevel.LOW,
+                approval_status=ApprovalStatus.NOT_REQUIRED,
+                result="completed",
+                input_ref=proposal_id,
+                output_ref=goal.get("goal_id"),
             )
         )
         self.sync()

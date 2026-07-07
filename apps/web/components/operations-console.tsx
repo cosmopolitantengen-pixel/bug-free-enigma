@@ -23,6 +23,7 @@ import {
   ServerCog,
   ShieldCheck,
   SlidersHorizontal,
+  Target,
   Trash2,
   Workflow,
   X,
@@ -103,11 +104,12 @@ type DataSet = {
   workflows: ApiRecord[];
   audit: ApiRecord[];
   events: ApiRecord[];
+  goals: ApiRecord[];
 };
 
 const EMPTY_DATA: DataSet = {
   summary: {}, health: {}, readiness: {}, integrity: {}, schema: {}, providers: {}, embeddings: {}, alertStatus: {}, runbooks: [], tasks: [], approvals: [], incidents: [],
-  schedules: [], executions: [], queueHealth: {}, agents: [], skills: [], tools: [], workflows: [], audit: [], events: [],
+  schedules: [], executions: [], queueHealth: {}, agents: [], skills: [], tools: [], workflows: [], audit: [], events: [], goals: [],
 };
 
 const ENDPOINTS: Record<keyof DataSet, string> = {
@@ -132,6 +134,7 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
   workflows: "/workflows",
   audit: "/audit-logs",
   events: "/events?limit=100",
+  goals: "/goals",
 };
 
 const NAV_ITEMS: Array<{ id: View; label: string; icon: typeof Activity }> = [
@@ -260,6 +263,7 @@ const DATA_LABELS: Record<keyof DataSet, string> = {
   workflows: "工作流",
   audit: "审计日志",
   events: "领域事件",
+  goals: "战略目标",
 };
 
 const CATALOG_LABELS: Record<string, string> = {
@@ -930,7 +934,9 @@ function Overview({ data, pending, incidents }: { data: DataSet; pending: number
     ["任务", s.task_count, ListChecks], ["待审批", pending, ClipboardCheck],
     ["待处理事件", incidents, AlertTriangle], ["运行中的计划", s.active_scheduled_job_count, CalendarClock],
     ["工作流运行", s.workflow_run_count, Workflow], ["智能体", s.agent_count, Bot],
-    ["模型令牌", s.model_token_count, Activity], ["完整性问题", s.integrity_issue_count, ShieldCheck],
+    ["模型令牌", s.model_token_count, Activity],
+    ["战略目标", s.strategic_goal_count ?? data.goals.length, Target],
+    ["完整性问题", s.integrity_issue_count, ShieldCheck],
   ] as const;
   return (
     <div className="view-stack">
@@ -949,6 +955,11 @@ function Overview({ data, pending, incidents }: { data: DataSet; pending: number
         <Panel title="计划执行动态" meta={`${data.executions.length} 次执行`}>
           <EntityList items={data.executions.slice(-6).reverse()} empty="暂无计划执行记录。" render={(item) => <EntityRow title={shortId(item.schedule_id)} detail={formatDate(item.started_at)} status={text(item.status)} />} />
         </Panel>
+        <Panel title="近期战略目标" meta={`${data.goals.length} 项`}>
+          <EntityList items={data.goals.slice(-6).reverse()} empty="暂无战略目标。" render={(item) => <EntityRow title={text(item.title)} detail={`${shortId(item.goal_id)} / ${formatValue(item.target_metric)}`} status={text(item.status)} />} />
+        </Panel>
+      </section>
+      <section className="two-column">
         <Panel title="近期领域事件" meta={`已加载 ${data.events.length} 条`}>
           <EntityList items={data.events.slice(-6).reverse()} empty="暂无领域事件。" render={(item) => <EntityRow title={formatValue(item.event_type)} detail={`${formatValue(item.source_type)} / ${shortId(item.source_id)}`} status={formatDate(item.created_at)} />} />
         </Panel>

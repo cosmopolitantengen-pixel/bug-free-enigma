@@ -8,7 +8,7 @@ The primary Human Root console is a responsive Next.js and TypeScript app:
 apps/web/
 ```
 
-Its Chinese-language seven-view operations console opens on a multi-turn chat workspace and also covers overview metrics, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. Chat sessions persist on the server, support automatic/chat/action/agent modes and explicit provider/model selection, and show actual routing, fallback, token, cost, action, and multi-step Agent Run trace metadata. Conversation tokens render incrementally through SSE, while Agent execution pushes each persisted run/step snapshot into the same action card. Explicit action and Agent requests become audited confirmation cards; no task or run starts until Human Root confirms. Agent traces show each bounded intent, task, status, and waiting approval, including restored state after reload. The console has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage runs in CI against mocked API responses for desktop and 390 px mobile viewports, including conversation persistence, streaming transport, action and Agent Run confirmation, readiness visibility, navigation, bearer-token storage, Workflow submission, approval decisions, schedule controls, Incident response, invalid API-base handling, and auth-required API degradation.
+Its Chinese-language seven-view operations console opens on a multi-turn chat workspace and also covers overview metrics, strategic goals, Workflow execution and approvals, schedules with Redis/RQ queue health, Agent/Skill/Tool/Workflow catalogs, Incidents with matched runbooks and audit records, and system status including production readiness, persistence/integrity, and alert delivery. Chat sessions persist on the server, support automatic/chat/action/agent modes and explicit provider/model selection, and show actual routing, fallback, token, cost, action, and multi-step Agent Run trace metadata. Conversation tokens render incrementally through SSE, while Agent execution pushes each persisted run/step snapshot into the same action card. Explicit action, goal, and Agent requests become audited confirmation cards; no task, goal, or run starts until Human Root confirms. Agent traces show each bounded intent, task, status, and waiting approval, including restored state after reload. The console has explicit loading, error, empty, and mobile navigation states, supports a configurable API origin, and is production-built as a standalone container. Playwright browser E2E coverage runs in CI against mocked API responses for desktop and 390 px mobile viewports, including conversation persistence, streaming transport, action, strategic-goal, and Agent Run confirmation, readiness visibility, navigation, bearer-token storage, Workflow submission, approval decisions, schedule controls, Incident response, invalid API-base handling, and auth-required API degradation.
 
 The first dependency-free control panel remains available as a fallback:
 
@@ -105,6 +105,7 @@ POST /agents/proposals/{proposal_id}/register
 
 - Hold multi-turn conversations through the governed Model Gateway, with browser-local session history and provider/model controls.
 - Turn explicit chat instructions into audited Workflow proposals, then create work only after Human Root confirmation.
+- Turn explicit chat goal instructions into audited strategic-goal proposals, then create the Goal only after Human Root confirmation.
 - Keep exploratory idea discussion in conversation mode without silently creating tasks.
 - Inspect actual provider, model, fallback, token usage, and estimated cost on each assistant response.
 - View system health and core counts.
@@ -114,7 +115,7 @@ POST /agents/proposals/{proposal_id}/register
 - View outbound alert delivery status without exposing the webhook URL.
 - View system integrity checks for persistence, schema, audit guards, backups, incidents, approvals, and budget policy.
 - View task status distribution.
-- Create strategic goals, update progress, and link tasks, reviews, and improvements.
+- Create strategic goals, view recent goals in the Next.js Overview, update progress, and link tasks, reviews, and improvements.
 - View skill risk distribution.
 - View Agents and Skills.
 - View registered Tools, recent Tool Runs, and adapter result/error summaries.

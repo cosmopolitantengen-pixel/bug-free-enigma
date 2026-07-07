@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 
 
@@ -18,6 +19,7 @@ from app.chat.planner import (
 from app.bootstrap import build_company_os
 from app.models.gateway import ModelGateway
 from app.models.providers import ProviderGeneration
+from app.persistence.sqlite_store import SQLiteStateStore
 from app.services.company import CompanyApplicationService
 
 
@@ -28,8 +30,10 @@ class _PurposeModelProvider:
     def __init__(self, planner_output: str) -> None:
         self.planner_output = planner_output
         self.purposes: list[str] = []
+        self.prompts: list[str] = []
 
     def generate(self, prompt: str, model_name: str, purpose: str, max_output_tokens: int) -> ProviderGeneration:
+        self.prompts.append(prompt)
         self.purposes.append(purpose)
         output = self.planner_output if purpose == "chat_action_planning" else "ordinary conversation response"
         return ProviderGeneration(output, 10, 5, 15)
@@ -42,6 +46,10 @@ class ChatPlannerTests(unittest.TestCase):
         )
 
         self.assertEqual(parsed, ChatActionPlan("code_search", "decide_and_resume_task"))
+        self.assertEqual(
+            parse_chat_action_plan('{"intent":"create_goal","query":null,"target_agent":null}'),
+            ChatActionPlan("create_goal"),
+        )
         self.assertIsNone(
             parse_chat_action_plan(
                 '{"intent":"backend_tests","query":null,"target_agent":null,"argv":["rm","-rf"]}'
@@ -142,6 +150,89 @@ class ChatPlannerTests(unittest.TestCase):
             "chat_action_plan_rejected",
             [event["event_type"] for event in service.list_audit_logs()],
         )
+
+    def test_chat_goal_action_creates_persisted_strategic_goal_after_confirmation(self):
+        service = CompanyApplicationService(company_os=build_company_os())
+        session = service.create_chat_session()
+
+        proposed = service.send_chat_session_message(
+            session["session_id"],
+            "\u8bbe\u7f6e\u76ee\u6807\uff1a\u628a AI Company OS \u505a\u6210 Codex \u7b49\u4ef7\u4f53\u9a8c\u7248",
+            mode="auto",
+            provider="local",
+        )
+        action = proposed["message"]["action"]
+
+        self.assertEqual(action["kind"], "strategic_goal")
+        self.assertEqual(action["workflow_id"], "strategic_goal_v1")
+        self.assertEqual(action["input"]["target_metric"], "milestones_completed")
+        self.assertEqual(service.list_strategic_goals(), [])
+
+        completed = service.execute_chat_action(action["proposal_id"])
+
+        goals = service.list_strategic_goals()
+        self.assertEqual(completed["type"], "strategic_goal")
+        self.assertEqual(len(goals), 1)
+        self.assertEqual(goals[0]["title"], "\u628a AI Company OS \u505a\u6210 Codex \u7b49\u4ef7\u4f53\u9a8c\u7248")
+        self.assertEqual(completed["chat_session"]["messages"][1]["action"]["status"], "completed")
+        self.assertIn("Strategic goal created", completed["chat_session"]["messages"][-1]["content"])
+        self.assertIn("strategic_goal_created", [event["event_type"] for event in service.list_audit_logs()])
+        self.assertEqual(service.list_audit_logs()[-1]["event_type"], "chat_action_confirmed")
+
+    def test_active_goals_are_included_in_conversation_context(self):
+        provider = _PurposeModelProvider('{"intent":"conversation","query":null,"target_agent":null}')
+        service = CompanyApplicationService(
+            company_os=build_company_os(
+                model_gateway=ModelGateway(
+                    providers={"planner": provider},
+                    default_provider="planner",
+                )
+            )
+        )
+        service.create_strategic_goal(
+            title="Codex equivalent OS",
+            description="Make the system work like a governed coding agent.",
+            owner_agent="ceo_agent_v1",
+            target_metric="milestones_completed",
+            target_value=3,
+        )
+
+        result = service.respond_to_chat(
+            [{"role": "user", "content": "What goal are we pursuing?"}],
+            mode="chat",
+            provider="planner",
+        )
+
+        self.assertEqual(result["type"], "conversation")
+        self.assertEqual(provider.purposes, ["chat_conversation"])
+        self.assertIn("Active strategic goals", provider.prompts[0])
+        self.assertIn("Codex equivalent OS", provider.prompts[0])
+
+    def test_pending_chat_goal_action_resumes_after_sqlite_restart(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "chat-goal.db")
+            first = CompanyApplicationService(
+                company_os=build_company_os(),
+                persistence=SQLiteStateStore(db_path),
+            )
+            session = first.create_chat_session()
+            proposed = first.send_chat_session_message(
+                session["session_id"],
+                "set goal: Ship chat-native strategic goals",
+                mode="auto",
+                provider="local",
+            )
+            proposal_id = proposed["message"]["action"]["proposal_id"]
+
+            second = CompanyApplicationService(
+                company_os=build_company_os(),
+                persistence=SQLiteStateStore(db_path),
+            )
+            completed = second.execute_chat_action(proposal_id)
+
+            self.assertEqual(completed["type"], "strategic_goal")
+            self.assertEqual(second.list_strategic_goals()[0]["title"], "Ship chat-native strategic goals")
+            self.assertEqual(second.list_chat_sessions()[0]["messages"][1]["action"]["status"], "completed")
 
     def test_action_mode_without_external_planner_uses_controlled_task_plan(self):
         service = CompanyApplicationService(company_os=build_company_os())

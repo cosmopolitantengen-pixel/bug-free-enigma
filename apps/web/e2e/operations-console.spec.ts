@@ -30,6 +30,7 @@ function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
       agent_count: 18,
       model_token_count: 0,
       integrity_issue_count: 0,
+      strategic_goal_count: 1,
       failed_scheduled_execution_count: 0,
       recent_failed_scheduled_executions: [],
     },
@@ -76,6 +77,7 @@ function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
     "/alerts/status": { enabled: false, configured: false, destination: "none", endpoint_host: null, timeout_seconds: 5 },
     "/runbooks": [],
     "/tasks": [{ task_id: "task-1", title: "Initial task", status: "planned", risk_level: "low", result: null }],
+    "/goals": [{ goal_id: "goal-1", title: "Codex equivalent OS", target_metric: "milestones_completed", status: "active" }],
     "/approvals": [{
       approval_id: "approval-1",
       status: "pending",
@@ -151,6 +153,36 @@ function mockChatResponse(latest: string, body: Record<string, unknown>): Record
     return action("chat-tool-1", "tool_call_v1", "工具调用", {
       tool_id: "git_read_tool", actor_id: "workspace_agent_v1", reason: latest, tool_input: { operation: "status" },
     }, "读取 Git 工作区状态");
+  }
+  if (latest.startsWith("设置目标")) {
+    return {
+      ...action("chat-goal-1", "strategic_goal_v1", "Strategic Goal", {
+        title: "把 AI Company OS 做成 Codex 等价体验版",
+        description: latest,
+        owner_agent: "ceo_agent_v1",
+        target_metric: "milestones_completed",
+        target_value: 1,
+        current_value: 0,
+      }, "create a persistent strategic goal for Human Root tracking"),
+      action: {
+        proposal_id: "chat-goal-1",
+        kind: "strategic_goal",
+        workflow_id: "strategic_goal_v1",
+        workflow_name: "Strategic Goal",
+        title: "把 AI Company OS 做成 Codex 等价体验版",
+        description: latest,
+        input: {
+          title: "把 AI Company OS 做成 Codex 等价体验版",
+          description: latest,
+          owner_agent: "ceo_agent_v1",
+          target_metric: "milestones_completed",
+          target_value: 1,
+          current_value: 0,
+        },
+        purpose: "create a persistent strategic goal for Human Root tracking",
+        status: "pending",
+      },
+    };
   }
   if (latest.includes("请制定")) {
     return {
@@ -303,6 +335,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const isCommandAction = url.pathname.includes("chat-command-1");
       const isFailedCommandAction = url.pathname.includes("chat-command-fail");
       const isAgentAction = url.pathname.includes("chat-agent-1");
+      const isGoalAction = url.pathname.includes("chat-goal-1");
       const isStream = url.pathname.endsWith("/stream");
       const proposalId = url.pathname.split("/")[3];
       const chatSession = state.chatSessions.find((session) =>
@@ -338,6 +371,38 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           await route.fulfill({
             contentType: "text/event-stream",
             body: `event: ready\ndata: ${JSON.stringify({ proposal_id: proposalId })}\n\nevent: progress\ndata: ${JSON.stringify(progress)}\n\nevent: complete\ndata: ${JSON.stringify(result)}\n\n`,
+          });
+        } else {
+          await route.fulfill({ contentType: "application/json", body: JSON.stringify(result) });
+        }
+        return;
+      }
+      if (isGoalAction && proposal && chatSession) {
+        const now = new Date().toISOString();
+        const goal = {
+          goal_id: "goal-chat-1",
+          title: proposal.title,
+          description: proposal.description,
+          owner_agent: "ceo_agent_v1",
+          target_metric: "milestones_completed",
+          target_value: 1,
+          current_value: 0,
+          status: "active",
+          linked_task_ids: [],
+          linked_review_ids: [],
+          linked_improvement_ids: [],
+          created_at: now,
+          updated_at: now,
+        };
+        proposal.status = "completed";
+        proposal.goal_id = goal.goal_id;
+        chatMessages.push({ message_id: `chat-message-${++chatSequence}`, role: "assistant", content: `Strategic goal created.\n${goal.title} (${goal.goal_id})`, created_at: now, failed: false, action: null });
+        chatSession.updated_at = now;
+        const result = { type: "strategic_goal", goal, output: `Strategic goal created: ${goal.title}`, approval_required: false, blocked: false, chat_session: chatSession };
+        if (isStream) {
+          await route.fulfill({
+            contentType: "text/event-stream",
+            body: `event: ready\ndata: ${JSON.stringify({ proposal_id: proposalId })}\n\nevent: complete\ndata: ${JSON.stringify(result)}\n\n`,
           });
         } else {
           await route.fulfill({ contentType: "application/json", body: JSON.stringify(result) });
@@ -738,6 +803,23 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "确认执行" }).click();
     await expect(page.getByText(/行动已完成/)).toBeVisible();
     expect(api.actions.filter((item) => item.path === "/chat/actions/chat-action-1/execute/stream")).toHaveLength(1);
+  });
+
+  test("creates a strategic goal from chat confirmation", async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name !== "desktop-chromium", "Chat goal smoke runs only on the desktop project.");
+    const api = await mockApi(page);
+    await page.goto("/");
+
+    await page.getByLabel("聊天消息").fill("设置目标：把 AI Company OS 做成 Codex 等价体验版");
+    await page.getByRole("button", { name: "发送消息" }).click();
+    await expect(page.getByText("strategic_goal_v1")).toBeVisible();
+    await page.getByRole("button", { name: "确认执行" }).click();
+
+    await expect(page.getByText("Strategic goal created.")).toBeVisible();
+    await page.getByRole("button", { name: /总览/ }).click();
+    await expect(page.getByText("近期战略目标")).toBeVisible();
+    await expect(page.getByText("Codex equivalent OS")).toBeVisible();
+    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-goal-1/execute/stream")).toHaveLength(1);
   });
 
   test("returns Git tool output inside the chat", async ({ page }, testInfo) => {
