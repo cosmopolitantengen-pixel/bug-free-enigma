@@ -39,6 +39,8 @@ Human Root can create a goal from chat with messages such as `set goal: ...` or 
 
 When an active goal exists, newly created Workflow tasks are automatically linked to the most recently updated active goal. This includes ordinary confirmed chat actions and each task created by a governed Agent Run step. The link writes the same `strategic_goal_linked` audit event as manual goal linking.
 
+Messages such as `下一步`, `继续目标`, `推进目标`, or `continue goal` use the current active goal as the objective. With a configured non-local model provider, chat creates a governed Agent Run confirmation card for the goal. With the local deterministic provider, chat falls back to a controlled task-planning proposal instead of pretending to run a model-driven Agent.
+
 ## Audit
 
 Goal creation writes `strategic_goal_created`.

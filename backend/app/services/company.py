@@ -78,6 +78,18 @@ GOAL_CREATE_MARKERS = (
     "\u65b0\u76ee\u6807",
 )
 
+GOAL_CONTINUE_MARKERS = (
+    "next step",
+    "continue goal",
+    "continue current goal",
+    "advance goal",
+    "推进目标",
+    "继续目标",
+    "当前目标下一步",
+    "下一步",
+    "下一步了",
+)
+
 
 @dataclass
 class CompanyApplicationService:
@@ -2261,7 +2273,7 @@ class CompanyApplicationService:
                 raise ValueError("agent mode requires a configured non-local model provider")
             proposal = self._build_agent_run_proposal(latest, provider, model_name, "explicit")
         else:
-            proposal = self._propose_chat_action(latest, mode)
+            proposal = self._propose_chat_action(latest, mode, provider, model_name)
         planner_result = None
         if (
             proposal is None
@@ -2608,13 +2620,19 @@ class CompanyApplicationService:
         self.sync()
         return self._drive_chat_agent_run(session, run, proposal)
 
-    def _propose_chat_action(self, message: str, mode: str) -> dict | None:
+    def _propose_chat_action(
+        self,
+        message: str,
+        mode: str,
+        provider: str | None = None,
+        model_name: str | None = None,
+    ) -> dict | None:
         normalized = message.lower()
         if mode == "chat":
             return None
         if mode == "auto" and prefers_conversation(message):
             return None
-        if not any(marker in normalized for marker in (*CHAT_ACTION_MARKERS, *GOAL_CREATE_MARKERS)):
+        if not any(marker in normalized for marker in (*CHAT_ACTION_MARKERS, *GOAL_CREATE_MARKERS, *GOAL_CONTINUE_MARKERS)):
             return None
 
         workflow_id = "task_planning_v1"
@@ -2623,6 +2641,8 @@ class CompanyApplicationService:
         workspace_tool = self._chat_workspace_tool(message, normalized)
         if any(marker in normalized for marker in GOAL_CREATE_MARKERS):
             return self._build_goal_create_proposal(message, "rules")
+        if any(marker in normalized for marker in GOAL_CONTINUE_MARKERS):
+            return self._build_goal_continue_proposal(message, "rules", provider, model_name)
         if workspace_tool is not None:
             workflow_id = "tool_call_v1"
             workflow_input, purpose = workspace_tool
@@ -2810,6 +2830,46 @@ class CompanyApplicationService:
             ),
         }
 
+    def _build_goal_continue_proposal(
+        self,
+        message: str,
+        planner: str,
+        provider: str | None,
+        model_name: str | None,
+    ) -> dict | None:
+        goal = self._current_active_goal()
+        if goal is None:
+            return None
+        instruction = message.strip() or "Continue the current strategic goal."
+        objective = (
+            f"Continue active strategic goal {goal.goal_id}: {goal.title}. "
+            f"Goal description: {goal.description}. "
+            f"Current progress: {goal.current_value}/{goal.target_value} {goal.target_metric}. "
+            f"Human Root instruction: {instruction}. "
+            "Inspect current project state, choose the safest next useful step, and use governed tools only."
+        )
+        title = f"Continue goal: {goal.title}"[:60]
+        if self._model_chat_planner_available(provider):
+            return self._build_agent_run_proposal(
+                objective,
+                provider,
+                model_name,
+                planner,
+                title=title,
+                goal_id=goal.goal_id,
+            )
+        return self._build_chat_proposal(
+            objective,
+            "task_planning_v1",
+            {
+                "goal_id": goal.goal_id,
+                "goal_title": goal.title,
+                "instruction": instruction,
+            },
+            "plan the next controlled step for the current strategic goal",
+            planner,
+        )
+
     @staticmethod
     def _extract_goal_title(message: str) -> str:
         compact = " ".join(message.split()).strip()
@@ -2858,24 +2918,29 @@ class CompanyApplicationService:
         provider: str | None,
         model_name: str | None,
         planner: str,
+        *,
+        title: str | None = None,
+        goal_id: str | None = None,
     ) -> dict:
         status = self.company_os.models.provider_status()
         selected_provider = str(provider or status["default_provider"]).lower()
         details = status["provider_details"]
         selected_details = details.get(selected_provider, {}) if isinstance(details, dict) else {}
         selected_model = str(model_name or selected_details.get("default_model") or status["default_model"])
-        title = message.replace("\n", " ").strip()[:60] or "Agent Run"
+        clean_title = title or message.replace("\n", " ").strip()[:60] or "Agent Run"
+        title = clean_title
         return {
             "proposal_id": new_id("chat_action"),
             "kind": "agent_run",
             "workflow_id": "agent_run_v1",
             "workflow_name": "Agent Run",
-            "title": title,
+            "title": clean_title,
             "description": message,
             "input": {
                 "provider": selected_provider,
                 "model_name": selected_model,
                 "max_steps": 8,
+                **({"goal_id": goal_id} if goal_id else {}),
             },
             "purpose": "连续调查并完成多步工作区目标",
             "status": "pending",

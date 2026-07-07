@@ -62,6 +62,12 @@ OPERATIONAL_HINTS = (
     "create ",
     "write ",
     "review ",
+    "next step",
+    "continue goal",
+    "advance goal",
+    "下一步",
+    "继续目标",
+    "推进目标",
 )
 
 CONVERSATIONAL_HINTS = (

@@ -21,7 +21,7 @@
 - Workflow Run and Workflow Step trace persistence
 - Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem boundaries, concurrency-checked workspace patching, sanitized allowlisted commands, platform executable resolution, non-zero command failure evidence, read-only Git inspection, and adapter failure handling
 - Model Gateway usage and cost logging
-- Rule-first chat intent routing, bounded model-planner parsing, fixed executable mappings, invalid-plan audit, and planner usage/cost reporting
+- Rule-first chat intent routing, bounded model-planner parsing, fixed executable mappings, active-goal continuation routing, invalid-plan audit, and planner usage/cost reporting
 - Server-owned chat session create/list/delete/message APIs, legacy text-only import, SQLite restart recovery, and pending action continuation after process restart
 - Strict Agent decision parsing, bounded read-only multi-step execution, exact-patch approval preview, rejection without write, and approval continuation after SQLite restart
 - OpenAI typed-event and DeepSeek data-event streaming, final usage accounting, conversation SSE persistence, planner-delta isolation, and persisted Agent Run progress events
@@ -43,7 +43,7 @@
 - Review-driven improvement proposal approval, sandbox, knowledge registration, dashboard summary, and persistence
 - GitHub absorption approval, sandbox, knowledge registration, dashboard summary, and persistence
 - GitHub connector URL validation, README decoding, secret-safe metadata, and import routing
-- Strategic goal creation, progress tracking, task/review/improvement linking, dashboard summary, and persistence
+- Strategic goal creation, progress tracking, chat-native goal continuation, task/review/improvement linking, dashboard summary, and persistence
 - Structured JSON log export, filtering, dashboard summary, and dashboard mount points
 - SQLite schema migration ledger, API exposure, and dashboard mount points
 - Audit log append-only behavior, including SQLite trigger guards against update and delete
@@ -82,7 +82,7 @@ The suite currently covers:
 - Static dashboard mount points and backend dashboard data contract
 - Next.js console dependency pins, required operational surfaces, responsive states, type checks, and production build
 - Next.js Playwright browser E2E for desktop multi-turn streamed chat generation with server-backed reload persistence, audited action, Strategic Goal, and multi-step Agent Run confirmation, streamed inline execution traces, high-risk command approval and continuation across reload, goal visibility, 390 px mobile navigation, production readiness visibility, bearer-token storage, Workflow submission, approval approve/reject decisions, schedule create/pause/resume/cancel controls, Incident acknowledge/resolve, invalid API-base handling, and auth-required API degradation with mocked API responses
-- Chat API separation between idea discussion and explicit operational proposals, natural workspace request rules, bounded model-assisted intent selection, no task creation before Human Root confirmation, idempotent duplicate confirmation, and normal Workflow/Memory behavior after confirmation
+- Chat API separation between idea discussion and explicit operational proposals, natural workspace request rules, active-goal continuation proposals, bounded model-assisted intent selection, no task creation before Human Root confirmation, idempotent duplicate confirmation, and normal Workflow/Memory behavior after confirmation
 - DeepSeek Chat Completions request/response handling, provider error redaction, explicit multi-provider fallback routing, actual-provider usage records, provider-specific pricing, secret-file loading, and console provider/model selection
 - Approval request routing for pending and blocked actions
 - Approval decision audit events and SQLite persistence
@@ -115,7 +115,7 @@ The suite currently covers:
 - Improvement proposal API routes, approval gating, sandbox gating, dashboard mount points, knowledge registration, audit events, and SQLite reload
 - GitHub absorption API routes, approval gating, sandbox gating, dashboard mount points, knowledge registration, audit events, unsafe repository rejection, and SQLite reload
 - Controlled GitHub connector URL validation, README decoding, secret-safe metadata, and import API routing through existing absorption controls
-- Strategic goal API routes, progress auto-completion, dashboard mount points, audit events, and SQLite reload
+- Strategic goal API routes, progress auto-completion, chat continuation entrypoints, dashboard mount points, audit events, and SQLite reload
 - Structured JSON log API routes, category/level filters, dashboard summary fields, and dashboard mount points
 - SQLite migration ledger through `0005_agent_skill_catalogs`, audit append-only trigger migration, `user_version`, `/database/schema`, and dashboard mount points
 - System integrity checks for memory mode warnings, SQLite audit guards, backup checksums, and dashboard exposure

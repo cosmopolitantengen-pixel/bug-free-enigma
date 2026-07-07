@@ -261,6 +261,59 @@ class ChatPlannerTests(unittest.TestCase):
             [event["action"] for event in service.list_audit_logs() if event["event_type"] == "strategic_goal_linked"],
         )
 
+    def test_continue_goal_auto_mode_proposes_agent_run_with_non_local_provider(self):
+        provider = _PurposeModelProvider('{"intent":"conversation","query":null,"target_agent":null}')
+        service = CompanyApplicationService(
+            company_os=build_company_os(
+                model_gateway=ModelGateway(
+                    providers={"planner": provider},
+                    default_provider="planner",
+                )
+            )
+        )
+        goal = service.create_strategic_goal(
+            title="Codex equivalent OS",
+            description="Make the system continue useful implementation steps.",
+            owner_agent="ceo_agent_v1",
+            target_metric="milestones_completed",
+            target_value=5,
+        )
+
+        result = service.respond_to_chat(
+            [{"role": "user", "content": "\u4e0b\u4e00\u6b65\u4e86"}],
+            mode="auto",
+            provider="planner",
+            model_name="planner-v1",
+        )
+
+        self.assertEqual(result["type"], "action_proposal")
+        self.assertEqual(result["action"]["kind"], "agent_run")
+        self.assertEqual(result["action"]["input"]["goal_id"], goal["goal_id"])
+        self.assertEqual(result["action"]["input"]["provider"], "planner")
+        self.assertIn("Codex equivalent OS", result["action"]["description"])
+        self.assertEqual(provider.purposes, [])
+
+    def test_continue_goal_with_local_provider_falls_back_to_controlled_task_plan(self):
+        service = CompanyApplicationService(company_os=build_company_os())
+        goal = service.create_strategic_goal(
+            title="Local goal continuation",
+            description="Plan safely when no non-local Agent model is selected.",
+            owner_agent="ceo_agent_v1",
+            target_metric="milestones_completed",
+            target_value=2,
+        )
+
+        result = service.respond_to_chat(
+            [{"role": "user", "content": "continue goal"}],
+            mode="auto",
+            provider="local",
+        )
+
+        self.assertEqual(result["type"], "action_proposal")
+        self.assertEqual(result["action"]["workflow_id"], "task_planning_v1")
+        self.assertEqual(result["action"]["input"]["goal_id"], goal["goal_id"])
+        self.assertIn("Local goal continuation", result["action"]["description"])
+
     def test_action_mode_without_external_planner_uses_controlled_task_plan(self):
         service = CompanyApplicationService(company_os=build_company_os())
 
