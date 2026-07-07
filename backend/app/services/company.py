@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from threading import Lock
+from queue import Queue
+from threading import Lock, Thread
 
 from app.auth.service import AuthService
 from app.bootstrap import CompanyOS, build_company_os
@@ -1835,6 +1837,7 @@ class CompanyApplicationService:
         task_id: str | None = None,
         model_name: str | None = None,
         provider: str | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> dict:
         self.company_os.agents.get(actor_id)
         input_rate, output_rate = self.company_os.models.budget_rates(
@@ -1903,6 +1906,7 @@ class CompanyApplicationService:
                     input_cost_per_token=input_rate,
                     output_cost_per_token=output_rate,
                 ),
+                on_delta=on_delta,
             )
         except ModelProviderError as exc:
             cost_log = self.company_os.budget.record_cost(
@@ -2086,6 +2090,7 @@ class CompanyApplicationService:
         model_name: str | None = None,
         provider: str | None = None,
         owner_id: str = "human_root",
+        on_delta: Callable[[str], None] | None = None,
     ) -> dict:
         session = self.chat_sessions.get(session_id)
         if session.owner_id != owner_id:
@@ -2098,7 +2103,13 @@ class CompanyApplicationService:
             for message in session.messages[-20:]
         ]
         try:
-            response = self.respond_to_chat(history, mode, model_name, provider)
+            response = self.respond_to_chat(
+                history,
+                mode,
+                model_name,
+                provider,
+                on_delta=on_delta,
+            )
         except ModelProviderError:
             failed = ChatMessageRecord(
                 role="assistant",
@@ -2130,6 +2141,60 @@ class CompanyApplicationService:
             "message": to_plain(assistant_message),
             "response": response,
         }
+
+    def stream_chat_session_message(
+        self,
+        session_id: str,
+        content: str,
+        mode: str = "auto",
+        model_name: str | None = None,
+        provider: str | None = None,
+        owner_id: str = "human_root",
+    ) -> Iterator[dict]:
+        events: Queue[dict | object] = Queue()
+        finished = object()
+
+        def emit_delta(delta: str) -> None:
+            if delta:
+                events.put({"event": "delta", "data": {"text": delta}})
+
+        def run() -> None:
+            try:
+                result = self.send_chat_session_message(
+                    session_id=session_id,
+                    content=content,
+                    mode=mode,
+                    model_name=model_name,
+                    provider=provider,
+                    owner_id=owner_id,
+                    on_delta=emit_delta,
+                )
+                events.put({"event": "complete", "data": result})
+            except (KeyError, PermissionError, ValueError, ModelProviderError) as exc:
+                events.put({"event": "error", "data": {"detail": str(exc)}})
+            except Exception as exc:
+                events.put(
+                    {
+                        "event": "error",
+                        "data": {
+                            "detail": f"chat stream failed: {exc.__class__.__name__}"
+                        },
+                    }
+                )
+            finally:
+                events.put(finished)
+
+        Thread(
+            target=run,
+            name=f"chat-stream-{session_id[-12:]}",
+            daemon=True,
+        ).start()
+        yield {"event": "ready", "data": {"session_id": session_id}}
+        while True:
+            event = events.get()
+            if event is finished:
+                break
+            yield event
 
     def cancel_chat_action(self, proposal_id: str, owner_id: str = "human_root") -> dict:
         if owner_id != "human_root":
@@ -2165,6 +2230,7 @@ class CompanyApplicationService:
         mode: str = "auto",
         model_name: str | None = None,
         provider: str | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> dict:
         if mode not in {"auto", "chat", "action", "agent"}:
             raise ValueError("chat mode must be auto, chat, action, or agent")
@@ -2279,6 +2345,7 @@ class CompanyApplicationService:
             purpose="chat_conversation",
             model_name=model_name,
             provider=provider,
+            on_delta=on_delta,
         )
         return {
             **result,
@@ -2791,7 +2858,11 @@ class CompanyApplicationService:
             purpose,
         )
 
-    def execute_chat_action(self, proposal_id: str) -> dict:
+    def execute_chat_action(
+        self,
+        proposal_id: str,
+        on_event: Callable[[dict], None] | None = None,
+    ) -> dict:
         with self._chat_action_lock:
             cached = self._chat_action_results.get(proposal_id)
             if cached is not None:
@@ -2805,7 +2876,7 @@ class CompanyApplicationService:
 
         if proposal.get("kind") == "agent_run":
             try:
-                return self._start_chat_agent_run(proposal)
+                return self._start_chat_agent_run(proposal, on_event)
             except Exception:
                 with self._chat_action_lock:
                     proposal["status"] = "failed"
@@ -2858,7 +2929,48 @@ class CompanyApplicationService:
         self.sync()
         return result
 
-    def _start_chat_agent_run(self, proposal: dict) -> dict:
+    def stream_chat_action_execution(self, proposal_id: str) -> Iterator[dict]:
+        events: Queue[dict | object] = Queue()
+        finished = object()
+
+        def emit_progress(payload: dict) -> None:
+            events.put({"event": "progress", "data": payload})
+
+        def run() -> None:
+            try:
+                result = self.execute_chat_action(proposal_id, emit_progress)
+                events.put({"event": "complete", "data": result})
+            except (KeyError, PermissionError, ValueError, ModelProviderError) as exc:
+                events.put({"event": "error", "data": {"detail": str(exc)}})
+            except Exception as exc:
+                events.put(
+                    {
+                        "event": "error",
+                        "data": {
+                            "detail": f"chat action stream failed: {exc.__class__.__name__}"
+                        },
+                    }
+                )
+            finally:
+                events.put(finished)
+
+        Thread(
+            target=run,
+            name=f"chat-action-stream-{proposal_id[-12:]}",
+            daemon=True,
+        ).start()
+        yield {"event": "ready", "data": {"proposal_id": proposal_id}}
+        while True:
+            event = events.get()
+            if event is finished:
+                break
+            yield event
+
+    def _start_chat_agent_run(
+        self,
+        proposal: dict,
+        on_event: Callable[[dict], None] | None = None,
+    ) -> dict:
         match = self.chat_sessions.find_by_proposal(proposal["proposal_id"])
         if match is None:
             raise ValueError("agent run proposal is not attached to a persisted chat session")
@@ -2901,13 +3013,15 @@ class CompanyApplicationService:
                 )
             )
         self.sync()
-        return self._drive_chat_agent_run(session, run, proposal)
+        self._emit_chat_agent_progress(on_event, session, run)
+        return self._drive_chat_agent_run(session, run, proposal, on_event)
 
     def _drive_chat_agent_run(
         self,
         session: ChatSessionRecord,
         run: ChatAgentRunRecord,
         proposal: dict,
+        on_event: Callable[[dict], None] | None = None,
     ) -> dict:
         while len(run.steps) < run.max_steps:
             observations = [
@@ -2933,6 +3047,7 @@ class CompanyApplicationService:
                     run,
                     proposal,
                     "Agent Run was blocked by the model budget policy.",
+                    on_event,
                 )
             decision = parse_agent_run_decision(str(model_result.get("output") or ""))
             if decision is None:
@@ -2956,6 +3071,7 @@ class CompanyApplicationService:
                     run,
                     proposal,
                     "The model returned an invalid Agent Run decision.",
+                    on_event,
                 )
             if decision.intent == "finish":
                 return self._complete_chat_agent_run(
@@ -2963,6 +3079,7 @@ class CompanyApplicationService:
                     run,
                     proposal,
                     decision.answer or "Agent Run completed.",
+                    on_event,
                 )
 
             tool_id, tool_input = self._agent_decision_tool_input(decision)
@@ -2978,6 +3095,7 @@ class CompanyApplicationService:
             run.updated_at = utc_now()
             session.updated_at = run.updated_at
             self.sync()
+            self._emit_chat_agent_progress(on_event, session, run)
             try:
                 result = self.run_registered_workflow(
                     workflow_id="tool_call_v1",
@@ -3000,6 +3118,7 @@ class CompanyApplicationService:
                     run,
                     proposal,
                     step.observation,
+                    on_event,
                 )
 
             task = result.get("task") or {}
@@ -3041,6 +3160,7 @@ class CompanyApplicationService:
                 )
                 self._audit_chat_agent_step(run, step, "waiting_approval")
                 self.sync()
+                self._emit_chat_agent_progress(on_event, session, run)
                 return {
                     **result,
                     "type": "agent_run",
@@ -3057,12 +3177,14 @@ class CompanyApplicationService:
             step.status = "failed" if failed else "completed"
             self._audit_chat_agent_step(run, step, step.status)
             self.sync()
+            self._emit_chat_agent_progress(on_event, session, run)
             if failed:
                 return self._fail_chat_agent_run(
                     session,
                     run,
                     proposal,
                     step.observation or "Agent Run tool step failed.",
+                    on_event,
                 )
 
         return self._fail_chat_agent_run(
@@ -3070,6 +3192,7 @@ class CompanyApplicationService:
             run,
             proposal,
             f"Agent Run reached the maximum of {run.max_steps} steps without finishing.",
+            on_event,
         )
 
     @staticmethod
@@ -3151,6 +3274,7 @@ class CompanyApplicationService:
         run: ChatAgentRunRecord,
         proposal: dict,
         answer: str,
+        on_event: Callable[[dict], None] | None = None,
     ) -> dict:
         run.status = "completed"
         run.final_answer = answer[:12000]
@@ -3187,6 +3311,7 @@ class CompanyApplicationService:
         with self._chat_action_lock:
             self._chat_action_results[proposal["proposal_id"]] = result
         self.sync()
+        self._emit_chat_agent_progress(on_event, session, run)
         return result
 
     def _fail_chat_agent_run(
@@ -3195,6 +3320,7 @@ class CompanyApplicationService:
         run: ChatAgentRunRecord,
         proposal: dict,
         error: str,
+        on_event: Callable[[dict], None] | None = None,
     ) -> dict:
         run.status = "failed"
         run.error = error[:2000]
@@ -3231,7 +3357,23 @@ class CompanyApplicationService:
         with self._chat_action_lock:
             self._chat_action_results[proposal["proposal_id"]] = result
         self.sync()
+        self._emit_chat_agent_progress(on_event, session, run)
         return result
+
+    @staticmethod
+    def _emit_chat_agent_progress(
+        on_event: Callable[[dict], None] | None,
+        session: ChatSessionRecord,
+        run: ChatAgentRunRecord,
+    ) -> None:
+        if on_event is not None:
+            on_event(
+                {
+                    "type": "agent_run_progress",
+                    "agent_run": to_plain(run),
+                    "chat_session": to_plain(session),
+                }
+            )
 
     def _audit_chat_agent_step(
         self,

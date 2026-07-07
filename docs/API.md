@@ -90,8 +90,10 @@ GET /chat/sessions
 POST /chat/sessions
 POST /chat/sessions/import
 POST /chat/sessions/{id}/messages
+POST /chat/sessions/{id}/messages/stream
 DELETE /chat/sessions/{id}
 POST /chat/actions/{id}/execute
+POST /chat/actions/{id}/execute/stream
 POST /chat/actions/{id}/cancel
 GET /cost-logs
 GET /budget/summary
@@ -149,6 +151,10 @@ The scheduler API persists one-time and recurring internal jobs, supports pause/
 `GET /models/providers` lists configured provider names, each provider's default and allowlisted models, the explicit fallback order, and non-secret per-million-token pricing metadata. `POST /models/generate` accepts optional `provider` and `model_name` selections. Successful responses include routing metadata for requested, attempted, and actual providers plus a `fallback_used` flag; usage and CostLog records always identify the provider and model that actually completed the request.
 
 `POST /chat/respond` remains the stateless governed conversational primitive. The operations console uses server-owned sessions: create or list them with `/chat/sessions`, then send one user message through `POST /chat/sessions/{id}/messages`. The backend supplies the trusted transcript, records the user and assistant messages, model usage/cost metadata, and action-card state, and returns the updated session. Sessions persist in SQLite/PostgreSQL, participate in verified backups and restores, and restore pending proposals after a process restart. `POST /chat/sessions/import` accepts legacy browser transcripts as role/content text only; executable action fields are ignored. Session deletion is explicit and audited.
+
+`POST /chat/sessions/{id}/messages/stream` is the console transport. It returns `text/event-stream` events named `ready`, `delta`, `complete`, and `error`. Only ordinary conversational text emits `delta`; action-planner and Agent-decision structured output stays server-side. The provider request continues in a server worker if the browser disconnects, and the `complete` event contains the same persisted session/result contract as the non-streaming endpoint. Native OpenAI Responses typed events and DeepSeek Chat Completion data events are normalized behind the Model Gateway. Final usage, cost, routing, and Audit records are written once after the provider completion event.
+
+`POST /chat/actions/{id}/execute/stream` emits `ready`, persisted `progress` snapshots, `complete`, and `error`. Agent Run progress includes the current run, steps, action state, and chat session; non-Agent Workflows simply complete through the same controlled execution path. Existing non-streaming message and action endpoints remain available for compatibility.
 
 `chat` mode always returns a Model Gateway response, `action` mode always proposes a Workflow, `agent` mode proposes a governed multi-step Agent Run, and `auto` mode proposes work only for explicit operational language. Known requests use deterministic rules. Ambiguous operational requests may call a configured non-local model with purpose `chat_action_planning`; its strict JSON output can select only a bounded intent and optional search text or allowlisted collaboration target. Tool IDs, commands, paths, URLs, executable inputs, and approval decisions are server-owned fixed mappings. Invalid or extra model fields reject the plan and write `chat_action_plan_rejected`. Proposals are audited and do not create tasks. Human Root confirmation calls `POST /chat/actions/{id}/execute`, which consumes the server-held proposal exactly once and runs the existing Workflow boundary, preserving Workflow Skill, approval, Memory, evaluation, and audit behavior. `POST /chat/actions/{id}/cancel` persistently closes an unconfirmed proposal. Completed proposal results are cached in-process so retries return the same task instead of creating duplicates. When that Workflow pauses, `POST /tasks/{task_id}/decision` records a Human Root approval or rejection and resumes the persisted task through one locked service operation. Repeating the same final decision returns the already-resolved task without executing it twice, and both execution and decision outcomes are written back into the originating chat session.
 
@@ -229,8 +235,10 @@ Current implemented routes include:
 - `GET/POST /chat/sessions`
 - `POST /chat/sessions/import`
 - `POST /chat/sessions/{session_id}/messages`
+- `POST /chat/sessions/{session_id}/messages/stream`
 - `DELETE /chat/sessions/{session_id}`
 - `POST /chat/actions/{proposal_id}/execute`
+- `POST /chat/actions/{proposal_id}/execute/stream`
 - `POST /chat/actions/{proposal_id}/cancel`
 - `GET /cost-logs`
 - `GET /budget/summary`

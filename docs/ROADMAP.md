@@ -98,6 +98,7 @@ Current status:
 - Chat action selection is rule-first and model-assisted only for ambiguous operational language. Structured model output is restricted to a bounded intent catalog, while executable parameters remain fixed server mappings and planner usage stays inside Budget and Audit controls.
 - Human Root chat sessions, messages, model metadata, and action-card state are now server-persisted, included in verified backup/restore state, and recover pending confirmation after browser or backend restart. Legacy browser transcripts import as text only.
 - Governed multi-step Agent Runs now let a configured non-local model choose one validated tool intent at a time, automatically continue low-risk reads, pause exact patches and fixed commands for Human Root approval, display the persisted execution trace in chat, and resume after SQLite restart. Runs are capped at eight tool steps and never accept model-selected Tool IDs, commands, URLs, or approval outcomes.
+- Native OpenAI/DeepSeek token streaming now reaches the console through authenticated SSE with final usage/cost/audit accounting, safe pre-delta fallback, and no planner/Agent-JSON leakage. Agent action execution separately streams persisted run and step snapshots into the live trace.
 - Unit and API tests cover the current closed loop.
 
 ## Phase 2: API and Persistence
@@ -160,7 +161,7 @@ Current interim implementation:
 - Current first Tool layer: task manager, knowledge base, audit read, external API, and code execution tool definitions.
 - Safe internal adapters exist for task manager, knowledge base, audit read, database read, and workspace-only filesystem read tools.
 - Exact workspace patching and fixed development commands are implemented behind mandatory Human Root approval; general code execution and external API adapters remain disabled by default.
-- Add streaming and further model adapters without bypassing provider-specific pricing, budget, privacy, or Audit controls. Native OpenAI Responses and DeepSeek Chat Completions adapters now share explicit fallback routing and actual-provider usage records.
+- Add further model adapters without bypassing provider-specific pricing, budget, privacy, or Audit controls. Native OpenAI Responses and DeepSeek Chat Completions adapters now share explicit fallback routing, actual-provider usage records, and provider-native streaming.
 - Add file, document, GitHub, and database tools.
 - Add browser and computer-control adapters only behind strict permission and approval gates.
 - Expand GitHub absorber beyond metadata/README import only after license, security, sandbox, and human approval checks remain covered.

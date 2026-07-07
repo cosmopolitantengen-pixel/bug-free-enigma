@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from app.core.models import ModelUsageRecord
@@ -105,6 +106,7 @@ class ModelGateway:
         provider: str | None = None,
         cost_per_token: float = 0.000001,
         max_output_tokens: int = 1024,
+        on_delta: Callable[[str], None] | None = None,
     ) -> ModelResponse:
         provider_name = provider or self.default_provider
         selected_model = self._selected_model(provider_name, model_name)
@@ -116,12 +118,36 @@ class ModelGateway:
         for attempt_provider, attempt_model in attempts:
             attempted_providers.append(attempt_provider)
             adapter = self._providers[attempt_provider]
+            emitted_delta = False
             try:
-                generated = adapter.generate(
-                    prompt, attempt_model, purpose, max_output_tokens
-                )
+                stream = getattr(adapter, "stream", None)
+                if on_delta is not None and callable(stream):
+                    generated = None
+                    for event in stream(
+                        prompt, attempt_model, purpose, max_output_tokens
+                    ):
+                        if event.delta:
+                            emitted_delta = True
+                            on_delta(event.delta)
+                        if event.generation is not None:
+                            generated = event.generation
+                    if generated is None:
+                        raise ModelProviderError(
+                            f"{attempt_provider} stream ended without a final response"
+                        )
+                else:
+                    generated = adapter.generate(
+                        prompt, attempt_model, purpose, max_output_tokens
+                    )
+                    if on_delta is not None:
+                        emitted_delta = True
+                        on_delta(generated.output)
             except ModelProviderError as exc:
                 last_error = exc
+                if emitted_delta:
+                    raise ModelProviderError(
+                        f"{attempt_provider} stream was interrupted after partial output"
+                    ) from exc
                 continue
             pricing = self._pricing.get(attempt_provider, {}).get(attempt_model)
             estimated_cost = (

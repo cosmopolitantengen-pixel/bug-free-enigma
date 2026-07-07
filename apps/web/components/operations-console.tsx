@@ -28,7 +28,7 @@ import {
   X,
 } from "lucide-react";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiRecord, apiRequest, formatDate, formatValue, getStoredApiToken, shortId, storeApiToken, text } from "@/lib/api";
+import { ApiRecord, ApiStreamEvent, apiEventStream, apiRequest, formatDate, formatValue, getStoredApiToken, shortId, storeApiToken, text } from "@/lib/api";
 
 type View = "chat" | "overview" | "work" | "scheduler" | "catalog" | "governance" | "system";
 type ChatAction = {
@@ -400,16 +400,16 @@ export function OperationsConsole() {
     method: "DELETE",
   }, apiToken), [apiBase, apiToken]);
 
-  const callChat = useCallback(async (sessionId: string, body: ApiRecord) => apiRequest<ApiRecord>(apiBase, `/chat/sessions/${sessionId}/messages`, {
+  const callChatStream = useCallback(async (sessionId: string, body: ApiRecord, onEvent: (event: ApiStreamEvent) => void) => apiEventStream<ApiRecord>(apiBase, `/chat/sessions/${sessionId}/messages/stream`, {
     method: "POST",
     body: JSON.stringify(body),
-  }, apiToken), [apiBase, apiToken]);
+  }, onEvent, apiToken), [apiBase, apiToken]);
 
-  const executeChatAction = useCallback(async (proposalId: string) => {
-    const result = await apiRequest<ApiRecord>(apiBase, `/chat/actions/${proposalId}/execute`, {
+  const executeChatAction = useCallback(async (proposalId: string, onEvent: (event: ApiStreamEvent) => void) => {
+    const result = await apiEventStream<ApiRecord>(apiBase, `/chat/actions/${proposalId}/execute/stream`, {
       method: "POST",
       signal: AbortSignal.timeout(130_000),
-    }, apiToken);
+    }, onEvent, apiToken);
     await refresh();
     return result;
   }, [apiBase, apiToken, refresh]);
@@ -495,7 +495,7 @@ export function OperationsConsole() {
 
         {loading && Object.keys(data.summary).length === 0 ? <LoadingState /> : (
           <>
-            {view === "chat" && <ChatView data={data} listChatSessions={listChatSessions} createChatSession={createChatSession} importChatSessions={importChatSessions} deleteChatSession={deleteChatSession} callChat={callChat} executeChatAction={executeChatAction} decideChatAction={decideChatAction} cancelChatAction={cancelChatAction} fail={setError} />}
+            {view === "chat" && <ChatView data={data} listChatSessions={listChatSessions} createChatSession={createChatSession} importChatSessions={importChatSessions} deleteChatSession={deleteChatSession} callChatStream={callChatStream} executeChatAction={executeChatAction} decideChatAction={decideChatAction} cancelChatAction={cancelChatAction} fail={setError} />}
             {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} />}
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
@@ -513,12 +513,12 @@ type ChatListCall = () => Promise<ApiRecord[]>;
 type ChatCreateCall = () => Promise<ApiRecord>;
 type ChatImportCall = (sessions: ApiRecord[]) => Promise<ApiRecord[]>;
 type ChatDeleteCall = (sessionId: string) => Promise<ApiRecord>;
-type ChatCall = (sessionId: string, body: ApiRecord) => Promise<ApiRecord>;
-type ChatActionCall = (proposalId: string) => Promise<ApiRecord>;
+type ChatStreamCall = (sessionId: string, body: ApiRecord, onEvent: (event: ApiStreamEvent) => void) => Promise<ApiRecord>;
+type ChatActionCall = (proposalId: string, onEvent: (event: ApiStreamEvent) => void) => Promise<ApiRecord>;
 type ChatDecisionCall = (taskId: string, decision: "approved" | "rejected") => Promise<ApiRecord>;
 type ChatCancelCall = (proposalId: string) => Promise<ApiRecord>;
 
-function ChatView({ data, listChatSessions, createChatSession, importChatSessions, deleteChatSession, callChat, executeChatAction, decideChatAction, cancelChatAction, fail }: { data: DataSet; listChatSessions: ChatListCall; createChatSession: ChatCreateCall; importChatSessions: ChatImportCall; deleteChatSession: ChatDeleteCall; callChat: ChatCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; cancelChatAction: ChatCancelCall; fail: (v: string) => void }) {
+function ChatView({ data, listChatSessions, createChatSession, importChatSessions, deleteChatSession, callChatStream, executeChatAction, decideChatAction, cancelChatAction, fail }: { data: DataSet; listChatSessions: ChatListCall; createChatSession: ChatCreateCall; importChatSessions: ChatImportCall; deleteChatSession: ChatDeleteCall; callChatStream: ChatStreamCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; cancelChatAction: ChatCancelCall; fail: (v: string) => void }) {
   const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
   const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
   const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
@@ -528,6 +528,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
   const [chatReady, setChatReady] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingChatId, setSendingChatId] = useState<string | null>(null);
+  const [streamingReply, setStreamingReply] = useState<{ sessionId: string; content: string } | null>(null);
   const [chatMode, setChatMode] = useState<"auto" | "chat" | "action" | "agent">("auto");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const executingActionIds = useRef<Set<string>>(new Set());
@@ -599,7 +600,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
-  }, [activeSession?.messages.length, sendingChatId]);
+  }, [activeSession?.messages.length, sendingChatId, streamingReply?.content]);
 
   const startNewChat = async () => {
     try {
@@ -634,15 +635,34 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
 
     fail("");
     const sessionId = activeSession.id;
+    const optimisticUser: ChatMessage = {
+      id: `pending-user-${Date.now()}`,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+    };
     setDraft("");
     setSendingChatId(sessionId);
+    setStreamingReply({ sessionId, content: "" });
+    setSessions((current) => current.map((session) => session.id === sessionId ? {
+      ...session,
+      title: session.messages.length ? session.title : content.slice(0, 28),
+      messages: [...session.messages, optimisticUser],
+      updatedAt: optimisticUser.createdAt,
+    } : session));
 
     try {
-      const result = await callChat(sessionId, {
+      const result = await callChatStream(sessionId, {
         content,
         mode: chatMode,
         provider,
         model_name: model,
+      }, ({ event, data }) => {
+        if (event !== "delta") return;
+        const delta = String(data.text ?? "");
+        setStreamingReply((current) => current?.sessionId === sessionId
+          ? { ...current, content: current.content + delta }
+          : current);
       });
       const serverSession = result.session as ApiRecord | undefined;
       if (serverSession) {
@@ -658,6 +678,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
       fail(message);
     } finally {
       setSendingChatId(null);
+      setStreamingReply(null);
     }
   };
 
@@ -679,7 +700,14 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
     executingActionIds.current.add(action.proposalId);
     updateAction(sessionId, message.id, { status: "executing" });
     try {
-      const result = await executeChatAction(action.proposalId);
+      const result = await executeChatAction(action.proposalId, ({ event, data }) => {
+        if (event !== "progress") return;
+        const serverSession = data.chat_session as ApiRecord | undefined;
+        if (!serverSession) return;
+        const next = chatSessionFromApi(serverSession);
+        setSessions((current) => [next, ...current.filter((session) => session.id !== next.id)]);
+        setActiveSessionId(next.id);
+      });
       const serverSession = result.chat_session as ApiRecord | undefined;
       if (serverSession) {
         const next = chatSessionFromApi(serverSession);
@@ -854,7 +882,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
               </div>}
             </article>
           ))}
-          {sendingChatId === activeSession.id && <article className="chat-message assistant pending"><div className="chat-message-label">AI Company OS</div><p>正在思考...</p></article>}
+          {sendingChatId === activeSession.id && <article className={`chat-message assistant pending ${streamingReply?.content ? "streaming" : ""}`}><div className="chat-message-label">AI Company OS</div><p>{streamingReply?.sessionId === activeSession.id && streamingReply.content ? streamingReply.content : "正在思考..."}</p></article>}
           <div ref={chatEndRef} aria-hidden="true" />
         </div>
 

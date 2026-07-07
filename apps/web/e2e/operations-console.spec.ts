@@ -228,7 +228,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       return;
     }
 
-    if (request.method() === "POST" && /^\/chat\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
+    if (request.method() === "POST" && /^\/chat\/sessions\/[^/]+\/messages(?:\/stream)?$/.test(url.pathname)) {
       const body = request.postDataJSON() as Record<string, unknown>;
       const sessionId = url.pathname.split("/")[3];
       const session = state.chatSessions.find((item) => item.session_id === sessionId);
@@ -260,10 +260,27 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
         session.updated_at = assistant.created_at;
       }
       state.actions.push({ method: request.method(), path: url.pathname, body });
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify({ session, message: assistant, response }),
-      });
+      const payload = { session, message: assistant, response };
+      if (url.pathname.endsWith("/stream")) {
+        const events = [
+          `event: ready\ndata: ${JSON.stringify({ session_id: sessionId })}`,
+        ];
+        if (response.type === "conversation") {
+          for (const delta of ["DeepSeek ", "generated ", "result"]) {
+            events.push(`event: delta\ndata: ${JSON.stringify({ text: delta })}`);
+          }
+        }
+        events.push(`event: complete\ndata: ${JSON.stringify(payload)}`);
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: `${events.join("\n\n")}\n\n`,
+        });
+      } else {
+        await route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify(payload),
+        });
+      }
       return;
     }
 
@@ -286,6 +303,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
       const isCommandAction = url.pathname.includes("chat-command-1");
       const isFailedCommandAction = url.pathname.includes("chat-command-fail");
       const isAgentAction = url.pathname.includes("chat-agent-1");
+      const isStream = url.pathname.endsWith("/stream");
       const proposalId = url.pathname.split("/")[3];
       const chatSession = state.chatSessions.find((session) =>
         ((session.messages as Array<Record<string, unknown>> | undefined) ?? []).some((message) =>
@@ -314,10 +332,16 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
         chatSession.agent_runs = [agentRun];
         chatMessages.push({ message_id: `chat-message-${++chatSequence}`, role: "assistant", content: "Agent Run inspected the workspace safely.", created_at: now, failed: false, action: null });
         chatSession.updated_at = now;
-        await route.fulfill({
-          contentType: "application/json",
-          body: JSON.stringify({ type: "agent_run", agent_run: agentRun, chat_session: chatSession, output: "Agent Run inspected the workspace safely.", approval_required: false, blocked: false }),
-        });
+        const result = { type: "agent_run", agent_run: agentRun, chat_session: chatSession, output: "Agent Run inspected the workspace safely.", approval_required: false, blocked: false };
+        if (isStream) {
+          const progress = { type: "agent_run_progress", agent_run: agentRun, chat_session: chatSession };
+          await route.fulfill({
+            contentType: "text/event-stream",
+            body: `event: ready\ndata: ${JSON.stringify({ proposal_id: proposalId })}\n\nevent: progress\ndata: ${JSON.stringify(progress)}\n\nevent: complete\ndata: ${JSON.stringify(result)}\n\n`,
+          });
+        } else {
+          await route.fulfill({ contentType: "application/json", body: JSON.stringify(result) });
+        }
         return;
       }
       if (proposal) {
@@ -339,9 +363,7 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
         chatMessages.push({ message_id: `chat-message-${++chatSequence}`, role: "assistant", content, created_at: new Date().toISOString(), failed: false, action: null });
         if (chatSession) chatSession.updated_at = new Date().toISOString();
       }
-      await route.fulfill({
-        contentType: "application/json",
-        body: JSON.stringify(isFailedCommandAction ? {
+      const result = isFailedCommandAction ? {
           workflow: { workflow_id: "tool_call_v1", name: "Tool Call" },
           task: { task_id: "task-command-failed", status: "needs_approval" },
           output: "Tool Call requires Human Root approval.",
@@ -384,8 +406,15 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
           approval_required: false,
           blocked: false,
           chat_session: chatSession,
-        }),
-      });
+        };
+      if (isStream) {
+        await route.fulfill({
+          contentType: "text/event-stream",
+          body: `event: ready\ndata: ${JSON.stringify({ proposal_id: proposalId })}\n\nevent: complete\ndata: ${JSON.stringify(result)}\n\n`,
+        });
+      } else {
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify(result) });
+      }
       return;
     }
 
@@ -648,7 +677,7 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.locator(".chat-message.user").getByText("我在考虑三种发布方向，先陪我梳理一下")).toBeVisible();
     await expect(page.getByText("DeepSeek generated result")).toBeVisible();
     await expect(page.getByText("42 Token")).toBeVisible();
-    expect(api.actions.find((item) => item.path.endsWith("/messages"))?.body).toMatchObject({
+    expect(api.actions.find((item) => item.path.endsWith("/messages/stream"))?.body).toMatchObject({
       content: "我在考虑三种发布方向，先陪我梳理一下",
       provider: "deepseek",
       model_name: "deepseek-v4-pro",
@@ -659,7 +688,7 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "发送消息" }).click();
     await expect(page.locator(".chat-message.user").getByText("第二个方向的优势是什么")).toBeVisible();
     await expect(page.locator(".chat-message.assistant")).toHaveCount(2);
-    const chatCalls = api.actions.filter((item) => item.path.endsWith("/messages"));
+    const chatCalls = api.actions.filter((item) => item.path.endsWith("/messages/stream"));
     expect(chatCalls).toHaveLength(2);
     expect(chatCalls[1].body).toMatchObject({ content: "第二个方向的优势是什么" });
     expect((api.chatSessions[0].messages as Array<Record<string, unknown>>).map((message) => message.content)).toEqual([
@@ -691,7 +720,7 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.getByText("list files", { exact: true })).toBeVisible();
     await expect(page.getByText("read file", { exact: true })).toBeVisible();
     await expect(page.getByText("Agent Run inspected the workspace safely.")).toBeVisible();
-    expect(api.actions.find((item) => item.path.endsWith("/messages"))?.body).toMatchObject({ mode: "agent" });
+    expect(api.actions.find((item) => item.path.endsWith("/messages/stream"))?.body).toMatchObject({ mode: "agent" });
   });
 
   test("confirms a chat action before running its workflow", async ({ page }, testInfo) => {
@@ -708,7 +737,7 @@ test.describe("AI Company OS operations console", () => {
 
     await page.getByRole("button", { name: "确认执行" }).click();
     await expect(page.getByText(/行动已完成/)).toBeVisible();
-    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-action-1/execute")).toHaveLength(1);
+    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-action-1/execute/stream")).toHaveLength(1);
   });
 
   test("returns Git tool output inside the chat", async ({ page }, testInfo) => {
@@ -722,7 +751,7 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "确认执行" }).click();
 
     await expect(page.getByText(/## main\.\.\.origin\/main/)).toBeVisible();
-    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-tool-1/execute")).toHaveLength(1);
+    expect(api.actions.filter((item) => item.path === "/chat/actions/chat-tool-1/execute/stream")).toHaveLength(1);
   });
 
   test("approves and resumes a high-risk command inside chat after reload", async ({ page }, testInfo) => {

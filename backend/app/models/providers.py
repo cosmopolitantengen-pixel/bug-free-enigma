@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
@@ -21,6 +23,12 @@ class ProviderGeneration:
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+
+
+@dataclass(frozen=True)
+class ProviderStreamEvent:
+    delta: str | None = None
+    generation: ProviderGeneration | None = None
 
 
 class ModelProvider(Protocol):
@@ -51,6 +59,13 @@ class DeterministicModelProvider:
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
         )
+
+    def stream(
+        self, prompt: str, model_name: str, purpose: str, max_output_tokens: int
+    ) -> Iterator[ProviderStreamEvent]:
+        generation = self.generate(prompt, model_name, purpose, max_output_tokens)
+        yield ProviderStreamEvent(delta=generation.output)
+        yield ProviderStreamEvent(generation=generation)
 
 
 class OpenAIResponsesProvider:
@@ -106,6 +121,67 @@ class OpenAIResponsesProvider:
         if not output:
             raise ModelProviderError("openai returned no text output")
         return ProviderGeneration(output, prompt_tokens, completion_tokens, total_tokens)
+
+    def stream(
+        self, prompt: str, model_name: str, purpose: str, max_output_tokens: int
+    ) -> Iterator[ProviderStreamEvent]:
+        output_parts: list[str] = []
+        completed_response: dict[str, Any] | None = None
+        try:
+            with self._client.stream(
+                "POST",
+                "/responses",
+                json={
+                    "model": model_name,
+                    "input": prompt,
+                    "store": False,
+                    "stream": True,
+                    "max_output_tokens": max_output_tokens,
+                },
+            ) as response:
+                if not response.is_success:
+                    raise ModelProviderError(_provider_http_error("openai", response))
+                for raw_data in _iter_sse_data(response.iter_lines()):
+                    if raw_data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(raw_data)
+                    except json.JSONDecodeError as exc:
+                        raise ModelProviderError("openai returned an invalid streaming event") from exc
+                    event_type = event.get("type")
+                    if event_type == "response.output_text.delta":
+                        delta = event.get("delta")
+                        if isinstance(delta, str) and delta:
+                            output_parts.append(delta)
+                            yield ProviderStreamEvent(delta=delta)
+                    elif event_type == "response.completed":
+                        value = event.get("response")
+                        if isinstance(value, dict):
+                            completed_response = value
+                    elif event_type in {"error", "response.failed", "response.incomplete"}:
+                        raise ModelProviderError("openai streaming response failed")
+        except ModelProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ModelProviderError(
+                f"openai request failed: {exc.__class__.__name__}"
+            ) from exc
+
+        output = "".join(output_parts).strip()
+        if not output:
+            raise ModelProviderError("openai returned no text output")
+        usage = (completed_response or {}).get("usage") or {}
+        try:
+            prompt_tokens = int(usage.get("input_tokens") or _estimate_tokens(prompt))
+            completion_tokens = int(usage.get("output_tokens") or _estimate_tokens(output))
+            total_tokens = int(usage.get("total_tokens") or prompt_tokens + completion_tokens)
+        except (TypeError, ValueError) as exc:
+            raise ModelProviderError("openai returned invalid streaming usage") from exc
+        yield ProviderStreamEvent(
+            generation=ProviderGeneration(
+                output, prompt_tokens, completion_tokens, total_tokens
+            )
+        )
 
 
 class DeepSeekChatProvider:
@@ -182,6 +258,80 @@ class DeepSeekChatProvider:
             raise ModelProviderError("deepseek returned no text output")
         return ProviderGeneration(output, prompt_tokens, completion_tokens, total_tokens)
 
+    def stream(
+        self, prompt: str, model_name: str, purpose: str, max_output_tokens: int
+    ) -> Iterator[ProviderStreamEvent]:
+        output_parts: list[str] = []
+        final_usage: dict[str, Any] = {}
+        try:
+            with self._client.stream(
+                "POST",
+                "/chat/completions",
+                json={
+                    "model": model_name,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"Complete the request for purpose: {purpose}.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "max_tokens": max_output_tokens,
+                },
+            ) as response:
+                if not response.is_success:
+                    raise ModelProviderError(_provider_http_error("deepseek", response))
+                for raw_data in _iter_sse_data(response.iter_lines()):
+                    if raw_data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(raw_data)
+                    except json.JSONDecodeError as exc:
+                        raise ModelProviderError(
+                            "deepseek returned an invalid streaming event"
+                        ) from exc
+                    usage = chunk.get("usage")
+                    if isinstance(usage, dict):
+                        final_usage = usage
+                    choices = chunk.get("choices") or []
+                    if not isinstance(choices, list) or not choices:
+                        continue
+                    choice = choices[0]
+                    delta = choice.get("delta") if isinstance(choice, dict) else None
+                    content = delta.get("content") if isinstance(delta, dict) else None
+                    if isinstance(content, str) and content:
+                        output_parts.append(content)
+                        yield ProviderStreamEvent(delta=content)
+        except ModelProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            raise ModelProviderError(
+                f"deepseek request failed: {exc.__class__.__name__}"
+            ) from exc
+
+        output = "".join(output_parts).strip()
+        if not output:
+            raise ModelProviderError("deepseek returned no text output")
+        try:
+            prompt_tokens = int(
+                final_usage.get("prompt_tokens") or _estimate_tokens(prompt)
+            )
+            completion_tokens = int(
+                final_usage.get("completion_tokens") or _estimate_tokens(output)
+            )
+            total_tokens = int(
+                final_usage.get("total_tokens") or prompt_tokens + completion_tokens
+            )
+        except (TypeError, ValueError) as exc:
+            raise ModelProviderError("deepseek returned invalid streaming usage") from exc
+        yield ProviderStreamEvent(
+            generation=ProviderGeneration(
+                output, prompt_tokens, completion_tokens, total_tokens
+            )
+        )
+
 
 def _response_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
@@ -211,6 +361,20 @@ def _chat_completion_text(payload: dict[str, Any]) -> str:
         return ""
     content = message.get("content")
     return content.strip() if isinstance(content, str) else ""
+
+
+def _iter_sse_data(lines: Iterator[str]) -> Iterator[str]:
+    data_lines: list[str] = []
+    for line in lines:
+        if line == "":
+            if data_lines:
+                yield "\n".join(data_lines)
+                data_lines.clear()
+            continue
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if data_lines:
+        yield "\n".join(data_lines)
 
 
 def _provider_http_error(provider: str, response: httpx.Response) -> str:

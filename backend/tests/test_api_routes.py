@@ -1515,6 +1515,54 @@ class ApiRouteTests(unittest.TestCase):
         self.assertGreater(listed[0]["messages"][-1]["total_tokens"], 0)
         self.assertEqual(len(self.client.get("/model-usage").json()), 2)
 
+    def test_chat_session_stream_emits_deltas_and_persists_final_exchange(self):
+        created = self.client.post("/chat/sessions", json={"title": "Streaming chat"})
+        session_id = created.json()["session_id"]
+
+        with self.client.stream(
+            "POST",
+            f"/chat/sessions/{session_id}/messages/stream",
+            json={
+                "content": "Explain the operating model briefly.",
+                "mode": "chat",
+                "provider": "local",
+                "model_name": "deterministic_mock_v1",
+            },
+        ) as response:
+            body = "".join(response.iter_text())
+
+        listed = self.client.get("/chat/sessions").json()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.headers["content-type"].startswith("text/event-stream"))
+        self.assertIn("event: ready", body)
+        self.assertIn("event: delta", body)
+        self.assertIn("event: complete", body)
+        self.assertNotIn("event: error", body)
+        self.assertEqual(len(listed[0]["messages"]), 2)
+        self.assertEqual(listed[0]["messages"][-1]["model"], "deterministic_mock_v1")
+        self.assertEqual(len(self.client.get("/model-usage").json()), 1)
+
+    def test_chat_session_stream_keeps_action_plans_out_of_text_deltas(self):
+        session_id = self.client.post(
+            "/chat/sessions", json={"title": "Streaming action"}
+        ).json()["session_id"]
+
+        with self.client.stream(
+            "POST",
+            f"/chat/sessions/{session_id}/messages/stream",
+            json={"content": "git status", "mode": "auto"},
+        ) as response:
+            body = "".join(response.iter_text())
+
+        listed = self.client.get("/chat/sessions").json()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("event: complete", body)
+        self.assertNotIn("event: delta", body)
+        self.assertEqual(
+            listed[0]["messages"][-1]["action"]["workflow_id"],
+            "tool_call_v1",
+        )
+
     def test_legacy_chat_import_discards_untrusted_action_fields(self):
         payload = {
             "sessions": [

@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -30,6 +31,7 @@ from app.models.providers import (
     ModelProviderError,
     OpenAIResponsesProvider,
     ProviderGeneration,
+    ProviderStreamEvent,
 )
 from app.persistence.sqlite_store import SQLiteStateStore
 from app.services.company import CompanyApplicationService
@@ -51,6 +53,32 @@ class _FakeModelProvider:
 class _FailingModelProvider(_FakeModelProvider):
     def generate(self, prompt, model_name, purpose, max_output_tokens):
         raise ModelProviderError("fake model endpoint unavailable")
+
+
+class _StreamingFakeProvider(_FakeModelProvider):
+    def stream(self, prompt, model_name, purpose, max_output_tokens):
+        yield ProviderStreamEvent(delta="real ")
+        yield ProviderStreamEvent(delta="stream")
+        yield ProviderStreamEvent(
+            generation=ProviderGeneration(
+                output="real stream",
+                prompt_tokens=5,
+                completion_tokens=2,
+                total_tokens=7,
+            )
+        )
+
+
+class _InterruptedStreamingProvider(_FakeModelProvider):
+    def stream(self, prompt, model_name, purpose, max_output_tokens):
+        yield ProviderStreamEvent(delta="partial")
+        raise ModelProviderError("upstream disconnected")
+
+
+class _SlowStreamingProvider(_StreamingFakeProvider):
+    def stream(self, prompt, model_name, purpose, max_output_tokens):
+        time.sleep(0.05)
+        yield from super().stream(prompt, model_name, purpose, max_output_tokens)
 
 
 class _FakeEmbeddingProvider:
@@ -155,6 +183,40 @@ class ModelProviderTests(unittest.TestCase):
             provider.generate("prompt", "test-model", "unit_test", 100)
         self.assertNotIn("do not expose", str(raised.exception))
 
+    def test_openai_responses_provider_streams_typed_text_events_and_usage(self):
+        observed = {}
+
+        def handler(request):
+            observed["body"] = json.loads(request.content)
+            events = [
+                'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello "}',
+                'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"stream"}',
+                'event: response.completed\ndata: {"type":"response.completed","response":{"usage":{"input_tokens":9,"output_tokens":2,"total_tokens":11}}}',
+            ]
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"content-type": "text/event-stream"},
+                text="\n\n".join(events) + "\n\n",
+            )
+
+        provider = OpenAIResponsesProvider(
+            "test-key",
+            default_model="test-model",
+            client=httpx.Client(
+                base_url="https://api.openai.com/v1",
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+
+        events = list(provider.stream("prompt", "test-model", "stream_test", 77))
+
+        self.assertTrue(observed["body"]["stream"])
+        self.assertFalse(observed["body"]["store"])
+        self.assertEqual([event.delta for event in events if event.delta], ["Hello ", "stream"])
+        self.assertEqual(events[-1].generation.output, "Hello stream")
+        self.assertEqual(events[-1].generation.total_tokens, 11)
+
     def test_deepseek_chat_provider_parses_text_and_usage(self):
         observed = {}
 
@@ -221,6 +283,42 @@ class ModelProviderTests(unittest.TestCase):
             provider.generate("prompt", "deepseek-v4-flash", "unit_test", 100)
         self.assertNotIn("private upstream detail", str(raised.exception))
 
+    def test_deepseek_provider_streams_deltas_and_final_usage(self):
+        observed = {}
+
+        def handler(request):
+            observed["body"] = json.loads(request.content)
+            chunks = [
+                'data: {"choices":[{"delta":{"content":"Deep"}}],"usage":null}',
+                'data: {"choices":[{"delta":{"content":"Seek"}}],"usage":null}',
+                'data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}',
+                "data: [DONE]",
+            ]
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"content-type": "text/event-stream"},
+                text="\n\n".join(chunks) + "\n\n",
+            )
+
+        provider = DeepSeekChatProvider(
+            "deepseek-test-key",
+            client=httpx.Client(
+                base_url="https://api.deepseek.com",
+                transport=httpx.MockTransport(handler),
+            ),
+        )
+
+        events = list(
+            provider.stream("prompt", "deepseek-v4-flash", "stream_test", 88)
+        )
+
+        self.assertTrue(observed["body"]["stream"])
+        self.assertTrue(observed["body"]["stream_options"]["include_usage"])
+        self.assertEqual([event.delta for event in events if event.delta], ["Deep", "Seek"])
+        self.assertEqual(events[-1].generation.output, "DeepSeek")
+        self.assertEqual(events[-1].generation.total_tokens, 10)
+
     def test_gateway_selects_provider_and_hashes_references(self):
         gateway = ModelGateway(
             providers={"fake": _FakeModelProvider()}, default_provider="fake"
@@ -244,6 +342,73 @@ class ModelProviderTests(unittest.TestCase):
                 purpose="provider_test",
                 model_name="unapproved-model",
             )
+
+    def test_gateway_emits_stream_deltas_and_records_one_usage(self):
+        gateway = ModelGateway(
+            providers={"fake": _StreamingFakeProvider()}, default_provider="fake"
+        )
+        deltas = []
+
+        response = gateway.generate(
+            "Private model input",
+            actor_id="document_agent_v1",
+            purpose="stream_test",
+            on_delta=deltas.append,
+        )
+
+        self.assertEqual(deltas, ["real ", "stream"])
+        self.assertEqual(response.output, "real stream")
+        self.assertEqual(response.usage.total_tokens, 7)
+        self.assertEqual(len(gateway.list_usage()), 1)
+
+    def test_gateway_does_not_mix_fallback_after_partial_stream_output(self):
+        gateway = ModelGateway(
+            providers={
+                "primary": _InterruptedStreamingProvider(),
+                "backup": _StreamingFakeProvider(),
+            },
+            default_provider="primary",
+            fallback_order=("backup",),
+        )
+        deltas = []
+
+        with self.assertRaisesRegex(ModelProviderError, "interrupted after partial"):
+            gateway.generate(
+                "Private model input",
+                actor_id="document_agent_v1",
+                purpose="stream_test",
+                on_delta=deltas.append,
+            )
+
+        self.assertEqual(deltas, ["partial"])
+        self.assertEqual(gateway.list_usage(), [])
+
+    def test_chat_stream_finishes_persistence_after_consumer_disconnect(self):
+        gateway = ModelGateway(
+            providers={"fake": _SlowStreamingProvider()}, default_provider="fake"
+        )
+        service = CompanyApplicationService(
+            company_os=build_company_os(model_gateway=gateway)
+        )
+        session = service.create_chat_session()
+        stream = service.stream_chat_session_message(
+            session["session_id"],
+            "Keep working after the browser leaves.",
+            mode="chat",
+            provider="fake",
+        )
+
+        self.assertEqual(next(stream)["event"], "ready")
+        stream.close()
+        for _ in range(50):
+            if len(service.list_chat_sessions()[0]["messages"]) == 2:
+                break
+            time.sleep(0.01)
+
+        stored = service.list_chat_sessions()[0]
+        self.assertEqual(len(stored["messages"]), 2)
+        self.assertEqual(stored["messages"][-1]["content"], "real stream")
+        self.assertEqual(len(service.list_model_usage()), 1)
 
     def test_gateway_falls_back_and_records_actual_provider_pricing(self):
         gateway = ModelGateway(

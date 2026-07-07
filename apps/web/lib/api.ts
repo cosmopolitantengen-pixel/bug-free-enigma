@@ -1,4 +1,5 @@
 export type ApiRecord = Record<string, unknown>;
+export type ApiStreamEvent = { event: string; data: ApiRecord };
 
 export async function apiRequest<T>(
   apiBase: string,
@@ -34,6 +35,84 @@ export async function apiRequest<T>(
     throw new Error(detail);
   }
   return payload as T;
+}
+
+export async function apiEventStream<T>(
+  apiBase: string,
+  path: string,
+  init: RequestInit,
+  onEvent: (event: ApiStreamEvent) => void,
+  authToken = getStoredApiToken(),
+): Promise<T> {
+  const headers: HeadersInit = {
+    "Content-Type": "application/json",
+    Accept: "text/event-stream",
+    ...init.headers,
+  };
+  if (authToken) Object.assign(headers, { Authorization: `Bearer ${authToken}` });
+
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase.replace(/\/$/, "")}${path}`, {
+      ...init,
+      headers,
+      signal: init.signal ?? AbortSignal.timeout(130_000),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new Error(`请求超时：${path}`);
+    }
+    throw error;
+  }
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const detail = payload && typeof payload === "object" && "detail" in payload
+      ? String(payload.detail)
+      : `请求失败：${response.status} ${response.statusText}`;
+    throw new Error(detail);
+  }
+  if (!response.body) throw new Error("服务器没有返回流式响应");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let complete: T | undefined;
+
+  const consumeFrame = (frame: string) => {
+    let event = "message";
+    const dataLines: string[] = [];
+    for (const line of frame.split(/\r?\n/)) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (!dataLines.length) return;
+    const raw = dataLines.join("\n");
+    let data: ApiRecord;
+    try {
+      data = JSON.parse(raw) as ApiRecord;
+    } catch {
+      throw new Error("服务器返回了无效的流式事件");
+    }
+    if (event === "error") throw new Error(String(data.detail ?? "流式请求失败"));
+    onEvent({ event, data });
+    if (event === "complete") complete = data as T;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    while (true) {
+      const separator = buffer.match(/\r?\n\r?\n/);
+      if (!separator || separator.index === undefined) break;
+      const frame = buffer.slice(0, separator.index);
+      buffer = buffer.slice(separator.index + separator[0].length);
+      consumeFrame(frame);
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) consumeFrame(buffer);
+  if (complete === undefined) throw new Error("流式响应在完成事件前结束");
+  return complete;
 }
 
 export function getStoredApiToken(): string {

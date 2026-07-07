@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.auth.service import AuthError
 from app.api.schemas import (
@@ -785,6 +788,33 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @router.post("/chat/sessions/{session_id}/messages/stream")
+    def stream_chat_session_message(
+        session_id: str,
+        payload: ChatSessionMessageCreateRequest,
+    ) -> StreamingResponse:
+        def encoded_events():
+            for item in service.stream_chat_session_message(
+                session_id=session_id,
+                content=payload.content,
+                mode=payload.mode,
+                model_name=payload.model_name,
+                provider=payload.provider,
+                owner_id=payload.owner_id,
+            ):
+                event = str(item.get("event") or "message")
+                data = json.dumps(item.get("data"), ensure_ascii=False, separators=(",", ":"))
+                yield f"event: {event}\ndata: {data}\n\n"
+
+        return StreamingResponse(
+            encoded_events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @router.post("/chat/actions/{proposal_id}/execute")
     def execute_chat_action(proposal_id: str) -> dict:
         try:
@@ -793,6 +823,23 @@ def build_router(service: CompanyApplicationService) -> APIRouter:
             raise HTTPException(status_code=404, detail="chat action proposal not found") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/chat/actions/{proposal_id}/execute/stream")
+    def stream_chat_action_execution(proposal_id: str) -> StreamingResponse:
+        def encoded_events():
+            for item in service.stream_chat_action_execution(proposal_id):
+                event = str(item.get("event") or "message")
+                data = json.dumps(item.get("data"), ensure_ascii=False, separators=(",", ":"))
+                yield f"event: {event}\ndata: {data}\n\n"
+
+        return StreamingResponse(
+            encoded_events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @router.post("/chat/actions/{proposal_id}/cancel")
     def cancel_chat_action(proposal_id: str) -> dict:

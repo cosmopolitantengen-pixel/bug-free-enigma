@@ -123,6 +123,35 @@ class ChatAgentRunTests(unittest.TestCase):
         self.assertEqual(completed["chat_session"]["messages"][1]["action"]["status"], "completed")
         self.assertEqual(completed["chat_session"]["agent_runs"][0]["status"], "completed")
 
+    def test_agent_run_execution_stream_emits_persisted_step_progress(self):
+        provider = _QueuedAgentProvider(
+            [
+                decision("list_files", path="backend"),
+                decision("finish", answer="Streaming progress completed."),
+            ]
+        )
+        service = service_with_provider(provider)
+        session = service.create_chat_session()
+        proposal = service.send_chat_session_message(
+            session["session_id"],
+            "Inspect the backend with progress updates.",
+            mode="agent",
+            provider="agenttest",
+        )["message"]["action"]
+
+        events = list(service.stream_chat_action_execution(proposal["proposal_id"]))
+        progress = [event["data"] for event in events if event["event"] == "progress"]
+
+        self.assertEqual(events[0]["event"], "ready")
+        self.assertEqual(events[-1]["event"], "complete")
+        self.assertGreaterEqual(len(progress), 4)
+        self.assertEqual(progress[0]["agent_run"]["status"], "running")
+        self.assertEqual(progress[-1]["agent_run"]["status"], "completed")
+        self.assertEqual(
+            progress[-1]["chat_session"]["agent_runs"][0]["steps"][0]["status"],
+            "completed",
+        )
+
     def test_agent_run_patch_waits_for_approval_then_continues(self):
         with tempfile.TemporaryDirectory() as temp_dir, patch(
             "app.tools.adapters.WORKSPACE_ROOT", Path(temp_dir)

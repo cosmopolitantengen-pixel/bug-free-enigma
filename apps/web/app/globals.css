@@ -154,6 +154,9 @@ textarea { min-height: 76px; resize: vertical; }
 .chat-message.user p { color: #fff; border-color: var(--accent); background: var(--accent); }
 .chat-message.failed p { color: var(--danger); border-color: #f4c7c1; background: var(--danger-soft); }
 .chat-message.pending p { color: var(--muted); }
+.chat-message.pending.streaming p { color: var(--ink); }
+.chat-message.pending.streaming p::after { display: inline-block; width: 2px; height: 1em; margin-left: 3px; background: var(--accent); content: ""; vertical-align: -2px; animation: stream-caret .8s steps(1) infinite; }
+@keyframes stream-caret { 50% { opacity: 0; } }
 .chat-message-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 6px 4px 0; color: var(--muted); font-size: 9px; }
 .chat-action-card { display: grid; gap: 10px; margin-top: 8px; padding: 12px; border: 1px solid #b9dfd1; border-radius: 7px; background: var(--accent-soft); }
 .chat-action-card.cancelled, .chat-action-card.failed { border-color: var(--line); background: var(--surface-muted); }

@@ -27,6 +27,8 @@ REQUIRED_API_PATHS = {
     "/runbooks",
     "/tasks/{task_id}/decision",
     "/workflows/run",
+    "/chat/sessions/{session_id}/messages/stream",
+    "/chat/actions/{proposal_id}/execute/stream",
 }
 
 REQUIRED_CONSOLE_ENDPOINTS = {
@@ -34,6 +36,8 @@ REQUIRED_CONSOLE_ENDPOINTS = {
     "/alerts/status",
     "/runbooks",
     "/scheduler/queue-health",
+    "/messages/stream",
+    "/execute/stream",
 }
 
 SECRET_PATTERNS = [
