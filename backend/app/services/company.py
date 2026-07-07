@@ -636,6 +636,7 @@ class CompanyApplicationService:
             self.company_os.tools.get(tool_input["tool_id"])
             self.company_os.agents.get(tool_input["actor_id"])
         task = self.create_task(title, description, user_id)
+        self._link_task_to_current_goal(task["task_id"])
         if workflow_id == "document_generation_v1":
             result = self.run_task(task["task_id"])
             return {"workflow": to_plain(definition), **result}
@@ -3938,6 +3939,25 @@ class CompanyApplicationService:
             goal.linked_task_ids.append(task_id)
             goal.updated_at = utc_now()
         self._audit_goal_link(goal, actor_id, "link_task_to_goal", task_id)
+        self.sync()
+        return to_plain(goal)
+
+    def _current_active_goal(self) -> StrategicGoal | None:
+        active_goals = self.company_os.goals.list(status=GoalStatus.ACTIVE.value)
+        if not active_goals:
+            return None
+        return sorted(active_goals, key=lambda goal: (goal.updated_at, goal.created_at, goal.goal_id))[-1]
+
+    def _link_task_to_current_goal(self, task_id: str, actor_id: str = "ceo_agent_v1") -> dict | None:
+        goal = self._current_active_goal()
+        if goal is None:
+            return None
+        self.tasks[task_id]
+        if task_id in goal.linked_task_ids:
+            return to_plain(goal)
+        goal.linked_task_ids.append(task_id)
+        goal.updated_at = utc_now()
+        self._audit_goal_link(goal, actor_id, "auto_link_task_to_current_goal", task_id)
         self.sync()
         return to_plain(goal)
 

@@ -956,7 +956,10 @@ function Overview({ data, pending, incidents }: { data: DataSet; pending: number
           <EntityList items={data.executions.slice(-6).reverse()} empty="暂无计划执行记录。" render={(item) => <EntityRow title={shortId(item.schedule_id)} detail={formatDate(item.started_at)} status={text(item.status)} />} />
         </Panel>
         <Panel title="近期战略目标" meta={`${data.goals.length} 项`}>
-          <EntityList items={data.goals.slice(-6).reverse()} empty="暂无战略目标。" render={(item) => <EntityRow title={text(item.title)} detail={`${shortId(item.goal_id)} / ${formatValue(item.target_metric)}`} status={text(item.status)} />} />
+          <EntityList items={data.goals.slice(-6).reverse()} empty="暂无战略目标。" render={(item) => {
+            const linkedTasks = Array.isArray(item.linked_task_ids) ? item.linked_task_ids.length : 0;
+            return <EntityRow title={text(item.title)} detail={`${shortId(item.goal_id)} / ${formatValue(item.target_metric)} / ${linkedTasks} 个任务`} status={text(item.status)} />;
+          }} />
         </Panel>
       </section>
       <section className="two-column">

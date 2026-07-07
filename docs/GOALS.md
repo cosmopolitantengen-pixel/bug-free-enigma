@@ -37,6 +37,8 @@ POST /goals/{goal_id}/improvements/{proposal_id}
 
 Human Root can create a goal from chat with messages such as `set goal: ...` or `设置目标：...`. The chat layer creates an audited confirmation card with `kind=strategic_goal`; no goal is written until Human Root confirms the action. Pending goal cards are persisted with the chat session and can be confirmed after a backend restart. Ordinary chat prompts include a compact list of active goals so the assistant can keep long-running operating intent in context.
 
+When an active goal exists, newly created Workflow tasks are automatically linked to the most recently updated active goal. This includes ordinary confirmed chat actions and each task created by a governed Agent Run step. The link writes the same `strategic_goal_linked` audit event as manual goal linking.
+
 ## Audit
 
 Goal creation writes `strategic_goal_created`.
@@ -47,4 +49,4 @@ Goal links write `strategic_goal_linked`.
 
 ## Dashboard
 
-The Next.js operations console reads `GET /goals`, shows strategic goal counts in Overview, and lists recent goals. The static dashboard includes a Strategic Goals panel near task creation. Human Root can create goals, update progress, and link task, review, or improvement records to a goal.
+The Next.js operations console reads `GET /goals`, shows strategic goal counts in Overview, and lists recent goals with linked task counts. The static dashboard includes a Strategic Goals panel near task creation. Human Root can create goals, update progress, and link task, review, or improvement records to a goal.

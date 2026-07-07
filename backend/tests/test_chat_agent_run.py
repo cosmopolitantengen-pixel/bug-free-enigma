@@ -123,6 +123,40 @@ class ChatAgentRunTests(unittest.TestCase):
         self.assertEqual(completed["chat_session"]["messages"][1]["action"]["status"], "completed")
         self.assertEqual(completed["chat_session"]["agent_runs"][0]["status"], "completed")
 
+    def test_agent_run_links_step_tasks_to_current_goal(self):
+        provider = _QueuedAgentProvider(
+            [
+                decision("list_files", path="backend"),
+                decision("finish", answer="The backend directory supports the goal."),
+            ]
+        )
+        service = service_with_provider(provider)
+        service.create_strategic_goal(
+            title="Codex equivalent OS",
+            description="Track Agent Run work against the current goal.",
+            owner_agent="ceo_agent_v1",
+            target_metric="milestones_completed",
+            target_value=4,
+        )
+        session = service.create_chat_session()
+        proposal = service.send_chat_session_message(
+            session["session_id"],
+            "Inspect the backend structure for the current goal.",
+            mode="agent",
+            provider="agenttest",
+            model_name="agenttest-v1",
+        )["message"]["action"]
+
+        completed = service.execute_chat_action(proposal["proposal_id"])
+        step_task_id = completed["agent_run"]["steps"][0]["task_id"]
+        goal = service.list_strategic_goals()[0]
+
+        self.assertEqual(goal["linked_task_ids"], [step_task_id])
+        self.assertIn(
+            "auto_link_task_to_current_goal",
+            [event["action"] for event in service.list_audit_logs() if event["event_type"] == "strategic_goal_linked"],
+        )
+
     def test_agent_run_execution_stream_emits_persisted_step_progress(self):
         provider = _QueuedAgentProvider(
             [

@@ -234,6 +234,33 @@ class ChatPlannerTests(unittest.TestCase):
             self.assertEqual(second.list_strategic_goals()[0]["title"], "Ship chat-native strategic goals")
             self.assertEqual(second.list_chat_sessions()[0]["messages"][1]["action"]["status"], "completed")
 
+    def test_confirmed_chat_workflow_links_created_task_to_current_goal(self):
+        service = CompanyApplicationService(company_os=build_company_os())
+        goal = service.create_strategic_goal(
+            title="Codex equivalent OS",
+            description="Track confirmed chat work under the current operating goal.",
+            owner_agent="ceo_agent_v1",
+            target_metric="milestones_completed",
+            target_value=5,
+        )
+        session = service.create_chat_session()
+        proposed = service.send_chat_session_message(
+            session["session_id"],
+            "Plan the next safe implementation step.",
+            mode="action",
+            provider="local",
+        )
+
+        completed = service.execute_chat_action(proposed["message"]["action"]["proposal_id"])
+        linked_goal = service.list_strategic_goals()[0]
+
+        self.assertEqual(completed["task"]["task_id"], linked_goal["linked_task_ids"][0])
+        self.assertEqual(linked_goal["goal_id"], goal["goal_id"])
+        self.assertIn(
+            "auto_link_task_to_current_goal",
+            [event["action"] for event in service.list_audit_logs() if event["event_type"] == "strategic_goal_linked"],
+        )
+
     def test_action_mode_without_external_planner_uses_controlled_task_plan(self):
         service = CompanyApplicationService(company_os=build_company_os())
 
