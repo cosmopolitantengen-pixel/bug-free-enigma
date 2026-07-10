@@ -31,7 +31,7 @@ import {
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiRecord, ApiStreamEvent, apiEventStream, apiRequest, formatDate, formatValue, getStoredApiToken, shortId, storeApiToken, text } from "@/lib/api";
 
-type View = "chat" | "overview" | "work" | "scheduler" | "catalog" | "governance" | "system";
+type View = "chat" | "overview" | "work" | "scheduler" | "governance" | "system";
 type ChatAction = {
   proposalId: string;
   workflowId: string;
@@ -139,12 +139,11 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
 
 const NAV_ITEMS: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "chat", label: "对话", icon: MessageSquare },
-  { id: "overview", label: "总览", icon: CircleGauge },
-  { id: "work", label: "工作台", icon: ListChecks },
-  { id: "scheduler", label: "计划任务", icon: CalendarClock },
-  { id: "catalog", label: "能力目录", icon: Boxes },
-  { id: "governance", label: "治理中心", icon: ShieldCheck },
-  { id: "system", label: "系统设置", icon: ServerCog },
+  { id: "overview", label: "目标与任务", icon: Target },
+  { id: "work", label: "执行中心", icon: Play },
+  { id: "scheduler", label: "自动化", icon: CalendarClock },
+  { id: "governance", label: "审批与安全", icon: ShieldCheck },
+  { id: "system", label: "设置", icon: ServerCog },
 ];
 
 const CHAT_STORAGE_KEY = "ai-company-os-chat-sessions-v1";
@@ -339,6 +338,7 @@ export function OperationsConsole() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [chatDraftSeed, setChatDraftSeed] = useState("");
 
   useEffect(() => {
     const stored = window.localStorage.getItem("ai-company-os-api-base");
@@ -457,6 +457,11 @@ export function OperationsConsole() {
 
   const pendingApprovals = data.approvals.filter((item) => ["pending", "need_more_info"].includes(text(item.status, "")));
   const openIncidents = data.incidents.filter((item) => text(item.status, "") !== "resolved");
+  const openChatWithPrompt = useCallback((prompt: string) => {
+    setChatDraftSeed(prompt);
+    setView("chat");
+    setMobileOpen(false);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -503,11 +508,10 @@ export function OperationsConsole() {
 
         {loading && Object.keys(data.summary).length === 0 ? <LoadingState /> : (
           <>
-            {view === "chat" && <ChatView data={data} listChatSessions={listChatSessions} createChatSession={createChatSession} importChatSessions={importChatSessions} deleteChatSession={deleteChatSession} callChatStream={callChatStream} executeChatAction={executeChatAction} decideChatAction={decideChatAction} cancelChatAction={cancelChatAction} fail={setError} />}
-            {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} />}
+            {view === "chat" && <ChatView data={data} listChatSessions={listChatSessions} createChatSession={createChatSession} importChatSessions={importChatSessions} deleteChatSession={deleteChatSession} callChatStream={callChatStream} executeChatAction={executeChatAction} decideChatAction={decideChatAction} cancelChatAction={cancelChatAction} fail={setError} draftSeed={chatDraftSeed} consumeDraftSeed={() => setChatDraftSeed("")} />}
+            {view === "overview" && <Overview data={data} pending={pendingApprovals.length} incidents={openIncidents.length} mutate={mutate} notify={setNotice} fail={setError} openChat={openChatWithPrompt} />}
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
-            {view === "catalog" && <CatalogView data={data} />}
             {view === "governance" && <GovernanceView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} />}
           </>
@@ -526,7 +530,7 @@ type ChatActionCall = (proposalId: string, onEvent: (event: ApiStreamEvent) => v
 type ChatDecisionCall = (taskId: string, decision: "approved" | "rejected") => Promise<ApiRecord>;
 type ChatCancelCall = (proposalId: string) => Promise<ApiRecord>;
 
-function ChatView({ data, listChatSessions, createChatSession, importChatSessions, deleteChatSession, callChatStream, executeChatAction, decideChatAction, cancelChatAction, fail }: { data: DataSet; listChatSessions: ChatListCall; createChatSession: ChatCreateCall; importChatSessions: ChatImportCall; deleteChatSession: ChatDeleteCall; callChatStream: ChatStreamCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; cancelChatAction: ChatCancelCall; fail: (v: string) => void }) {
+function ChatView({ data, listChatSessions, createChatSession, importChatSessions, deleteChatSession, callChatStream, executeChatAction, decideChatAction, cancelChatAction, fail, draftSeed, consumeDraftSeed }: { data: DataSet; listChatSessions: ChatListCall; createChatSession: ChatCreateCall; importChatSessions: ChatImportCall; deleteChatSession: ChatDeleteCall; callChatStream: ChatStreamCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; cancelChatAction: ChatCancelCall; fail: (v: string) => void; draftSeed: string; consumeDraftSeed: () => void }) {
   const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
   const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
   const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
@@ -542,6 +546,12 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
   const executingActionIds = useRef<Set<string>>(new Set());
   const availableModels = allowedModels[provider] ?? [];
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
+
+  useEffect(() => {
+    if (!draftSeed) return;
+    setDraft(draftSeed);
+    consumeDraftSeed();
+  }, [consumeDraftSeed, draftSeed]);
 
   const loadServerSessions = useCallback(async (preferredId?: string) => {
     const records = await listChatSessions();
@@ -932,43 +942,106 @@ function AgentRunTrace({ run }: { run?: AgentRun }) {
   );
 }
 
-function Overview({ data, pending, incidents }: { data: DataSet; pending: number; incidents: number }) {
-  const s = data.summary;
-  const metrics = [
-    ["任务", s.task_count, ListChecks], ["待审批", pending, ClipboardCheck],
-    ["待处理事件", incidents, AlertTriangle], ["运行中的计划", s.active_scheduled_job_count, CalendarClock],
-    ["工作流运行", s.workflow_run_count, Workflow], ["智能体", s.agent_count, Bot],
-    ["模型令牌", s.model_token_count, Activity],
-    ["战略目标", s.strategic_goal_count ?? data.goals.length, Target],
-    ["完整性问题", s.integrity_issue_count, ShieldCheck],
-  ] as const;
+function Overview({ data, pending, incidents, mutate, notify, fail, openChat }: { data: DataSet; pending: number; incidents: number; mutate: Mutate; notify: (v: string) => void; fail: (v: string) => void; openChat: (prompt: string) => void }) {
+  const [goalTitle, setGoalTitle] = useState("");
+  const [goalDescription, setGoalDescription] = useState("");
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [submitting, setSubmitting] = useState<"goal" | "task" | "" >("");
+
+  const createGoal = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting("goal");
+    try {
+      await mutate("/goals", {
+        title: goalTitle,
+        description: goalDescription || goalTitle,
+        owner_agent: "ceo_agent_v1",
+        target_metric: "milestones_completed",
+        target_value: 100,
+        current_value: 0,
+      });
+      setGoalTitle("");
+      setGoalDescription("");
+      notify("目标已创建，AI 可以开始推进。");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "创建目标失败");
+    } finally {
+      setSubmitting("");
+    }
+  };
+
+  const createTask = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting("task");
+    try {
+      await mutate("/tasks", { title: taskTitle, description: taskDescription || taskTitle, user_id: "human_root" });
+      setTaskTitle("");
+      setTaskDescription("");
+      notify("任务已创建，可以交给 AI 执行。");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "创建任务失败");
+    } finally {
+      setSubmitting("");
+    }
+  };
+
+  const controlTask = async (taskId: unknown, action: "run" | "pause" | "resume" | "cancel") => {
+    try {
+      await mutate(`/tasks/${text(taskId)}/${action}`);
+      notify({ run: "任务已开始。", pause: "任务已暂停。", resume: "任务已继续。", cancel: "任务已取消。" }[action]);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "任务操作失败");
+    }
+  };
+
   return (
-    <div className="view-stack">
-      <section className="metrics-grid">
-        {metrics.map(([label, value, Icon]) => <Metric key={label} label={label} value={text(value, "0")} icon={<Icon />} />)}
+    <div className="view-stack task-center">
+      <section className="ai-delegation-banner">
+        <div className="ai-delegation-icon"><Bot /></div>
+        <div><strong>AI 负责推进，你负责定目标</strong><span>目标拆解、Agent 调度、工具选择和过程记录由系统完成；高风险动作会停下来请你确认。</span></div>
+        <button className="button" onClick={() => openChat("请根据当前目标和任务，选择最重要的一项并开始推进。")}>让 AI 开始工作<ChevronRight /></button>
       </section>
-      <section className="two-column">
-        <Panel title="近期工作" meta={`共 ${data.tasks.length} 项`}>
-          <EntityList items={data.tasks.slice(-8).reverse()} empty="暂无任务。" render={(item) => <EntityRow title={text(item.title)} detail={shortId(item.task_id)} status={text(item.status)} />} />
+
+      <section className="metrics-grid task-metrics">
+        <Metric label="进行中的目标" value={String(data.goals.filter((item) => text(item.status) === "active").length)} icon={<Target />} />
+        <Metric label="全部任务" value={String(data.tasks.length)} icon={<ListChecks />} />
+        <Metric label="等待你确认" value={String(pending)} icon={<ClipboardCheck />} />
+        <Metric label="需要处理" value={String(incidents)} icon={<AlertTriangle />} />
+      </section>
+
+      <section className="quick-create-grid">
+        <Panel title="新建目标" meta="AI 自动拆解">
+          <form className="form-grid" onSubmit={createGoal}>
+            <Field label="你想实现什么"><input value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} placeholder="例如：完成产品第一版并交付使用" required /></Field>
+            <Field label="补充说明"><textarea value={goalDescription} onChange={(event) => setGoalDescription(event.target.value)} placeholder="结果标准、限制条件或期望时间" /></Field>
+            <button className="button" disabled={submitting === "goal"}><Target />{submitting === "goal" ? "创建中..." : "创建目标"}</button>
+          </form>
         </Panel>
-        <Panel title="待办队列" meta={`${pending + incidents} 项待处理`}>
-          <EntityList items={[...data.approvals.filter((a) => text(a.status) === "pending"), ...data.incidents.filter((i) => text(i.status) !== "resolved")].slice(0, 8)} empty="当前没有需要处理的事项。" render={(item) => <EntityRow title={text(item.title ?? item.request)} detail={shortId(item.approval_id ?? item.incident_id)} status={text(item.status)} />} />
+        <Panel title="新建任务" meta="可立即交给 AI">
+          <form className="form-grid" onSubmit={createTask}>
+            <Field label="要完成的事情"><input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} placeholder="例如：检查项目并修复启动问题" required /></Field>
+            <Field label="任务要求"><textarea value={taskDescription} onChange={(event) => setTaskDescription(event.target.value)} placeholder="说明范围、输出和不能做的事情" /></Field>
+            <button className="button" disabled={submitting === "task"}><Plus />{submitting === "task" ? "创建中..." : "创建任务"}</button>
+          </form>
         </Panel>
       </section>
-      <section className="two-column">
-        <Panel title="计划执行动态" meta={`${data.executions.length} 次执行`}>
-          <EntityList items={data.executions.slice(-6).reverse()} empty="暂无计划执行记录。" render={(item) => <EntityRow title={shortId(item.schedule_id)} detail={formatDate(item.started_at)} status={text(item.status)} />} />
-        </Panel>
-        <Panel title="近期战略目标" meta={`${data.goals.length} 项`}>
-          <EntityList items={data.goals.slice(-6).reverse()} empty="暂无战略目标。" render={(item) => {
-            const linkedTasks = Array.isArray(item.linked_task_ids) ? item.linked_task_ids.length : 0;
-            return <EntityRow title={text(item.title)} detail={`${shortId(item.goal_id)} / ${formatValue(item.target_metric)} / ${linkedTasks} 个任务`} status={text(item.status)} />;
+
+      <section className="two-column task-records">
+        <Panel title="战略目标" meta={`${data.goals.length} 项`}>
+          <EntityList items={data.goals.slice().reverse()} empty="还没有目标。" render={(item) => {
+            const current = Number(item.current_value ?? 0);
+            const target = Number(item.target_value ?? 100) || 100;
+            const progress = Math.max(0, Math.min(100, Math.round((current / target) * 100)));
+            return <div className="goal-record"><div className="entity-row"><div><strong>{text(item.title)}</strong><span>{shortId(item.goal_id)} / {Array.isArray(item.linked_task_ids) ? item.linked_task_ids.length : 0} 个关联任务</span></div><StatusPill value={text(item.status)} /></div><div className="goal-progress"><span style={{ width: `${progress}%` }} /></div><div className="record-footer"><small>{progress}% 完成</small><button className="small-button" onClick={() => openChat(`继续推进目标“${text(item.title)}”，先检查当前进度，再执行最重要的下一步。`)}><Bot />交给 AI 继续</button></div></div>;
           }} />
         </Panel>
-      </section>
-      <section className="two-column">
-        <Panel title="近期领域事件" meta={`已加载 ${data.events.length} 条`}>
-          <EntityList items={data.events.slice(-6).reverse()} empty="暂无领域事件。" render={(item) => <EntityRow title={formatValue(item.event_type)} detail={`${formatValue(item.source_type)} / ${shortId(item.source_id)}`} status={formatDate(item.created_at)} />} />
+        <Panel title="任务队列" meta={`最近 ${Math.min(data.tasks.length, 16)} / 共 ${data.tasks.length} 项`}>
+          <EntityList items={data.tasks.slice(-16).reverse()} empty="还没有任务。" render={(item) => {
+            const status = text(item.status);
+            const terminal = ["completed", "cancelled", "failed"].includes(status);
+            return <div className="task-record"><EntityRow title={text(item.title)} detail={`${shortId(item.task_id)} / ${formatValue(item.risk_level)}`} status={status} /><div className="task-record-actions"><button className="small-button" onClick={() => openChat(`请接手任务“${text(item.title)}”。先读取任务状态和相关上下文，然后规划并执行下一步。`)}><Bot />交给 AI</button>{["created", "planned"].includes(status) && <button className="small-button" onClick={() => void controlTask(item.task_id, "run")}><Play />运行</button>}{status === "paused" && <button className="small-button" onClick={() => void controlTask(item.task_id, "resume")}><Play />继续</button>}{["running", "in_progress"].includes(status) && <button className="small-button" onClick={() => void controlTask(item.task_id, "pause")}>暂停</button>}{!terminal && <button className="small-button danger-button" onClick={() => void controlTask(item.task_id, "cancel")}>取消</button>}</div></div>;
+          }} />
         </Panel>
       </section>
     </div>
@@ -1220,6 +1293,10 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
       <Panel title="数据库结构迁移" meta={`已应用 ${migrations.length} 项`}>
         <EntityList items={migrations} empty="没有数据库迁移记录。" render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} />
       </Panel>
+      <details className="advanced-catalog">
+        <summary>高级信息：Agent、Skill、Tool 与 Workflow</summary>
+        <CatalogView data={data} />
+      </details>
       <div className="legacy-note"><FileClock /><div><strong>已保留旧版控制台</strong><span>无依赖的备用控制台仍位于 <code>apps/web_dashboard</code>。</span></div></div>
     </div>
   );
