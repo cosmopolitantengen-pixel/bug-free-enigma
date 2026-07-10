@@ -489,6 +489,10 @@ export function OperationsConsole() {
             <div><p className="eyebrow">人类最高管理员 / {NAV_ITEMS.find((item) => item.id === view)?.label}</p><h1>{NAV_ITEMS.find((item) => item.id === view)?.label}</h1></div>
           </div>
           <div className="top-actions">
+            <div className="top-summary" aria-label="运营摘要">
+              <span><ClipboardCheck />{pendingApprovals.length} 待审批</span>
+              <span className={openIncidents.length ? "has-alerts" : ""}><AlertTriangle />{openIncidents.length} 事件</span>
+            </div>
             <StatusPill value={text(data.integrity.status, loading ? "loading" : "unknown")} />
             <button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button>
           </div>
