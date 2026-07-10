@@ -71,6 +71,7 @@ Current status:
 - Strategic goals persist to SQLite, track progress, link tasks/reviews/improvements, audit changes, and appear in the dashboard.
 - Low-risk internal Tool Runs now execute deterministic adapters for task state, knowledge docs, audit reads, aggregate database state, and safe workspace file reads instead of returning only simulated text.
 - Workspace file reads include deterministic external-content inspection so prompt-injection-like text is flagged as untrusted source data.
+- Local computer control now has a first high-risk Tool boundary: disabled by default, explicitly enabled for local use, approval-gated, audited, and restricted to reviewed URL/app/key/text desktop operations.
 - GitHub absorption analysis accepts user-supplied repo metadata or controlled GitHub connector metadata import, applies external-content/license/security checks, requires approval and sandbox, and registers safe analyses as Knowledge only.
 - Structured JSON operational logs are exposed as a read-only view over audit, workflow, tool, model, cost, and incident records.
 - SQLite now records a baseline schema migration ledger and exposes database schema status through API and dashboard.

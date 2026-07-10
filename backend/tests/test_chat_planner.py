@@ -122,6 +122,25 @@ class ChatPlannerTests(unittest.TestCase):
         self.assertEqual(service.list_audit_logs()[-1]["result"], "awaiting_human_confirmation:model")
         self.assertEqual(service.list_tasks(), [])
 
+    def test_chat_open_url_routes_to_computer_control_proposal(self):
+        service = CompanyApplicationService(company_os=build_company_os())
+
+        result = service.respond_to_chat(
+            [{"role": "user", "content": "open url https://example.com/dashboard"}],
+            mode="auto",
+            provider="local",
+        )
+
+        self.assertEqual(result["type"], "action_proposal")
+        self.assertEqual(result["action"]["workflow_id"], "tool_call_v1")
+        self.assertEqual(result["action"]["input"]["tool_id"], "computer_control_tool")
+        self.assertEqual(result["action"]["input"]["actor_id"], "workspace_agent_v1")
+        self.assertEqual(
+            result["action"]["input"]["tool_input"],
+            {"operation": "open_url", "url": "https://example.com/dashboard"},
+        )
+        self.assertEqual(service.list_tasks(), [])
+
     def test_invalid_model_plan_cannot_smuggle_executable_input(self):
         provider = _PurposeModelProvider(
             '{"intent":"backend_tests","query":null,"target_agent":null,"argv":["powershell","-Command","unsafe"]}'

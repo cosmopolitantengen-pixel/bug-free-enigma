@@ -1,6 +1,7 @@
 param(
     [int]$ApiPort = 8000,
-    [int]$WebPort = 3000
+    [int]$WebPort = 3000,
+    [switch]$EnableComputerControl
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,9 @@ $webDir = Join-Path $root "apps\web"
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
 $env:AI_COMPANY_OS_SQLITE_PATH = $databasePath
 $env:NEXT_PUBLIC_API_BASE = "http://127.0.0.1:$ApiPort"
+if ($EnableComputerControl) {
+    $env:AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL = "1"
+}
 
 function Test-Endpoint([string]$Url) {
     try {

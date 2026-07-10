@@ -11,6 +11,8 @@ Human Root > AI Board > AI CEO > Department Agent > Agent > Skill > Tool
 - `L2_INTERNAL_WRITE`: write internal task, memory, and knowledge records.
 - `L3_EXTERNAL_PREPARE`: prepare external content or API calls, but require approval before sending.
 - `L4_HIGH_RISK`: contracts, privacy, account, computer-control, code execution, or money-adjacent actions require Root approval.
+
+Local computer control is always treated as `L4_HIGH_RISK`. The default Tool is disabled until explicitly enabled for local use, and every desktop action still requires Human Root approval before execution.
 - `L5_ROOT`: root settings, keys, audit deletion, risk shutdown, payment and refund actions are human-only.
 
 ## Hard Invariants

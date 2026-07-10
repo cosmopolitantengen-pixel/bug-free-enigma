@@ -45,7 +45,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 ## Verification Evidence
 
-- Full local backend suite: 253 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
+- Full local backend suite: 258 tests pass, with the dedicated PostgreSQL and Redis integration tests skipped when service URLs are not configured.
 - GitHub Actions provisions PostgreSQL with pgvector plus Redis and runs the full suite with both integration tests enabled.
 - GitHub Actions runs the release gate for API contract, readiness redaction, core Workflow smoke, console endpoint wiring, and secret-like committed values.
 - GitHub Actions installs, type-checks, and production-builds the Next.js console.
@@ -55,6 +55,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 - Chat action planning is rule-first and restricts model output to a validated intent catalog. Tests reject executable-field smuggling and preserve explicit conversation-only requests; live DeepSeek acceptance showed planner usage/cost, zero tasks before confirmation, an audited model-planned proposal, and controlled Git execution only after confirmation.
 - Server-owned chat sessions persist transcripts, usage/cost metadata, and action state in SQLite/PostgreSQL and backup snapshots. Tests prove pending action execution after SQLite restart and reject executable fields during legacy browser-history import.
 - Chat-native strategic goal cards route explicit goal-setting language through Human Root confirmation before writing Goals. Tests cover creation, audit, active-goal conversation context, `下一步` / `continue goal` continuation proposals, SQLite restart recovery, automatic task linkage for confirmed chat Workflows and Agent Run steps, and Next.js Overview visibility.
+- Local computer control has an initial controlled Tool boundary: disabled by default, high-risk, Human Root approval-gated, audited, and limited to reviewed URL/app/key/text desktop actions.
 - Governed Agent Runs use a strict one-step decision contract over fixed Tool mappings, cap execution at eight steps, automatically continue low-risk reads, and pause patches or commands for Human Root. Tests cover read-only completion, exact-patch preview and approval, rejection without mutation, parser smuggling rejection, and approval continuation after SQLite restart; Playwright covers the visible multi-step trace. Live DeepSeek acceptance completed a confirmed read-only README objective through one persisted `read_file` step and returned a Chinese summary without requesting a write or command approval.
 - Provider-native OpenAI/DeepSeek streaming is normalized through authenticated chat SSE. Tests verify typed/data event parsing, final usage accounting, persisted conversation completion, no structured planner deltas, and persisted Agent step progress; browser E2E runs every chat/action flow through the streaming endpoints.
 - Git diff whitespace validation passes.
@@ -65,7 +66,7 @@ The first-version API list is present: auth, Agents, Skills, Workflows, Tasks, A
 
 These are not proven complete and must not be represented as delivered:
 
-1. Broader connector-backed ingestion beyond GitHub metadata/README import and real external/browser/computer Tool adapters.
+1. Broader connector-backed ingestion beyond GitHub metadata/README import, plus browser automation and broader computer/external Tool adapters beyond the first approval-gated local desktop control boundary.
 2. External secret-manager adapters beyond file-mounted secrets, identity-provider-backed sessions, and deeper production auth hardening beyond the current optional bearer-token API gate and expiring local sessions.
 3. Managed alert routing/escalation, deployment promotion automation, deeper browser coverage for provider failures and destructive restore approval flows, and streaming policy. DeepSeek V4 generation now has provider-specific input/output pricing and explicit multi-provider fallback routing.
 

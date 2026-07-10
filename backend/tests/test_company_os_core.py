@@ -841,7 +841,7 @@ class CompanyOSCoreTests(unittest.TestCase):
             command_result = json.loads(completed["run"]["result"])
 
             self.assertEqual(completed["run"]["status"], "failed")
-            self.assertEqual(completed["run"]["error"], "command exited with status 3")
+            self.assertEqual(completed["run"]["error"], "tool process exited with status 3")
             self.assertIn("partial output", command_result["stdout"])
             self.assertIn("validation failed", command_result["stderr"])
 
@@ -906,6 +906,86 @@ class CompanyOSCoreTests(unittest.TestCase):
             self.assertIn("inside the workspace", patch_result["run"]["error"])
             self.assertEqual(command_result["run"]["status"], "failed")
             self.assertIn("not allowlisted", command_result["run"]["error"])
+
+    def test_computer_control_tool_is_disabled_until_explicitly_enabled(self):
+        from app.services.company import CompanyApplicationService
+
+        with patch.dict(os.environ, {"AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL": ""}, clear=False):
+            service = CompanyApplicationService(company_os=build_company_os())
+
+        result = service.request_tool_run(
+            tool_id="computer_control_tool",
+            actor_id="workspace_agent_v1",
+            input={"operation": "launch_app", "app": "calc"},
+            reason="Open a reviewed local app.",
+        )
+
+        self.assertEqual(result["run"]["status"], "blocked")
+        self.assertEqual(result["run"]["error"], "tool is disabled")
+        self.assertIsNone(result["approval"])
+
+    def test_computer_control_tool_requires_approval_and_uses_allowlist(self):
+        from app.services.company import CompanyApplicationService
+
+        with patch.dict(os.environ, {"AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL": "1"}, clear=False), patch(
+            "app.tools.adapters.shutil.which", return_value=r"C:\Windows\System32\calc.exe"
+        ), patch(
+            "app.tools.adapters.subprocess.run",
+            return_value=subprocess.CompletedProcess(["calc.exe"], 0, stdout="", stderr=""),
+        ) as run_process:
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="computer_control_tool",
+                actor_id="workspace_agent_v1",
+                input={"operation": "launch_app", "app": "calc"},
+                reason="Open calculator after Human Root approval.",
+            )
+
+            self.assertEqual(requested["run"]["status"], "waiting_approval")
+            self.assertEqual(requested["risk"]["level"], "high")
+            self.assertEqual(requested["permission_decision"], "require_approval")
+            self.assertEqual(requested["approval"]["request"]["metadata"]["tool_input"]["app"], "calc")
+
+            service.decide_approval(
+                requested["approval"]["approval_id"],
+                ApprovalStatus.APPROVED,
+                "human_root",
+                "approve controlled desktop app launch",
+            )
+            completed = service.complete_tool_run(requested["run"]["run_id"])
+
+            self.assertEqual(completed["run"]["status"], "completed")
+            self.assertEqual(json.loads(completed["run"]["result"])["operation"], "launch_app")
+            self.assertEqual(run_process.call_args.kwargs["shell"], False)
+
+    def test_computer_control_nonzero_exit_is_a_failed_run(self):
+        from app.services.company import CompanyApplicationService
+
+        with patch.dict(os.environ, {"AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL": "1"}, clear=False), patch(
+            "app.tools.adapters.shutil.which", return_value=r"C:\Windows\System32\calc.exe"
+        ), patch(
+            "app.tools.adapters.subprocess.run",
+            return_value=subprocess.CompletedProcess(["calc.exe"], 5, stdout="", stderr="launch denied"),
+        ):
+            service = CompanyApplicationService(company_os=build_company_os())
+            requested = service.request_tool_run(
+                tool_id="computer_control_tool",
+                actor_id="workspace_agent_v1",
+                input={"operation": "launch_app", "app": "calc"},
+                reason="Preserve a failed desktop action.",
+            )
+            service.decide_approval(
+                requested["approval"]["approval_id"],
+                ApprovalStatus.APPROVED,
+                "human_root",
+                "approve failure-state test",
+            )
+
+            completed = service.complete_tool_run(requested["run"]["run_id"])
+
+            self.assertEqual(completed["run"]["status"], "failed")
+            self.assertEqual(completed["run"]["error"], "tool process exited with status 5")
+            self.assertIn("launch denied", json.loads(completed["run"]["result"])["stderr"])
 
     def test_git_read_tool_inspects_repository_without_approval(self):
         from app.services.company import CompanyApplicationService

@@ -19,7 +19,7 @@
 - Native task-planning Workflow permission/risk/Skill checks, traces, audit, Memory, Evaluation, Incident, API, dashboard, and SQLite reload
 - Approval-gated Workflow resume after Human Root approval
 - Workflow Run and Workflow Step trace persistence
-- Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem boundaries, concurrency-checked workspace patching, sanitized allowlisted commands, platform executable resolution, non-zero command failure evidence, read-only Git inspection, and adapter failure handling
+- Tool registration, controlled tool run requests, approval-gated completion, internal adapter execution, filesystem boundaries, concurrency-checked workspace patching, sanitized allowlisted commands, platform executable resolution, non-zero command failure evidence, read-only Git inspection, disabled-by-default computer-control gating, and adapter failure handling
 - Model Gateway usage and cost logging
 - Rule-first chat intent routing, bounded model-planner parsing, fixed executable mappings, active-goal continuation routing, invalid-plan audit, and planner usage/cost reporting
 - Server-owned chat session create/list/delete/message APIs, legacy text-only import, SQLite restart recovery, and pending action continuation after process restart
@@ -92,7 +92,7 @@ The suite currently covers:
 - Complete 18-Agent/18-Skill V1 bootstrap catalogs, invalid reference rejection, audited formal registration, SQLite reload, and backup rollback
 - Skill and Agent proposal sandbox gating, audit events, dashboard controls, and SQLite reload
 - Evaluation record creation, API exposure, dashboard summary, and SQLite reload
-- Tool registry bootstrap, low-risk internal adapter output, approval-gated Tool Run completion, knowledge/audit/database/filesystem/Git adapters, exact workspace patches, sanitized command execution, failed adapter input, filesystem path boundary checks, disallowed/disabled Tool Run blocking, API exposure, dashboard mount points, and SQLite reload
+- Tool registry bootstrap, low-risk internal adapter output, approval-gated Tool Run completion, knowledge/audit/database/filesystem/Git adapters, exact workspace patches, sanitized command execution, first local computer-control adapter gating, failed adapter input, filesystem path boundary checks, disallowed/disabled Tool Run blocking, API exposure, dashboard mount points, and SQLite reload
 - Filesystem read external-content inspection for clean and instruction-risk source files
 - Workflow Run and Workflow Step creation, API exposure, dashboard summary, dashboard mount points, and SQLite reload
 - V1 Workflow catalog API/detail exposure, all 10 common native entrypoints, and dashboard catalog rendering

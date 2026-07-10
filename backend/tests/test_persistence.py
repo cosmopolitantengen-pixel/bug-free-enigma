@@ -114,6 +114,38 @@ class PersistenceTests(unittest.TestCase):
             self.assertTrue(reloaded.company_os.tools.get("workspace_command_tool").requires_approval)
             self.assertFalse(reloaded.company_os.tools.get("git_read_tool").requires_approval)
 
+    def test_existing_workspace_agent_receives_computer_control_tool_grant(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "catalog_tool_upgrade.db")
+            first = CompanyApplicationService(
+                company_os=build_company_os(),
+                persistence=SQLiteStateStore(db_path),
+            )
+            first.sync()
+
+            with closing(sqlite3.connect(db_path)) as connection:
+                payload = json.loads(
+                    connection.execute(
+                        "SELECT payload_json FROM agents WHERE agent_id = ?",
+                        ("workspace_agent_v1",),
+                    ).fetchone()[0]
+                )
+                payload["allowed_tools"] = [
+                    tool_id for tool_id in payload["allowed_tools"] if tool_id != "computer_control_tool"
+                ]
+                connection.execute(
+                    "UPDATE agents SET payload_json = ? WHERE agent_id = ?",
+                    (json.dumps(payload), "workspace_agent_v1"),
+                )
+                connection.commit()
+
+            reloaded = CompanyApplicationService(
+                company_os=build_company_os(),
+                persistence=SQLiteStateStore(db_path),
+            )
+
+            self.assertIn("computer_control_tool", reloaded.company_os.agents.get("workspace_agent_v1").allowed_tools)
+
     def test_registered_agent_and_skill_catalogs_survive_restart(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "catalogs.db")

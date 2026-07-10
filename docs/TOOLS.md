@@ -29,6 +29,7 @@ A Tool is a registered capability an Agent can request. Tools are lower authorit
 - `workspace_patch_tool`: enabled, medium-risk exact text replacement with stale-file protection and mandatory approval.
 - `workspace_command_tool`: enabled, high-risk allowlisted process execution with mandatory approval and sanitized environment.
 - `git_read_tool`: enabled, low-risk Git status/diff/log inspection.
+- `computer_control_tool`: disabled by default, high-risk local desktop control through a small approval-gated action set. Enable locally with `AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL=1` or `.\scripts\start-local.ps1 -EnableComputerControl`.
 - `external_api_tool`: disabled by default, medium-risk external API preparation.
 - `code_execution_tool`: disabled by default, high-risk sandbox code execution.
 
@@ -59,6 +60,7 @@ The first implementation includes a small controlled adapter layer for safe inte
 - `workspace_patch_tool` previews and atomically applies one exact replacement, requires current file SHA-256 for Agent-driven changes, and returns a unified diff.
 - `workspace_command_tool` runs an argument array without a shell, limits executable names, workspace `cwd`, timeout, output size, and inherited environment variables.
 - `git_read_tool` exposes read-only status, diff, and recent log operations without allowing arbitrary Git subcommands.
+- `computer_control_tool` can open a reviewed URL, launch a small allowlisted app, send allowlisted keys, or type bounded text on the local desktop only after Human Root approval and only when the local enable flag is set.
 
 Adapter output is stored on the Tool Run as JSON. Invalid adapter input marks the Tool Run as `failed` and writes the failure into audit output.
 
@@ -81,4 +83,4 @@ Chat auto mode recognizes explicit and natural workspace requests such as `git s
 
 Chat Agent mode can sequence up to eight server-mapped steps from read-only Git inspection, workspace listing/reading/search, fixed frontend type-check, fixed backend tests, and exact workspace patching. Low-risk reads continue automatically after the initial run confirmation. Tests, type-checks, and patches enter the existing Tool Call approval boundary and pause the Agent Run until Human Root approves or rejects. The run, step observations, linked tasks, and waiting approval survive process restart; model output never bypasses Tool registration or chooses arbitrary commands.
 
-Real browser, computer-control, or external API adapters should only be added after their permission boundaries, sandbox behavior, approval flow, and audit output are covered by tests.
+Real browser or broader external API adapters should only be added after their permission boundaries, sandbox behavior, approval flow, and audit output are covered by tests. The first computer-control adapter is intentionally narrow: it is disabled by default, high-risk, approval-gated, audited, and restricted to reviewed URL/app/key/text operations.

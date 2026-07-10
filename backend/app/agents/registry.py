@@ -280,6 +280,7 @@ def default_agents() -> list[Agent]:
                 "workspace_patch_tool",
                 "workspace_command_tool",
                 "git_read_tool",
+                "computer_control_tool",
             },
             reports_to="project_manager_agent_v1",
             risk_level=RiskLevel.HIGH,

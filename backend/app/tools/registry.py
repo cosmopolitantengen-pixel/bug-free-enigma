@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from app.core.enums import PermissionLevel, RiskLevel
 from app.core.models import Tool
 
@@ -124,6 +126,19 @@ def default_tools() -> list[Tool]:
             output_schema={"output": "string"},
         ),
         Tool(
+            tool_id="computer_control_tool",
+            name="Computer Control Tool",
+            type="desktop",
+            description="Control the local desktop through a small, approval-gated action set.",
+            action="control_local_computer",
+            permission_level=PermissionLevel.L4_HIGH_RISK,
+            risk_level=RiskLevel.HIGH,
+            requires_approval=True,
+            input_schema={"operation": "string", "url": "string", "app": "string", "keys": "string", "text": "string"},
+            output_schema={"operation": "string", "exit_code": "integer", "stdout": "string", "stderr": "string"},
+            enabled=_computer_control_enabled(),
+        ),
+        Tool(
             tool_id="external_api_tool",
             name="External API Tool",
             type="external",
@@ -150,3 +165,8 @@ def default_tools() -> list[Tool]:
             enabled=False,
         ),
     ]
+
+
+def _computer_control_enabled() -> bool:
+    value = os.getenv("AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}

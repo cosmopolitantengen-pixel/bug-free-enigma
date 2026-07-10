@@ -5,9 +5,11 @@ import hashlib
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 from app.core.models import KnowledgeDoc, Task, ToolRun
@@ -58,6 +60,23 @@ ALLOWED_COMMANDS = {
     "tsc",
     "tsc.cmd",
 }
+COMPUTER_CONTROL_ALLOWED_APPS = {
+    "calc": "calc.exe",
+    "calculator": "calc.exe",
+    "notepad": "notepad.exe",
+}
+COMPUTER_CONTROL_ALLOWED_KEYS = {
+    "{ENTER}",
+    "{ESC}",
+    "{TAB}",
+    "{UP}",
+    "{DOWN}",
+    "{LEFT}",
+    "{RIGHT}",
+    "^l",
+    "^r",
+    "^w",
+}
 SAFE_ENVIRONMENT_KEYS = {
     "COMSPEC",
     "HOME",
@@ -96,6 +115,7 @@ def execute_tool_adapter(tool_id: str, input: dict[str, Any], context: ToolAdapt
         "workspace_patch_tool": _workspace_patch_adapter,
         "workspace_command_tool": _workspace_command_adapter,
         "git_read_tool": _git_read_adapter,
+        "computer_control_tool": _computer_control_adapter,
     }
     adapter = adapters.get(tool_id)
     if adapter is None:
@@ -456,6 +476,107 @@ def _git_read_adapter(input: dict[str, Any], context: ToolAdapterContext) -> dic
         "output": completed.stdout[-MAX_COMMAND_OUTPUT_BYTES:],
         "truncated": len(completed.stdout) > MAX_COMMAND_OUTPUT_BYTES,
     }
+
+
+def _computer_control_adapter(input: dict[str, Any], context: ToolAdapterContext) -> dict[str, Any]:
+    if not _computer_control_enabled():
+        raise ToolAdapterError("computer control is disabled; set AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL=1 and restart")
+    operation = str(input.get("operation", "")).strip().lower()
+    if operation == "open_url":
+        url = _validated_desktop_url(input.get("url"))
+        return _run_desktop_process(["powershell", "-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath $args[0]", url], operation)
+    if operation == "launch_app":
+        app = str(input.get("app", "")).strip().lower()
+        executable = COMPUTER_CONTROL_ALLOWED_APPS.get(app)
+        if executable is None:
+            raise ToolAdapterError("app is not allowlisted for computer control")
+        return _run_desktop_process([executable], operation)
+    if operation == "send_keys":
+        keys = str(input.get("keys", "")).strip()
+        if keys not in COMPUTER_CONTROL_ALLOWED_KEYS:
+            raise ToolAdapterError("keys are not allowlisted for computer control")
+        return _run_desktop_send_keys(keys, operation)
+    if operation == "type_text":
+        text = str(input.get("text", ""))
+        if not text or len(text) > 500:
+            raise ToolAdapterError("text must be 1-500 characters for computer control")
+        return _run_desktop_send_keys(_escape_send_keys_text(text), operation)
+    raise ToolAdapterError(f"unsupported computer control operation: {operation}")
+
+
+def _computer_control_enabled() -> bool:
+    value = os.getenv("AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _validated_desktop_url(raw_url: Any) -> str:
+    url = str(raw_url or "").strip()
+    parsed = urlparse(url)
+    if len(url) > 2048 or parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ToolAdapterError("url must be an http(s) URL for computer control")
+    return url
+
+
+def _run_desktop_send_keys(keys: str, operation: str) -> dict[str, Any]:
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "[System.Windows.Forms.SendKeys]::SendWait($args[0])"
+    )
+    return _run_desktop_process(["powershell", "-NoProfile", "-NonInteractive", "-Command", script, keys], operation)
+
+
+def _run_desktop_process(argv: list[str], operation: str) -> dict[str, Any]:
+    environment = {key: value for key, value in os.environ.items() if key.upper() in SAFE_ENVIRONMENT_KEYS}
+    resolved = shutil.which(argv[0], path=environment.get("PATH"))
+    execution_argv = [resolved, *argv[1:]] if resolved else argv
+    try:
+        completed = subprocess.run(
+            execution_argv,
+            env=environment,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            shell=False,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ToolAdapterError(f"computer control failed to start: {exc.__class__.__name__}") from exc
+    return {
+        "operation": operation,
+        "platform": sys.platform,
+        "argv": _redacted_desktop_argv(argv),
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout[-MAX_COMMAND_OUTPUT_BYTES:],
+        "stderr": completed.stderr[-MAX_COMMAND_OUTPUT_BYTES:],
+        "truncated": len(completed.stdout) > MAX_COMMAND_OUTPUT_BYTES or len(completed.stderr) > MAX_COMMAND_OUTPUT_BYTES,
+    }
+
+
+def _redacted_desktop_argv(argv: list[str]) -> list[str]:
+    if not argv:
+        return []
+    redacted = list(argv)
+    if redacted[0].lower().startswith("powershell") and redacted[-1]:
+        redacted[-1] = "<desktop-input>"
+    return redacted
+
+
+def _escape_send_keys_text(text: str) -> str:
+    replacements = {
+        "+": "{+}",
+        "^": "{^}",
+        "%": "{%}",
+        "~": "{~}",
+        "(": "{(}",
+        ")": "{)}",
+        "[": "{[}",
+        "]": "{]}",
+        "{": "{{}",
+        "}": "{}}",
+    }
+    return "".join(replacements.get(character, character) for character in text)
 
 
 def _resolve_workspace_path(raw_path: Any) -> Path:

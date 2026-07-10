@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -89,6 +90,16 @@ GOAL_CONTINUE_MARKERS = (
     "下一步",
     "下一步了",
 )
+COMPUTER_CONTROL_MARKERS = (
+    "open url",
+    "open browser",
+    "computer control",
+    "\u6253\u5f00\u7f51\u5740",
+    "\u6253\u5f00\u6d4f\u89c8\u5668",
+    "\u63a7\u5236\u7535\u8111",
+)
+
+URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 
 
 @dataclass
@@ -194,6 +205,7 @@ class CompanyApplicationService:
             scheduled_executions=loaded_scheduled_executions,
             model_gateway=active_model_gateway.with_usage(loaded_model_usage),
         )
+        self._reconcile_default_catalog_upgrades()
         self._bind_workflow_skill_runtime()
         self._configure_knowledge_vectors()
         self._restore_chat_action_proposals()
@@ -244,6 +256,16 @@ class CompanyApplicationService:
             scheduled_executions=list(self.company_os.scheduler.list_executions()),
             chat_sessions=list(self.chat_sessions.list()),
         )
+
+    def _reconcile_default_catalog_upgrades(self) -> None:
+        try:
+            workspace_agent = self.company_os.agents.get("workspace_agent_v1")
+            self.company_os.tools.get("computer_control_tool")
+        except KeyError:
+            return
+        if "computer_control_tool" not in workspace_agent.allowed_tools:
+            workspace_agent.allowed_tools.add("computer_control_tool")
+            self._sync_persistence_state()
 
     def register_user(self, email: str, password: str) -> dict:
         user = self.auth.register(email, password)
@@ -2632,7 +2654,10 @@ class CompanyApplicationService:
             return None
         if mode == "auto" and prefers_conversation(message):
             return None
-        if not any(marker in normalized for marker in (*CHAT_ACTION_MARKERS, *GOAL_CREATE_MARKERS, *GOAL_CONTINUE_MARKERS)):
+        if not any(
+            marker in normalized
+            for marker in (*CHAT_ACTION_MARKERS, *GOAL_CREATE_MARKERS, *GOAL_CONTINUE_MARKERS, *COMPUTER_CONTROL_MARKERS)
+        ):
             return None
 
         workflow_id = "task_planning_v1"
@@ -2959,6 +2984,17 @@ class CompanyApplicationService:
 
     @staticmethod
     def _chat_workspace_tool(message: str, normalized: str) -> tuple[dict, str] | None:
+        url_match = URL_RE.search(message)
+        if url_match and any(marker in normalized for marker in COMPUTER_CONTROL_MARKERS):
+            return (
+                {
+                    "tool_id": "computer_control_tool",
+                    "actor_id": "workspace_agent_v1",
+                    "reason": message,
+                    "tool_input": {"operation": "open_url", "url": url_match.group(0)},
+                },
+                "open a reviewed URL on the local computer",
+            )
         if any(marker in normalized for marker in ("git status", "查看 git 状态", "查看git状态", "仓库状态", "哪些文件变了")):
             tool_input = {"operation": "status"}
             purpose = "读取 Git 工作区状态"
@@ -3855,6 +3891,20 @@ class CompanyApplicationService:
                 "cwd": input.get("cwd", "."),
                 "timeout_seconds": input.get("timeout_seconds", 30),
             }
+        if tool_id == "computer_control_tool":
+            operation = str(input.get("operation", ""))
+            approval_input = {"operation": operation}
+            if operation == "open_url":
+                approval_input["url"] = input.get("url")
+            elif operation == "launch_app":
+                approval_input["app"] = input.get("app")
+            elif operation == "send_keys":
+                approval_input["keys"] = input.get("keys")
+            elif operation == "type_text":
+                text = input.get("text")
+                approval_input["text_length"] = len(text) if isinstance(text, str) else None
+                approval_input["text_sha256"] = hashlib.sha256(text.encode("utf-8")).hexdigest() if isinstance(text, str) else None
+            return approval_input
         if tool_id == "workspace_patch_tool":
             old_text = input.get("old_text")
             new_text = input.get("new_text")
@@ -5536,9 +5586,9 @@ class CompanyApplicationService:
         if adapter_result is None:
             adapter_result = {"message": f"Simulated {tool.name} execution completed."}
         run.result = json.dumps(to_plain(adapter_result), sort_keys=True)
-        if tool.tool_id == "workspace_command_tool" and adapter_result.get("exit_code") != 0:
+        if tool.tool_id in {"workspace_command_tool", "computer_control_tool"} and adapter_result.get("exit_code") != 0:
             run.status = ToolRunStatus.FAILED
-            run.error = f"command exited with status {adapter_result.get('exit_code')}"
+            run.error = f"tool process exited with status {adapter_result.get('exit_code')}"
         else:
             run.status = ToolRunStatus.COMPLETED
         run.completed_at = utc_now()
