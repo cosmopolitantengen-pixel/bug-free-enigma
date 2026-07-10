@@ -139,11 +139,23 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
 
 const NAV_ITEMS: Array<{ id: View; label: string; icon: typeof Activity }> = [
   { id: "chat", label: "对话", icon: MessageSquare },
+  { id: "system", label: "设置", icon: ServerCog },
+];
+
+const VIEW_LABELS: Record<View, string> = {
+  chat: "对话",
+  overview: "目标与任务",
+  work: "执行中心",
+  scheduler: "自动化",
+  governance: "审批与安全",
+  system: "设置",
+};
+
+const ADVANCED_VIEWS: Array<{ id: Exclude<View, "chat" | "system">; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "目标与任务", icon: Target },
   { id: "work", label: "执行中心", icon: Play },
   { id: "scheduler", label: "自动化", icon: CalendarClock },
   { id: "governance", label: "审批与安全", icon: ShieldCheck },
-  { id: "system", label: "设置", icon: ServerCog },
 ];
 
 const CHAT_STORAGE_KEY = "ai-company-os-chat-sessions-v1";
@@ -468,9 +480,10 @@ export function OperationsConsole() {
       <aside className={`sidebar ${mobileOpen ? "open" : ""}`}>
         <div className="brand-block">
           <div className="brand-mark">AC</div>
-          <div><strong>AI Company OS</strong><span>人类最高管理员控制台</span></div>
+          <div><strong>AI Company OS</strong><span>AI 自主工作台</span></div>
           <button className="icon-button mobile-close" onClick={() => setMobileOpen(false)} aria-label="关闭导航"><X /></button>
         </div>
+        <div className="sidebar-mode"><Bot /><div><strong>Agent 自主管理</strong><span>目标、任务与工具由 AI 调度</span></div></div>
         <nav aria-label="主导航">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -491,14 +504,10 @@ export function OperationsConsole() {
         <header className="topbar">
           <div className="title-row">
             <button className="icon-button mobile-menu" onClick={() => setMobileOpen(true)} aria-label="打开导航"><Menu /></button>
-            <div><p className="eyebrow">人类最高管理员 / {NAV_ITEMS.find((item) => item.id === view)?.label}</p><h1>{NAV_ITEMS.find((item) => item.id === view)?.label}</h1></div>
+            <div><p className="eyebrow">AI 自主工作台 / {VIEW_LABELS[view]}</p><h1>{VIEW_LABELS[view]}</h1></div>
           </div>
           <div className="top-actions">
-            <div className="top-summary" aria-label="运营摘要">
-              <span><ClipboardCheck />{pendingApprovals.length} 待审批</span>
-              <span className={openIncidents.length ? "has-alerts" : ""}><AlertTriangle />{openIncidents.length} 事件</span>
-            </div>
-            <StatusPill value={text(data.integrity.status, loading ? "loading" : "unknown")} />
+            <span className={`ai-live-status ${error ? "bad" : ""}`}><Bot />{error ? "需要检查" : "AI 管理中"}</span>
             <button className="button secondary" onClick={() => void refresh()} disabled={loading}><RefreshCw className={loading ? "spin" : ""} />刷新</button>
           </div>
         </header>
@@ -513,7 +522,7 @@ export function OperationsConsole() {
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "governance" && <GovernanceView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
-            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} />}
+            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} openView={setView} />}
           </>
         )}
       </main>
@@ -878,7 +887,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
         </div>
 
         <div className="chat-messages" aria-live="polite">
-          {activeSession.messages.length === 0 && <div className="chat-empty"><MessageSquare /><strong>开始一段新对话</strong><span>可以提问、讨论方案，也可以让 AI 帮你整理和创作。</span></div>}
+          {activeSession.messages.length === 0 && <div className="chat-empty"><Bot /><strong>把目标交给 AI</strong><span>AI 会在后台管理目标、任务、Agent、工具和自动化；需要你确认时会直接在对话里提醒。</span><div className="chat-suggestions"><button onClick={() => setDraft("接管当前项目，检查现状并开始执行最重要的下一步。")}>接管当前项目</button><button onClick={() => setDraft("检查当前所有目标和任务，处理能自动完成的工作，只把必须由我决定的事项告诉我。")}>处理全部工作</button><button onClick={() => setDraft("检查当前系统异常并尝试安全修复，涉及高风险操作时先向我确认。")}>检查并修复</button></div></div>}
           {activeSession.messages.map((message) => (
             <article className={`chat-message ${message.role} ${message.failed ? "failed" : ""}`} key={message.id}>
               <div className="chat-message-label">{message.role === "user" ? "你" : "AI Company OS"}</div>
@@ -1233,7 +1242,7 @@ function IncidentItem({ item, updateIncident }: { item: ApiRecord; updateInciden
   return <div className="action-row"><div className="incident-detail"><EntityRow title={text(item.title)} detail={`${shortId(item.incident_id)} / ${formatValue(item.risk_level)} / ${text(item.runbook_title, "无处置手册")}`} status={text(item.status)} />{runbook && <span className="muted-line">{text(runbook.title)}：{actions[0] ?? text(runbook.description)}</span>}</div>{text(item.status) !== "resolved" && <div className="inline-actions">{text(item.status) === "open" && <button className="small-button" onClick={() => void updateIncident(item.incident_id, "acknowledge")}>确认</button>}<button className="small-button" onClick={() => void updateIncident(item.incident_id, "resolve")}>解决</button></div>}</div>;
 }
 
-function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean }) {
+function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken, openView }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean; openView: (view: View) => void }) {
   const migrations = (data.schema.migrations as ApiRecord[] | undefined) ?? [];
   const readinessChecks = (data.readiness.checks as ApiRecord[] | undefined) ?? [];
   const providerNames = (data.providers.providers as string[] | undefined) ?? [];
@@ -1293,6 +1302,15 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
       <Panel title="数据库结构迁移" meta={`已应用 ${migrations.length} 项`}>
         <EntityList items={migrations} empty="没有数据库迁移记录。" render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} />
       </Panel>
+      <details className="advanced-catalog">
+        <summary>高级管理：通常由 AI 和 Agent 自动使用</summary>
+        <div className="admin-shortcuts">
+          {ADVANCED_VIEWS.map((item) => {
+            const Icon = item.icon;
+            return <button key={item.id} className="admin-shortcut" aria-label={`打开${item.label}`} onClick={() => openView(item.id)}><Icon /><span><strong>{item.label}</strong><small>仅用于人工排障</small></span><ChevronRight /></button>;
+          })}
+        </div>
+      </details>
       <details className="advanced-catalog">
         <summary>高级信息：Agent、Skill、Tool 与 Workflow</summary>
         <CatalogView data={data} />

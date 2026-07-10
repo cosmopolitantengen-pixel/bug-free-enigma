@@ -704,6 +704,13 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
   return state;
 }
 
+async function openConsoleView(page: Page, name: "目标与任务" | "执行中心" | "自动化" | "审批与安全" | "设置") {
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  if (name === "设置") return;
+  await page.getByText("高级管理：通常由 AI 和 Agent 自动使用", { exact: true }).click();
+  await page.getByRole("button", { name: `打开${name}`, exact: true }).click();
+}
+
 test.describe("AI Company OS operations console", () => {
   test("loads production readiness and core operator views on desktop", async ({ page }, testInfo) => {
     test.skip(testInfo.project.name !== "desktop-chromium", "Desktop navigation smoke runs only on the desktop project.");
@@ -711,15 +718,15 @@ test.describe("AI Company OS operations console", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "对话" })).toBeVisible();
-    await expect(page.getByText("开始一段新对话")).toBeVisible();
-    await page.getByRole("button", { name: /目标与任务/ }).click();
+    await expect(page.getByText("把目标交给 AI")).toBeVisible();
+    await openConsoleView(page, "目标与任务");
     await expect(page.getByRole("heading", { name: "目标与任务" })).toBeVisible();
     await expect(page.getByText("任务队列", { exact: true })).toBeVisible();
     await expect(page.getByText("Initial task")).toBeVisible();
     await page.getByRole("button", { name: "让 AI 开始工作" }).click();
     await expect(page.getByLabel("聊天消息")).toHaveValue("请根据当前目标和任务，选择最重要的一项并开始推进。");
 
-    await page.getByRole("button", { name: /设置/ }).click();
+    await openConsoleView(page, "设置");
     await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
     await expect(page.getByText("生产就绪检查")).toBeVisible();
     await expect(page.getByText("http_auth_gate")).toBeVisible();
@@ -817,7 +824,7 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "确认执行" }).click();
 
     await expect(page.getByText("Strategic goal created.")).toBeVisible();
-    await page.getByRole("button", { name: /目标与任务/ }).click();
+    await openConsoleView(page, "目标与任务");
     await expect(page.getByRole("heading", { name: "战略目标" })).toBeVisible();
     await expect(page.getByText("Codex equivalent OS")).toBeVisible();
     expect(api.actions.filter((item) => item.path === "/chat/actions/chat-goal-1/execute/stream")).toHaveLength(1);
@@ -878,13 +885,13 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /设置/ }).click();
+    await openConsoleView(page, "设置");
     await page.getByLabel("访问令牌").fill("local-token");
     await page.getByRole("button", { name: "保存令牌" }).click();
     await expect(page.getByText("API 访问令牌已保存到当前浏览器。")).toBeVisible();
     await expect.poll(() => api.authHeaders).toContain("Bearer local-token");
 
-    await page.getByRole("button", { name: /执行中心/ }).click();
+    await openConsoleView(page, "执行中心");
     await page.getByLabel("标题").fill("Browser E2E workflow");
     await page.getByLabel("说明").fill("Exercise the operator workflow submission path.");
     await page.getByLabel("工作流输入（JSON）").fill("{\"source\":\"playwright\"}");
@@ -904,7 +911,7 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /执行中心/ }).click();
+    await openConsoleView(page, "执行中心");
     await page.getByLabel("模型服务商").selectOption("deepseek");
     await page.getByRole("combobox", { name: "模型", exact: true }).selectOption("deepseek-v4-pro");
     await page.getByLabel("提示词").fill("请生成一份多模型路由测试结果。");
@@ -926,11 +933,11 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /执行中心/ }).click();
+    await openConsoleView(page, "执行中心");
     await page.getByTitle("批准").click();
     await expect(page.getByText("审批已批准。")).toBeVisible();
 
-    await page.getByRole("button", { name: /审批与安全/ }).click();
+    await openConsoleView(page, "审批与安全");
     await expect(page.getByText("Restart the failed worker pool.")).toBeVisible();
     await page.getByRole("button", { name: "确认" }).click();
     await expect(page.getByText("事件已确认。")).toBeVisible();
@@ -957,11 +964,11 @@ test.describe("AI Company OS operations console", () => {
     });
     await page.goto("/");
 
-    await page.getByRole("button", { name: /执行中心/ }).click();
+    await openConsoleView(page, "执行中心");
     await page.getByTitle("拒绝").click();
     await expect(page.getByText("审批已拒绝。")).toBeVisible();
 
-    await page.getByRole("button", { name: /自动化/ }).click();
+    await openConsoleView(page, "自动化");
     await expect(page.getByText("Paused readiness check")).toBeVisible();
     await page.getByRole("button", { name: "恢复" }).click();
     await expect(page.getByText("计划任务已恢复。")).toBeVisible();
@@ -980,7 +987,7 @@ test.describe("AI Company OS operations console", () => {
     const api = await mockApi(page);
     await page.goto("/");
 
-    await page.getByRole("button", { name: /自动化/ }).click();
+    await openConsoleView(page, "自动化");
     await page.getByLabel("计划名称").fill("Playwright readiness check");
     await page.getByLabel("任务标题").fill("Verify production readiness");
     await page.getByLabel("任务说明").fill("Check deployment readiness from the operator console.");
@@ -1013,7 +1020,7 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.getByText("API 部分异常")).toBeVisible();
     await expect(page.getByText(/生产就绪：Not authenticated/)).toBeVisible();
 
-    await page.getByRole("button", { name: /设置/ }).click();
+    await openConsoleView(page, "设置");
     await page.getByLabel("API 地址").fill("localhost:8000");
     await page.getByRole("button", { name: "应用连接" }).click();
     await expect(page.getByText("API 地址必须以 http:// 或 https:// 开头")).toBeVisible();
@@ -1026,8 +1033,8 @@ test.describe("AI Company OS operations console", () => {
 
     await expect(page.getByRole("heading", { name: "对话", level: 1 })).toBeVisible();
     await page.getByRole("button", { name: "打开导航" }).click();
-    await page.getByRole("button", { name: /自动化/ }).click();
-    await expect(page.getByRole("heading", { name: "自动化", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "队列健康" })).toBeVisible();
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "设置", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "API 连接" })).toBeVisible();
   });
 });
