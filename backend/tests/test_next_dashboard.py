@@ -15,7 +15,7 @@ class NextDashboardTests(unittest.TestCase):
         with open(styles_path, "r", encoding="utf-8") as handle:
             styles = handle.read()
 
-        for label in ["对话", "设置", "目标与任务", "执行中心", "自动化", "审批与安全", "高级管理"]:
+        for label in ["对话", "设置", "目标与任务", "执行中心", "自动化", "审批与安全", "人工接管"]:
             self.assertIn(label, console)
         for endpoint in [
             "/dashboard/summary", "/system/integrity", "/deployment/readiness", "/workflows/run", "/approvals",
@@ -34,6 +34,8 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("输入消息，Enter 发送，Shift+Enter 换行", console)
         self.assertIn("对话模式", console)
         self.assertIn("确认执行", console)
+        self.assertIn("目标、任务、自动化和能力体系由 AI Agent 自动管理", console)
+        self.assertIn('get("operator") === "1"', console)
         self.assertIn("@media (max-width: 760px)", styles)
 
     def test_frontend_dependencies_are_pinned(self):

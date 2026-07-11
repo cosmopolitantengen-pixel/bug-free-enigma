@@ -718,9 +718,12 @@ async function mockApi(page: Page, options: MockApiOptions = {}) {
 }
 
 async function openConsoleView(page: Page, name: "目标与任务" | "执行中心" | "自动化" | "审批与安全" | "设置") {
+  if (name !== "设置" && !new URL(page.url()).searchParams.has("operator")) {
+    await page.goto("/?operator=1");
+  }
   await page.getByRole("button", { name: "设置", exact: true }).click();
   if (name === "设置") return;
-  await page.getByText("高级管理：通常由 AI 和 Agent 自动使用", { exact: true }).click();
+  await page.getByText("人工接管：仅用于异常排障", { exact: true }).click();
   await page.getByRole("button", { name: `打开${name}`, exact: true }).click();
 }
 
@@ -732,6 +735,11 @@ test.describe("AI Company OS operations console", () => {
 
     await expect(page.getByRole("heading", { name: "对话" })).toBeVisible();
     await expect(page.getByText("把目标交给 AI")).toBeVisible();
+    await openConsoleView(page, "设置");
+    await expect(page.getByText("目标、任务、自动化和能力体系由 AI Agent 自动管理；需要你决定时会回到对话请求确认。")).toBeVisible();
+    await expect(page.getByText("人工接管：仅用于异常排障", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("能力目录：只读排障信息", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "对话", exact: true }).click();
     await openConsoleView(page, "目标与任务");
     await expect(page.getByRole("heading", { name: "目标与任务" })).toBeVisible();
     await expect(page.getByText("任务队列", { exact: true })).toBeVisible();
@@ -758,7 +766,7 @@ test.describe("AI Company OS operations console", () => {
     await expect(page.getByText("模型路由与价格")).toBeVisible();
     await expect(page.getByText(/deepseek-v4-pro：输入 \$0.435/)).toBeVisible();
 
-    await page.getByText("高级信息：Agent、Skill、Tool 与 Workflow", { exact: true }).click();
+    await page.getByText("能力目录：只读排障信息", { exact: true }).click();
     await expect(page.getByPlaceholder("搜索智能体、技能、工具和工作流")).toBeVisible();
   });
 

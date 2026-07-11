@@ -364,8 +364,10 @@ export function OperationsConsole() {
   const [notice, setNotice] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [chatDraftSeed, setChatDraftSeed] = useState("");
+  const [operatorMode, setOperatorMode] = useState(false);
 
   useEffect(() => {
+    setOperatorMode(new URLSearchParams(window.location.search).get("operator") === "1");
     const stored = window.localStorage.getItem("ai-company-os-api-base");
     if (stored) {
       setApiBase(stored);
@@ -535,7 +537,7 @@ export function OperationsConsole() {
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "governance" && <GovernanceView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
-            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} openView={setView} mutate={mutate} notify={setNotice} fail={setError} />}
+            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} operatorMode={operatorMode} openView={setView} mutate={mutate} notify={setNotice} fail={setError} />}
           </>
         )}
       </main>
@@ -1262,7 +1264,7 @@ function IncidentItem({ item, updateIncident }: { item: ApiRecord; updateInciden
   return <div className="action-row"><div className="incident-detail"><EntityRow title={text(item.title)} detail={`${shortId(item.incident_id)} / ${formatValue(item.risk_level)} / ${text(item.runbook_title, "无处置手册")}`} status={text(item.status)} />{runbook && <span className="muted-line">{text(runbook.title)}：{actions[0] ?? text(runbook.description)}</span>}</div>{text(item.status) !== "resolved" && <div className="inline-actions">{text(item.status) === "open" && <button className="small-button" onClick={() => void updateIncident(item.incident_id, "acknowledge")}>确认</button>}<button className="small-button" onClick={() => void updateIncident(item.incident_id, "resolve")}>解决</button></div>}</div>;
 }
 
-function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken, openView, mutate, notify, fail }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean; openView: (view: View) => void; mutate: Mutate; notify: (v: string) => void; fail: (v: string) => void }) {
+function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken, operatorMode, openView, mutate, notify, fail }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean; operatorMode: boolean; openView: (view: View) => void; mutate: Mutate; notify: (v: string) => void; fail: (v: string) => void }) {
   const migrations = (data.schema.migrations as ApiRecord[] | undefined) ?? [];
   const readinessChecks = (data.readiness.checks as ApiRecord[] | undefined) ?? [];
   const providerNames = (data.providers.providers as string[] | undefined) ?? [];
@@ -1338,7 +1340,7 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
     <div className="view-stack settings-view">
       <section className="settings-intro">
         <div className="settings-intro-icon"><SlidersHorizontal /></div>
-        <div><strong>控制 AI 的工作方式</strong><span>常用设置会立即影响对话和 Agent；技术诊断已收进页面底部。</span></div>
+        <div><strong>控制 AI 的工作方式</strong><span>目标、任务、自动化和能力体系由 AI Agent 自动管理；需要你决定时会回到对话请求确认。</span></div>
         <div className="settings-intro-status"><span className={text(data.health.status) === "ok" ? "good" : "bad"}>API {text(data.health.status) === "ok" ? "正常" : "异常"}</span><span className={data.budget.enabled === false ? "warn" : "good"}>预算保护{data.budget.enabled === false ? "关闭" : "开启"}</span></div>
       </section>
 
@@ -1395,19 +1397,21 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
           <section className="diagnostic-section diagnostic-wide"><div className="diagnostic-heading"><h2>数据库结构迁移</h2><span>{migrations.length} 项</span></div><EntityList items={migrations} empty="没有数据库迁移记录。" render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} /></section>
         </div>
       </details>
-      <details className="advanced-catalog">
-        <summary>高级管理：通常由 AI 和 Agent 自动使用</summary>
-        <div className="admin-shortcuts">
-          {ADVANCED_VIEWS.map((item) => {
-            const Icon = item.icon;
-            return <button key={item.id} className="admin-shortcut" aria-label={`打开${item.label}`} onClick={() => openView(item.id)}><Icon /><span><strong>{item.label}</strong><small>仅用于人工排障</small></span><ChevronRight /></button>;
-          })}
-        </div>
-      </details>
-      <details className="advanced-catalog">
-        <summary>高级信息：Agent、Skill、Tool 与 Workflow</summary>
-        <CatalogView data={data} />
-      </details>
+      {operatorMode && <>
+        <details className="advanced-catalog">
+          <summary>人工接管：仅用于异常排障</summary>
+          <div className="admin-shortcuts">
+            {ADVANCED_VIEWS.map((item) => {
+              const Icon = item.icon;
+              return <button key={item.id} className="admin-shortcut" aria-label={`打开${item.label}`} onClick={() => openView(item.id)}><Icon /><span><strong>{item.label}</strong><small>AI 无法恢复时人工检查</small></span><ChevronRight /></button>;
+            })}
+          </div>
+        </details>
+        <details className="advanced-catalog">
+          <summary>能力目录：只读排障信息</summary>
+          <CatalogView data={data} />
+        </details>
+      </>}
     </div>
   );
 }
