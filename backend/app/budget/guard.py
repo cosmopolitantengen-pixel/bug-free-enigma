@@ -166,6 +166,7 @@ class BudgetGuard:
             "max_tokens_per_call": self.policy.max_tokens_per_call,
             "max_total_tokens": self.policy.max_total_tokens,
             "max_estimated_cost": self.policy.max_estimated_cost,
+            "cost_per_token": self.policy.cost_per_token,
             "currency": self.policy.currency,
             "used_tokens": sum(log.tokens for log in recorded),
             "used_cost": round(sum(log.amount for log in recorded), 9),

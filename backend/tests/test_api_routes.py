@@ -1629,6 +1629,7 @@ class ApiRouteTests(unittest.TestCase):
         self.assertTrue(blocked.json()["blocked"])
         self.assertEqual(blocked.json()["incident"]["status"], "open")
         self.assertEqual(budget.json()["max_tokens_per_call"], 1)
+        self.assertEqual(budget.json()["cost_per_token"], 0.000001)
         self.assertEqual(len(incidents.json()), 1)
         self.assertEqual(audit.json()[-2]["event_type"], "budget_policy_updated")
         self.assertEqual(audit.json()[-1]["event_type"], "model_blocked")

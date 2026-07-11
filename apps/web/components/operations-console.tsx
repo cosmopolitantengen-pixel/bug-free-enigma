@@ -11,7 +11,6 @@ import {
   CircleGauge,
   ClipboardCheck,
   Database,
-  FileClock,
   ListChecks,
   Menu,
   MessageSquare,
@@ -89,6 +88,7 @@ type DataSet = {
   integrity: ApiRecord;
   schema: ApiRecord;
   providers: ApiRecord;
+  budget: ApiRecord;
   embeddings: ApiRecord;
   alertStatus: ApiRecord;
   runbooks: ApiRecord[];
@@ -108,7 +108,7 @@ type DataSet = {
 };
 
 const EMPTY_DATA: DataSet = {
-  summary: {}, health: {}, readiness: {}, integrity: {}, schema: {}, providers: {}, embeddings: {}, alertStatus: {}, runbooks: [], tasks: [], approvals: [], incidents: [],
+  summary: {}, health: {}, readiness: {}, integrity: {}, schema: {}, providers: {}, budget: {}, embeddings: {}, alertStatus: {}, runbooks: [], tasks: [], approvals: [], incidents: [],
   schedules: [], executions: [], queueHealth: {}, agents: [], skills: [], tools: [], workflows: [], audit: [], events: [], goals: [],
 };
 
@@ -119,6 +119,7 @@ const ENDPOINTS: Record<keyof DataSet, string> = {
   integrity: "/system/integrity",
   schema: "/database/schema",
   providers: "/models/providers",
+  budget: "/budget/summary",
   embeddings: "/knowledge/embeddings/status",
   alertStatus: "/alerts/status",
   runbooks: "/runbooks",
@@ -159,12 +160,20 @@ const ADVANCED_VIEWS: Array<{ id: Exclude<View, "chat" | "system">; label: strin
 ];
 
 const CHAT_STORAGE_KEY = "ai-company-os-chat-sessions-v1";
+const CHAT_MODE_KEY = "ai-company-os-chat-mode";
+const CHAT_PROVIDER_KEY = "ai-company-os-chat-provider";
+const CHAT_MODEL_KEY = "ai-company-os-chat-model";
 
 function createId(prefix: string) {
   const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   return `${prefix}-${suffix}`;
+}
+
+function storedPreference(key: string, fallback: string): string {
+  if (typeof window === "undefined") return fallback;
+  return window.localStorage.getItem(key) || fallback;
 }
 
 function chatActionFromApi(value: ApiRecord | undefined): ChatAction | undefined {
@@ -259,6 +268,7 @@ const DATA_LABELS: Record<keyof DataSet, string> = {
   integrity: "系统完整性",
   schema: "数据库结构",
   providers: "模型服务",
+  budget: "模型预算",
   embeddings: "向量索引",
   alertStatus: "告警状态",
   runbooks: "处置手册",
@@ -522,7 +532,7 @@ export function OperationsConsole() {
             {view === "work" && <WorkView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "scheduler" && <SchedulerView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
             {view === "governance" && <GovernanceView data={data} mutate={mutate} notify={setNotice} fail={setError} />}
-            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} openView={setView} />}
+            {view === "system" && <SystemView data={data} apiDraft={apiDraft} setApiDraft={setApiDraft} saveApiBase={saveApiBase} apiTokenDraft={apiTokenDraft} setApiTokenDraft={setApiTokenDraft} saveApiToken={saveApiToken} hasApiToken={Boolean(apiToken)} openView={setView} mutate={mutate} notify={setNotice} fail={setError} />}
           </>
         )}
       </main>
@@ -542,15 +552,15 @@ type ChatCancelCall = (proposalId: string) => Promise<ApiRecord>;
 function ChatView({ data, listChatSessions, createChatSession, importChatSessions, deleteChatSession, callChatStream, executeChatAction, decideChatAction, cancelChatAction, fail, draftSeed, consumeDraftSeed }: { data: DataSet; listChatSessions: ChatListCall; createChatSession: ChatCreateCall; importChatSessions: ChatImportCall; deleteChatSession: ChatDeleteCall; callChatStream: ChatStreamCall; executeChatAction: ChatActionCall; decideChatAction: ChatDecisionCall; cancelChatAction: ChatCancelCall; fail: (v: string) => void; draftSeed: string; consumeDraftSeed: () => void }) {
   const providerNames = (data.providers.providers as string[] | undefined) ?? ["local"];
   const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
-  const [provider, setProvider] = useState(() => text(data.providers.default_provider, providerNames[0] ?? "local"));
-  const [model, setModel] = useState(() => text(data.providers.default_model, "deterministic_mock_v1"));
+  const [provider, setProvider] = useState(() => storedPreference(CHAT_PROVIDER_KEY, text(data.providers.default_provider, providerNames[0] ?? "local")));
+  const [model, setModel] = useState(() => storedPreference(CHAT_MODEL_KEY, text(data.providers.default_model, "deterministic_mock_v1")));
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState("");
   const [chatReady, setChatReady] = useState(false);
   const [draft, setDraft] = useState("");
   const [sendingChatId, setSendingChatId] = useState<string | null>(null);
   const [streamingReply, setStreamingReply] = useState<{ sessionId: string; content: string } | null>(null);
-  const [chatMode, setChatMode] = useState<"auto" | "chat" | "action" | "agent">("auto");
+  const [chatMode, setChatMode] = useState<"auto" | "chat" | "action" | "agent">(() => storedPreference(CHAT_MODE_KEY, "auto") as "auto" | "chat" | "action" | "agent");
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const executingActionIds = useRef<Set<string>>(new Set());
   const availableModels = allowedModels[provider] ?? [];
@@ -624,6 +634,12 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
     const models = allowedModels[provider] ?? [];
     if (models.length && !models.includes(model)) setModel(models[0]);
   }, [allowedModels, model, provider]);
+
+  useEffect(() => {
+    window.localStorage.setItem(CHAT_PROVIDER_KEY, provider);
+    window.localStorage.setItem(CHAT_MODEL_KEY, model);
+    window.localStorage.setItem(CHAT_MODE_KEY, chatMode);
+  }, [chatMode, model, provider]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "end" });
@@ -1242,17 +1258,105 @@ function IncidentItem({ item, updateIncident }: { item: ApiRecord; updateInciden
   return <div className="action-row"><div className="incident-detail"><EntityRow title={text(item.title)} detail={`${shortId(item.incident_id)} / ${formatValue(item.risk_level)} / ${text(item.runbook_title, "无处置手册")}`} status={text(item.status)} />{runbook && <span className="muted-line">{text(runbook.title)}：{actions[0] ?? text(runbook.description)}</span>}</div>{text(item.status) !== "resolved" && <div className="inline-actions">{text(item.status) === "open" && <button className="small-button" onClick={() => void updateIncident(item.incident_id, "acknowledge")}>确认</button>}<button className="small-button" onClick={() => void updateIncident(item.incident_id, "resolve")}>解决</button></div>}</div>;
 }
 
-function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken, openView }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean; openView: (view: View) => void }) {
+function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, setApiTokenDraft, saveApiToken, hasApiToken, openView, mutate, notify, fail }: { data: DataSet; apiDraft: string; setApiDraft: (v: string) => void; saveApiBase: (e: FormEvent) => void; apiTokenDraft: string; setApiTokenDraft: (v: string) => void; saveApiToken: (e: FormEvent) => void; hasApiToken: boolean; openView: (view: View) => void; mutate: Mutate; notify: (v: string) => void; fail: (v: string) => void }) {
   const migrations = (data.schema.migrations as ApiRecord[] | undefined) ?? [];
   const readinessChecks = (data.readiness.checks as ApiRecord[] | undefined) ?? [];
   const providerNames = (data.providers.providers as string[] | undefined) ?? [];
-  const fallbackOrder = (data.providers.fallback_order as string[] | undefined) ?? [];
+  const allowedModels = (data.providers.allowed_models as Record<string, string[]> | undefined) ?? {};
   const providerDetails = (data.providers.provider_details as Record<string, ApiRecord> | undefined) ?? {};
   const providerRows = providerNames.map((name) => ({ id: name, name, is_default: name === text(data.providers.default_provider), ...(providerDetails[name] ?? {}) }));
+  const [preferredProvider, setPreferredProvider] = useState(() => storedPreference(CHAT_PROVIDER_KEY, text(data.providers.default_provider, "local")));
+  const [preferredModel, setPreferredModel] = useState(() => storedPreference(CHAT_MODEL_KEY, text(data.providers.default_model, "deterministic_mock_v1")));
+  const [preferredMode, setPreferredMode] = useState(() => storedPreference(CHAT_MODE_KEY, "auto"));
+  const [budgetDraft, setBudgetDraft] = useState({ name: "Local development budget", maxPerCall: "4096", maxTotal: "100000", maxCost: "0.05", enabled: true });
+  const [savingBudget, setSavingBudget] = useState(false);
+  const availableModels = allowedModels[preferredProvider] ?? [];
+  const computerTool = data.tools.find((item) => text(item.tool_id) === "computer_control_tool");
+  const commandTool = data.tools.find((item) => text(item.tool_id) === "workspace_command_tool");
+  const externalTool = data.tools.find((item) => text(item.tool_id) === "external_api_tool");
+  const tokenPercent = Math.min(100, Math.round((Number(data.budget.used_tokens ?? 0) / Math.max(1, Number(data.budget.max_total_tokens ?? 1))) * 100));
+  const costPercent = Math.min(100, Math.round((Number(data.budget.used_cost ?? 0) / Math.max(0.000001, Number(data.budget.max_estimated_cost ?? 1))) * 100));
+
+  useEffect(() => {
+    if (providerNames.length && !providerNames.includes(preferredProvider)) {
+      setPreferredProvider(text(data.providers.default_provider, providerNames[0]));
+    }
+  }, [data.providers.default_provider, preferredProvider, providerNames]);
+
+  useEffect(() => {
+    const models = allowedModels[preferredProvider] ?? [];
+    if (models.length && !models.includes(preferredModel)) setPreferredModel(models[0]);
+  }, [allowedModels, preferredModel, preferredProvider]);
+
+  useEffect(() => {
+    if (!data.budget.policy_id) return;
+    setBudgetDraft({
+      name: text(data.budget.policy_name, "AI usage budget"),
+      maxPerCall: text(data.budget.max_tokens_per_call, "4096"),
+      maxTotal: text(data.budget.max_total_tokens, "100000"),
+      maxCost: text(data.budget.max_estimated_cost, "0.05"),
+      enabled: data.budget.enabled !== false,
+    });
+  }, [data.budget]);
+
+  const saveAiPreferences = (event: FormEvent) => {
+    event.preventDefault();
+    window.localStorage.setItem(CHAT_PROVIDER_KEY, preferredProvider);
+    window.localStorage.setItem(CHAT_MODEL_KEY, preferredModel);
+    window.localStorage.setItem(CHAT_MODE_KEY, preferredMode);
+    notify("AI 工作方式已保存，返回对话后生效。");
+  };
+
+  const saveBudget = async (event: FormEvent) => {
+    event.preventDefault();
+    setSavingBudget(true);
+    try {
+      await mutate("/budget/policy", {
+        actor_id: "human_root",
+        name: budgetDraft.name,
+        max_tokens_per_call: Number(budgetDraft.maxPerCall),
+        max_total_tokens: Number(budgetDraft.maxTotal),
+        max_estimated_cost: Number(budgetDraft.maxCost),
+        cost_per_token: Number(data.budget.cost_per_token ?? 0.000001),
+        currency: text(data.budget.currency, "USD"),
+        enabled: budgetDraft.enabled,
+      });
+      notify("AI 使用额度已更新。");
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "更新使用额度失败");
+    } finally {
+      setSavingBudget(false);
+    }
+  };
+
   return (
-    <div className="view-stack">
-      <section className="two-column work-layout">
-        <Panel title="API 连接" meta={formatValue(data.health.status)}>
+    <div className="view-stack settings-view">
+      <section className="settings-intro">
+        <div className="settings-intro-icon"><SlidersHorizontal /></div>
+        <div><strong>控制 AI 的工作方式</strong><span>常用设置会立即影响对话和 Agent；技术诊断已收进页面底部。</span></div>
+        <div className="settings-intro-status"><span className={text(data.health.status) === "ok" ? "good" : "bad"}>API {text(data.health.status) === "ok" ? "正常" : "异常"}</span><span className={data.budget.enabled === false ? "warn" : "good"}>预算保护{data.budget.enabled === false ? "关闭" : "开启"}</span></div>
+      </section>
+
+      <section className="settings-primary-grid">
+        <Panel title="AI 工作方式" meta="对话默认值">
+          <form className="form-grid" onSubmit={saveAiPreferences}>
+            <Field label="自主程度"><select aria-label="默认自主程度" value={preferredMode} onChange={(event) => setPreferredMode(event.target.value)}><option value="auto">自动判断</option><option value="agent">连续执行 Agent</option><option value="action">执行前先确认计划</option><option value="chat">只聊天，不执行</option></select></Field>
+            <Field label="模型服务商"><select aria-label="默认模型服务商" value={preferredProvider} onChange={(event) => setPreferredProvider(event.target.value)}>{providerNames.map((name) => <option key={name} value={name}>{formatValue(name)}</option>)}</select></Field>
+            <Field label="默认模型"><select aria-label="默认模型" value={preferredModel} onChange={(event) => setPreferredModel(event.target.value)}>{availableModels.map((name) => <option key={name} value={name}>{name}</option>)}</select></Field>
+            <button className="button"><Bot />保存 AI 设置</button>
+          </form>
+        </Panel>
+
+        <Panel title="安全边界" meta="真实运行策略">
+          <div className="settings-policy-list">
+            <SettingPolicy icon={<Check />} title="读取与分析" detail="低风险操作由 Agent 自动完成" value="自动执行" tone="good" />
+            <SettingPolicy icon={<ShieldCheck />} title="文件修改与命令" detail="执行前展示内容并请求确认" value={commandTool?.requires_approval ? "需要确认" : "未启用"} tone="warn" />
+            <SettingPolicy icon={<ServerCog />} title="电脑控制" detail="打开网页、应用和输入操作" value={computerTool?.enabled ? "已启用，需确认" : "未启用"} tone={computerTool?.enabled ? "warn" : "neutral"} />
+            <SettingPolicy icon={<Activity />} title="外部 API" detail="向外部系统发送数据" value={externalTool?.enabled ? "已启用，需确认" : "未启用"} tone={externalTool?.enabled ? "warn" : "neutral"} />
+          </div>
+        </Panel>
+
+        <Panel title="连接与凭据" meta={formatValue(data.health.status)}>
           <form className="form-grid" onSubmit={saveApiBase}>
             <Field label="API 地址"><input value={apiDraft} onChange={(e) => setApiDraft(e.target.value)} /></Field>
             <button className="button"><SlidersHorizontal />应用连接</button>
@@ -1262,46 +1366,30 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
             <button className="button secondary"><ShieldCheck />{hasApiToken ? "更新令牌" : "保存令牌"}</button>
           </form>
         </Panel>
-        <Panel title="生产就绪检查" meta={formatValue(data.readiness.status, "unknown")}>
-          <EntityList items={readinessChecks} empty="没有生产就绪检查结果。" render={(item) => <EntityRow title={text(item.name)} detail={text(item.message)} status={text(item.status)} />} />
+
+        <Panel title="AI 使用额度" meta={data.budget.enabled === false ? "已关闭" : "保护中"}>
+          <div className="budget-usage">
+            <div><span>Token</span><strong>{Number(data.budget.used_tokens ?? 0).toLocaleString()} / {Number(data.budget.max_total_tokens ?? 0).toLocaleString()}</strong><div className="budget-track"><span style={{ width: `${tokenPercent}%` }} /></div></div>
+            <div><span>费用</span><strong>${Number(data.budget.used_cost ?? 0).toFixed(4)} / ${Number(data.budget.max_estimated_cost ?? 0).toFixed(2)}</strong><div className="budget-track"><span style={{ width: `${costPercent}%` }} /></div></div>
+          </div>
+          <form className="form-grid budget-form" onSubmit={saveBudget}>
+            <div className="field-pair"><Field label="单次最大 Token"><input type="number" min="1" value={budgetDraft.maxPerCall} onChange={(event) => setBudgetDraft((current) => ({ ...current, maxPerCall: event.target.value }))} required /></Field><Field label="总 Token 上限"><input type="number" min="1" value={budgetDraft.maxTotal} onChange={(event) => setBudgetDraft((current) => ({ ...current, maxTotal: event.target.value }))} required /></Field></div>
+            <div className="field-pair"><Field label="费用上限"><input type="number" min="0" step="0.01" value={budgetDraft.maxCost} onChange={(event) => setBudgetDraft((current) => ({ ...current, maxCost: event.target.value }))} required /></Field><label className="toggle-field"><input type="checkbox" checked={budgetDraft.enabled} onChange={(event) => setBudgetDraft((current) => ({ ...current, enabled: event.target.checked }))} /><span><strong>启用预算保护</strong><small>达到上限后停止模型调用</small></span></label></div>
+            <button className="button secondary" disabled={savingBudget}><CircleGauge />{savingBudget ? "保存中..." : "保存额度"}</button>
+          </form>
         </Panel>
       </section>
-      <Panel title="持久化" meta={formatValue(data.schema.backend)}>
-        <div className="system-facts">
-          <Fact label="后端" value={formatValue(data.schema.backend)} />
-          <Fact label="数据库结构版本" value={text(data.schema.schema_version)} />
-          <Fact label="完整性" value={formatValue(data.integrity.status)} />
-          <Fact label="迁移数量" value={String(migrations.length)} />
+
+      <details className="advanced-diagnostics">
+        <summary><span><ServerCog /><strong>高级诊断</strong><small>生产检查、数据库、模型路由与告警</small></span><StatusPill value={text(data.readiness.status, "unknown")} /></summary>
+        <div className="diagnostic-grid">
+          <section className="diagnostic-section"><div className="diagnostic-heading"><h2>生产就绪检查</h2><span>{readinessChecks.length} 项</span></div><EntityList items={readinessChecks} empty="没有生产就绪检查结果。" render={(item) => <EntityRow title={text(item.name)} detail={text(item.message)} status={text(item.status)} />} /></section>
+          <section className="diagnostic-section"><div className="diagnostic-heading"><h2>持久化</h2><span>{formatValue(data.schema.backend)}</span></div><div className="system-facts"><Fact label="后端" value={formatValue(data.schema.backend)} /><Fact label="数据库版本" value={text(data.schema.schema_version)} /><Fact label="完整性" value={formatValue(data.integrity.status)} /><Fact label="迁移数量" value={String(migrations.length)} /></div></section>
+          <section className="diagnostic-section"><div className="diagnostic-heading"><h2>模型路由与价格</h2><span>{providerRows.length} 个供应商</span></div><EntityList items={providerRows} empty="没有已配置的模型供应商。" render={(item) => <ProviderRouteItem item={item} />} /></section>
+          <section className="diagnostic-section"><div className="diagnostic-heading"><h2>告警与向量服务</h2><span>{data.alertStatus.enabled ? "告警已启用" : "告警未启用"}</span></div><div className="system-facts"><Fact label="告警目标" value={formatValue(data.alertStatus.destination, "none")} /><Fact label="告警主机" value={text(data.alertStatus.endpoint_host, "未配置")} /><Fact label="向量嵌入" value={data.embeddings.enabled ? "已启用" : "已禁用"} /><Fact label="已索引文档" value={text(data.embeddings.indexed_documents, "0")} /></div></section>
+          <section className="diagnostic-section diagnostic-wide"><div className="diagnostic-heading"><h2>数据库结构迁移</h2><span>{migrations.length} 项</span></div><EntityList items={migrations} empty="没有数据库迁移记录。" render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} /></section>
         </div>
-      </Panel>
-      <Panel title="AI 服务" meta={formatValue(data.providers.default_provider)}>
-        <div className="system-facts">
-          <Fact label="模型服务商" value={formatValue(data.providers.default_provider)} />
-          <Fact label="默认模型" value={text(data.providers.default_model)} />
-          <Fact label="已配置供应商" value={providerNames.length ? providerNames.map((name) => formatValue(name)).join("、") : "无"} />
-          <Fact label="降级顺序" value={fallbackOrder.length ? fallbackOrder.map((name) => formatValue(name)).join(" → ") : "未启用"} />
-          <Fact label="向量嵌入" value={data.embeddings.enabled ? "已启用" : "已禁用"} />
-          <Fact label="嵌入模型" value={text(data.embeddings.default_model, "未配置")} />
-          <Fact label="向量维度" value={text(data.embeddings.dimensions)} />
-          <Fact label="已索引文档" value={text(data.embeddings.indexed_documents, "0")} />
-          <Fact label="失败文档" value={text(data.embeddings.failed_documents, "0")} />
-          <Fact label="向量存储" value={data.embeddings.vector_store ? "已连接" : "未连接"} />
-        </div>
-      </Panel>
-      <Panel title="模型路由与价格" meta={`${providerRows.length} 个供应商`}>
-        <EntityList items={providerRows} empty="没有已配置的模型供应商。" render={(item) => <ProviderRouteItem item={item} />} />
-      </Panel>
-      <Panel title="告警发送" meta={data.alertStatus.enabled ? "已启用" : "已禁用"}>
-        <div className="system-facts">
-          <Fact label="已配置" value={data.alertStatus.configured ? "是" : "否"} />
-          <Fact label="发送目标" value={formatValue(data.alertStatus.destination, "none")} />
-          <Fact label="端点主机" value={text(data.alertStatus.endpoint_host, "未配置")} />
-          <Fact label="超时时间" value={`${text(data.alertStatus.timeout_seconds, "5")} 秒`} />
-        </div>
-      </Panel>
-      <Panel title="数据库结构迁移" meta={`已应用 ${migrations.length} 项`}>
-        <EntityList items={migrations} empty="没有数据库迁移记录。" render={(item) => <EntityRow title={`${text(item.version)} / ${text(item.migration_id)}`} detail={text(item.description)} status={formatDate(item.applied_at)} />} />
-      </Panel>
+      </details>
       <details className="advanced-catalog">
         <summary>高级管理：通常由 AI 和 Agent 自动使用</summary>
         <div className="admin-shortcuts">
@@ -1315,9 +1403,12 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
         <summary>高级信息：Agent、Skill、Tool 与 Workflow</summary>
         <CatalogView data={data} />
       </details>
-      <div className="legacy-note"><FileClock /><div><strong>已保留旧版控制台</strong><span>无依赖的备用控制台仍位于 <code>apps/web_dashboard</code>。</span></div></div>
     </div>
   );
+}
+
+function SettingPolicy({ icon, title, detail, value, tone }: { icon: ReactNode; title: string; detail: string; value: string; tone: "good" | "warn" | "neutral" }) {
+  return <div className="setting-policy"><span className={`setting-policy-icon ${tone}`}>{icon}</span><div><strong>{title}</strong><small>{detail}</small></div><span className={`setting-policy-value ${tone}`}>{value}</span></div>;
 }
 
 function ProviderRouteItem({ item }: { item: ApiRecord }) {

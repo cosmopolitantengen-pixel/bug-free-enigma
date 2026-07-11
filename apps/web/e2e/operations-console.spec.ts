@@ -66,6 +66,19 @@ function fixtureFor(pathname: string, options: MockApiOptions = {}): unknown {
         },
       },
     },
+    "/budget/summary": {
+      policy_id: "budget-1",
+      policy_name: "Local development budget",
+      enabled: true,
+      max_tokens_per_call: 4096,
+      max_total_tokens: 100000,
+      max_estimated_cost: 0.05,
+      cost_per_token: 0.000001,
+      currency: "USD",
+      used_tokens: 1200,
+      used_cost: 0.003,
+      cost_log_count: 4,
+    },
     "/knowledge/embeddings/status": {
       enabled: false,
       default_model: null,
@@ -728,6 +741,18 @@ test.describe("AI Company OS operations console", () => {
 
     await openConsoleView(page, "设置");
     await expect(page.getByRole("heading", { name: "设置" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "AI 工作方式" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "安全边界" })).toBeVisible();
+    await page.getByLabel("默认自主程度").selectOption("agent");
+    await page.getByLabel("默认模型", { exact: true }).selectOption("deepseek-v4-pro");
+    await page.getByRole("button", { name: "保存 AI 设置" }).click();
+    await expect(page.getByText("AI 工作方式已保存，返回对话后生效。")).toBeVisible();
+    await page.getByRole("button", { name: "对话", exact: true }).click();
+    await expect(page.getByLabel("对话模式")).toHaveValue("agent");
+    await expect(page.getByLabel("对话模型", { exact: true })).toHaveValue("deepseek-v4-pro");
+
+    await openConsoleView(page, "设置");
+    await page.getByText("高级诊断", { exact: true }).click();
     await expect(page.getByText("生产就绪检查")).toBeVisible();
     await expect(page.getByText("http_auth_gate")).toBeVisible();
     await expect(page.getByText("模型路由与价格")).toBeVisible();
@@ -1035,6 +1060,6 @@ test.describe("AI Company OS operations console", () => {
     await page.getByRole("button", { name: "打开导航" }).click();
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await expect(page.getByRole("heading", { name: "设置", level: 1 })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "API 连接" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "连接与凭据" })).toBeVisible();
   });
 });
