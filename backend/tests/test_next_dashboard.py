@@ -15,7 +15,7 @@ class NextDashboardTests(unittest.TestCase):
         with open(styles_path, "r", encoding="utf-8") as handle:
             styles = handle.read()
 
-        for label in ["对话", "总览", "工作台", "计划任务", "能力目录", "治理中心", "系统设置"]:
+        for label in ["对话", "设置", "目标与任务", "执行中心", "自动化", "审批与安全", "高级管理"]:
             self.assertIn(label, console)
         for endpoint in [
             "/dashboard/summary", "/system/integrity", "/deployment/readiness", "/workflows/run", "/approvals",
@@ -85,6 +85,11 @@ class NextDashboardTests(unittest.TestCase):
         self.assertIn("taskkill", contents["e2e_runner"])
         self.assertIn("@playwright/test/cli.js", contents["e2e_runner"])
         self.assertIn("AI_COMPANY_OS_SQLITE_PATH", contents["local_starter"])
+        self.assertIn("EnableCodexCore", contents["local_starter"])
+        self.assertIn("AI_COMPANY_OS_ENABLE_CODEX_CLI", contents["local_starter"])
+        self.assertIn("AI_COMPANY_OS_CODEX_ENTRYPOINT", contents["local_starter"])
+        self.assertIn('AI_COMPANY_OS_MODEL_FALLBACKS = "deepseek"', contents["local_starter"])
+        self.assertNotIn('AI_COMPANY_OS_MODEL_FALLBACKS = "local"', contents["local_starter"])
         self.assertIn("/database/schema", contents["local_starter"])
         self.assertIn("-WindowStyle Hidden", contents["local_starter"])
 

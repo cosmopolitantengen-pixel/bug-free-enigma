@@ -163,6 +163,8 @@ const CHAT_STORAGE_KEY = "ai-company-os-chat-sessions-v1";
 const CHAT_MODE_KEY = "ai-company-os-chat-mode";
 const CHAT_PROVIDER_KEY = "ai-company-os-chat-provider";
 const CHAT_MODEL_KEY = "ai-company-os-chat-model";
+const CHAT_PREFERENCES_VERSION_KEY = "ai-company-os-chat-preferences-version";
+const CHAT_PREFERENCES_VERSION = "codex-core-v1";
 
 function createId(prefix: string) {
   const suffix = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -173,6 +175,7 @@ function createId(prefix: string) {
 
 function storedPreference(key: string, fallback: string): string {
   if (typeof window === "undefined") return fallback;
+  if (window.localStorage.getItem(CHAT_PREFERENCES_VERSION_KEY) !== CHAT_PREFERENCES_VERSION) return fallback;
   return window.localStorage.getItem(key) || fallback;
 }
 
@@ -639,6 +642,7 @@ function ChatView({ data, listChatSessions, createChatSession, importChatSession
     window.localStorage.setItem(CHAT_PROVIDER_KEY, provider);
     window.localStorage.setItem(CHAT_MODEL_KEY, model);
     window.localStorage.setItem(CHAT_MODE_KEY, chatMode);
+    window.localStorage.setItem(CHAT_PREFERENCES_VERSION_KEY, CHAT_PREFERENCES_VERSION);
   }, [chatMode, model, provider]);
 
   useEffect(() => {
@@ -1304,6 +1308,7 @@ function SystemView({ data, apiDraft, setApiDraft, saveApiBase, apiTokenDraft, s
     window.localStorage.setItem(CHAT_PROVIDER_KEY, preferredProvider);
     window.localStorage.setItem(CHAT_MODEL_KEY, preferredModel);
     window.localStorage.setItem(CHAT_MODE_KEY, preferredMode);
+    window.localStorage.setItem(CHAT_PREFERENCES_VERSION_KEY, CHAT_PREFERENCES_VERSION);
     notify("AI 工作方式已保存，返回对话后生效。");
   };
 

@@ -17,6 +17,21 @@ The `openai` adapters use the OpenAI Responses and Embeddings APIs. Requests set
 
 The native `deepseek` adapter uses the official OpenAI-compatible Chat Completions endpoint without pretending that it is an OpenAI Responses endpoint. Credentials come from `DEEPSEEK_API_KEY` or `DEEPSEEK_API_KEY_FILE`. The supported V4 defaults and request shape follow the official [DeepSeek quick start](https://api-docs.deepseek.com/zh-cn/) and [model list](https://api-docs.deepseek.com/api/list-models/).
 
+The optional `codex` adapter invokes a locally installed and authenticated Codex CLI. Each call is ephemeral, ignores user and project rules, disables external apps/plugins/browser/computer tools, strips provider secrets from the child environment, and fixes Codex to a read-only workspace sandbox. Codex may investigate with read-only shell access, but all changes and operational effects must still be selected from AI Company OS's bounded Agent intents and pass through its Tool, Permission, Approval, Budget, and Audit boundaries.
+
+```text
+AI_COMPANY_OS_ENABLE_CODEX_CLI=true
+AI_COMPANY_OS_MODEL_PROVIDER=codex
+AI_COMPANY_OS_CODEX_EXECUTABLE=codex
+AI_COMPANY_OS_CODEX_ENTRYPOINT=
+AI_COMPANY_OS_CODEX_WORKSPACE_ROOT=/absolute/path/to/workspace
+AI_COMPANY_OS_CODEX_MODEL=codex-default
+AI_COMPANY_OS_CODEX_ALLOWED_MODELS=codex-default
+AI_COMPANY_OS_CODEX_TIMEOUT_SECONDS=180
+```
+
+`codex-default` deliberately omits the CLI `--model` argument so the installed Codex release selects its current default. An explicit allowlisted model name is passed with `--model`. Run `codex login status` before enabling the adapter. On Windows, `scripts/start-local.ps1 -EnableCodexCore` discovers the npm installation and launches `codex.js` with `node.exe`, avoiding a background `.cmd` shell while preserving the package's native-binary setup. It also sets the workspace root and selects this provider automatically. When a DeepSeek key or key file is already configured, the local starter uses DeepSeek as the explicit fallback for Codex account-limit or availability failures; it never substitutes the deterministic local provider. Subscription-backed CLI calls report zero estimated API cost because ChatGPT account limits are not a per-token USD price; token budgets and the account's own usage limits still apply.
+
 ```text
 AI_COMPANY_OS_MODEL_PROVIDER=openai
 AI_COMPANY_OS_MODEL_NAME=gpt-4.1-mini

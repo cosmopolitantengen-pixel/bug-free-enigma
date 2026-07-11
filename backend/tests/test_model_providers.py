@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -26,6 +27,7 @@ from app.knowledge_base.embeddings import (
 )
 from app.models.gateway import ModelGateway, ModelPricing, create_model_gateway
 from app.models.providers import (
+    CodexCliProvider,
     DeepSeekChatProvider,
     ModelProviderConfigurationError,
     ModelProviderError,
@@ -118,6 +120,94 @@ class ModelProviderTests(unittest.TestCase):
     def test_model_pricing_preserves_sub_micro_costs(self):
         pricing = ModelPricing(input_per_million=0.14, output_per_million=0.28)
         self.assertEqual(pricing.estimate(1, 1), 0.00000042)
+
+    def test_codex_cli_provider_uses_read_only_ephemeral_json_and_parses_usage(self):
+        observed = {}
+
+        def runner(command, **kwargs):
+            observed["command"] = command
+            observed.update(kwargs)
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="\n".join(
+                    (
+                        '{"type":"thread.started","thread_id":"thread-test"}',
+                        '{"type":"item.completed","item":{"type":"agent_message","text":"Codex answer"}}',
+                        '{"type":"turn.completed","usage":{"input_tokens":14,"output_tokens":8}}',
+                    )
+                ),
+                stderr="ignored diagnostic",
+            )
+
+        with tempfile.TemporaryDirectory() as workspace:
+            provider = CodexCliProvider(
+                "codex.cmd",
+                workspace_root=workspace,
+                runner=runner,
+            )
+            with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "must-not-leak"}):
+                generation = provider.generate(
+                    "Sensitive prompt", "codex-default", "unit_test", 512
+                )
+
+        self.assertEqual(generation.output, "Codex answer")
+        self.assertEqual(generation.prompt_tokens, 14)
+        self.assertEqual(generation.completion_tokens, 8)
+        self.assertEqual(generation.total_tokens, 22)
+        self.assertEqual(observed["command"][:2], ["codex.cmd", "exec"])
+        self.assertIn("--ephemeral", observed["command"])
+        self.assertIn("--ignore-user-config", observed["command"])
+        self.assertIn("read-only", observed["command"])
+        self.assertNotIn("--model", observed["command"])
+        self.assertFalse(observed["shell"])
+        self.assertNotIn("DEEPSEEK_API_KEY", observed["env"])
+        self.assertIn("unit_test", observed["input"])
+        self.assertIn("512", observed["input"])
+
+    def test_codex_cli_provider_sanitizes_process_failures(self):
+        def runner(command, **kwargs):
+            return subprocess.CompletedProcess(
+                command,
+                7,
+                stdout="",
+                stderr="private upstream detail and secret token",
+            )
+
+        with tempfile.TemporaryDirectory() as workspace:
+            provider = CodexCliProvider(
+                "codex.cmd",
+                workspace_root=workspace,
+                runner=runner,
+            )
+            with self.assertRaisesRegex(ModelProviderError, "exit code 7") as raised:
+                provider.generate("prompt", "codex-default", "unit_test", 128)
+
+        self.assertNotIn("private upstream detail", str(raised.exception))
+        self.assertNotIn("secret token", str(raised.exception))
+
+    def test_codex_cli_provider_reports_usage_limit_without_upstream_links(self):
+        def runner(command, **kwargs):
+            return subprocess.CompletedProcess(
+                command,
+                1,
+                stdout=(
+                    '{"type":"error","message":"You have hit your usage limit. '
+                    'Purchase credits at https://chatgpt.com/private"}'
+                ),
+                stderr="",
+            )
+
+        with tempfile.TemporaryDirectory() as workspace:
+            provider = CodexCliProvider(
+                "codex.cmd",
+                workspace_root=workspace,
+                runner=runner,
+            )
+            with self.assertRaisesRegex(ModelProviderError, "usage limit reached") as raised:
+                provider.generate("prompt", "codex-default", "unit_test", 128)
+
+        self.assertNotIn("chatgpt.com/private", str(raised.exception))
 
     def test_openai_responses_provider_parses_text_and_usage(self):
         observed = {}
@@ -533,6 +623,35 @@ class ModelProviderTests(unittest.TestCase):
             status["provider_details"]["deepseek"]["pricing_usd_per_million"]
             ["deepseek-v4-pro"]["input"],
             0.435,
+        )
+
+    def test_model_factory_configures_codex_as_governed_local_core(self):
+        with tempfile.TemporaryDirectory() as workspace:
+            with patch.dict(
+                os.environ,
+                {
+                    "AI_COMPANY_OS_ENABLE_CODEX_CLI": "1",
+                    "AI_COMPANY_OS_CODEX_EXECUTABLE": "codex.cmd",
+                    "AI_COMPANY_OS_CODEX_WORKSPACE_ROOT": workspace,
+                    "AI_COMPANY_OS_MODEL_PROVIDER": "codex",
+                },
+                clear=True,
+            ):
+                gateway = create_model_gateway()
+
+        status = gateway.provider_status()
+        self.assertEqual(status["default_provider"], "codex")
+        self.assertEqual(status["allowed_models"]["codex"], ["codex-default"])
+        self.assertEqual(
+            status["provider_details"]["codex"]["sandbox"], "read-only"
+        )
+        self.assertEqual(
+            status["provider_details"]["codex"]["pricing_usd_per_million"]
+            ["codex-default"]["input"],
+            0,
+        )
+        self.assertTrue(
+            status["provider_details"]["codex"]["governed_execution"]
         )
 
     def test_model_failure_creates_audit_cost_and_incident_records(self):

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+import os
+import subprocess
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -66,6 +69,169 @@ class DeterministicModelProvider:
         generation = self.generate(prompt, model_name, purpose, max_output_tokens)
         yield ProviderStreamEvent(delta=generation.output)
         yield ProviderStreamEvent(generation=generation)
+
+
+_CODEX_DISABLED_FEATURES = (
+    "apps",
+    "browser_use",
+    "browser_use_external",
+    "computer_use",
+    "hooks",
+    "image_generation",
+    "in_app_browser",
+    "multi_agent",
+    "plugin_hooks",
+    "plugins",
+    "shell_snapshot",
+    "tool_search",
+    "workspace_dependencies",
+)
+_CODEX_ENVIRONMENT_ALLOWLIST = {
+    "APPDATA",
+    "CODEX_HOME",
+    "COMMONPROGRAMFILES",
+    "COMMONPROGRAMFILES(X86)",
+    "COMSPEC",
+    "HOME",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LANG",
+    "LC_ALL",
+    "LOCALAPPDATA",
+    "PATH",
+    "PATHEXT",
+    "PROGRAMDATA",
+    "PROGRAMFILES",
+    "PROGRAMFILES(X86)",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "USERNAME",
+    "WINDIR",
+}
+
+
+class CodexCliProvider:
+    """Runs Codex as a read-only reasoning provider behind OS governance."""
+
+    name = "codex"
+    DEFAULT_MODEL = "codex-default"
+
+    def __init__(
+        self,
+        executable: str,
+        *,
+        workspace_root: str | Path,
+        entrypoint: str | Path | None = None,
+        default_model: str = DEFAULT_MODEL,
+        timeout_seconds: float = 180.0,
+        runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    ) -> None:
+        if not executable.strip():
+            raise ModelProviderConfigurationError("Codex CLI executable is required")
+        if not default_model.strip():
+            raise ModelProviderConfigurationError(
+                "AI_COMPANY_OS_CODEX_MODEL is required"
+            )
+        workspace = Path(workspace_root).expanduser().resolve()
+        if not workspace.is_dir():
+            raise ModelProviderConfigurationError(
+                "AI_COMPANY_OS_CODEX_WORKSPACE_ROOT must be an existing directory"
+            )
+        if timeout_seconds <= 0 or timeout_seconds > 600:
+            raise ModelProviderConfigurationError(
+                "AI_COMPANY_OS_CODEX_TIMEOUT_SECONDS must be between 0 and 600"
+            )
+        self.default_model = default_model.strip()
+        self._command_prefix = [executable.strip()]
+        if entrypoint is not None and str(entrypoint).strip():
+            entrypoint_path = Path(entrypoint).expanduser().resolve()
+            if not entrypoint_path.is_file():
+                raise ModelProviderConfigurationError(
+                    "AI_COMPANY_OS_CODEX_ENTRYPOINT must be an existing file"
+                )
+            self._command_prefix.append(str(entrypoint_path))
+        self._workspace = workspace
+        self._timeout_seconds = timeout_seconds
+        self._runner = runner
+        self.status_details = {
+            "transport": "local_codex_cli",
+            "sandbox": "read-only",
+            "governed_execution": True,
+        }
+
+    def generate(
+        self, prompt: str, model_name: str, purpose: str, max_output_tokens: int
+    ) -> ProviderGeneration:
+        command = self._command(model_name)
+        try:
+            completed = self._runner(
+                command,
+                input=self._wrapped_prompt(prompt, purpose, max_output_tokens),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=self._timeout_seconds,
+                cwd=str(self._workspace),
+                env=_codex_environment(),
+                shell=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ModelProviderError("codex request timed out") from exc
+        except OSError as exc:
+            raise ModelProviderError(
+                f"codex CLI could not be started: {exc.__class__.__name__}"
+            ) from exc
+        stdout = str(completed.stdout or "")
+        stderr = str(completed.stderr or "")
+        if completed.returncode != 0:
+            raise ModelProviderError(
+                _codex_failure_message(stdout, stderr, completed.returncode)
+            )
+        return _codex_generation(stdout, prompt)
+
+    def _command(self, model_name: str) -> list[str]:
+        command = [
+            *self._command_prefix,
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+        ]
+        for feature in _CODEX_DISABLED_FEATURES:
+            command.extend(("--disable", feature))
+        command.extend(
+            (
+                "--sandbox",
+                "read-only",
+                "--skip-git-repo-check",
+                "-C",
+                str(self._workspace),
+            )
+        )
+        if model_name != self.DEFAULT_MODEL:
+            command.extend(("--model", model_name))
+        command.append("-")
+        return command
+
+    @staticmethod
+    def _wrapped_prompt(
+        prompt: str, purpose: str, max_output_tokens: int
+    ) -> str:
+        return "\n".join(
+            (
+                "AI Company OS is invoking Codex as a read-only reasoning provider.",
+                "Inspect only the configured workspace. Do not modify files or cause external side effects.",
+                f"Purpose: {purpose}",
+                f"Keep the final answer within approximately {max_output_tokens} tokens.",
+                "Follow the task-specific response format below exactly.",
+                "",
+                prompt,
+            )
+        )
 
 
 class OpenAIResponsesProvider:
@@ -381,6 +547,82 @@ def _provider_http_error(provider: str, response: httpx.Response) -> str:
     request_id = response.headers.get("x-request-id")
     suffix = f" (request {request_id})" if request_id else ""
     return f"{provider} returned HTTP {response.status_code}{suffix}"
+
+
+def _codex_environment() -> dict[str, str]:
+    allowed = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in _CODEX_ENVIRONMENT_ALLOWLIST
+    }
+    allowed.update({"NO_COLOR": "1", "RUST_LOG": "error", "TERM": "dumb"})
+    return allowed
+
+
+def _codex_generation(stdout: str, prompt: str) -> ProviderGeneration:
+    messages: list[str] = []
+    usage: dict[str, Any] = {}
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "item.completed":
+            item = event.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message":
+                value = item.get("text")
+                if isinstance(value, str) and value.strip():
+                    messages.append(value.strip())
+        elif event.get("type") == "turn.completed":
+            value = event.get("usage")
+            if isinstance(value, dict):
+                usage = value
+    output = "\n\n".join(messages).strip()
+    if not output:
+        raise ModelProviderError(_codex_failure_message(stdout, "", None))
+    prompt_tokens = _non_negative_int(
+        usage.get("input_tokens"), _estimate_tokens(prompt)
+    )
+    completion_tokens = _non_negative_int(
+        usage.get("output_tokens"), _estimate_tokens(output)
+    )
+    return ProviderGeneration(
+        output=output,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+
+
+def _non_negative_int(value: Any, fallback: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed >= 0 else fallback
+
+
+def _codex_failure_message(
+    stdout: str, stderr: str, exit_code: int | None
+) -> str:
+    diagnostic = f"{stdout}\n{stderr}".lower()
+    if any(
+        marker in diagnostic
+        for marker in ("usage limit", "purchase more credits", "rate limit")
+    ):
+        return "codex usage limit reached; try again later or select another provider"
+    if "not logged in" in diagnostic or "authentication" in diagnostic:
+        return "codex CLI is not authenticated"
+    if "model" in diagnostic and any(
+        marker in diagnostic
+        for marker in ("not found", "not supported", "unavailable")
+    ):
+        return "the selected Codex model is unavailable"
+    if exit_code is None:
+        return "codex returned no text output"
+    return f"codex CLI returned exit code {exit_code}"
 
 
 def _validate_base_url(base_url: str, setting_name: str) -> None:

@@ -18,6 +18,7 @@ from app.agents.registry import AgentRegistry
 from app.bootstrap import build_company_os
 from app.core.enums import ActionDecision, ApprovalStatus, PermissionLevel, RiskLevel, TaskStatus
 from app.core.models import ActionRequest, Agent, AuditEvent, BudgetPolicy, RiskAssessment, Task, WorkflowDefinition, WorkflowStepDefinition
+from app.models.gateway import ModelGateway
 from app.workflows.registry import WorkflowRegistry
 
 
@@ -536,7 +537,7 @@ class CompanyOSCoreTests(unittest.TestCase):
         self.assertEqual(service.list_audit_logs()[-1]["event_type"], "task_completed")
 
     def test_model_gateway_records_deterministic_usage(self):
-        company_os = build_company_os()
+        company_os = build_company_os(model_gateway=ModelGateway())
 
         response = company_os.models.generate(
             prompt="Create an internal summary.",

@@ -1,7 +1,8 @@
 param(
     [int]$ApiPort = 8000,
     [int]$WebPort = 3000,
-    [switch]$EnableComputerControl
+    [switch]$EnableComputerControl,
+    [switch]$EnableCodexCore
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +17,33 @@ $env:AI_COMPANY_OS_SQLITE_PATH = $databasePath
 $env:NEXT_PUBLIC_API_BASE = "http://127.0.0.1:$ApiPort"
 if ($EnableComputerControl) {
     $env:AI_COMPANY_OS_ENABLE_COMPUTER_CONTROL = "1"
+}
+if ($EnableCodexCore) {
+    $codexCommand = Get-Command codex.cmd -ErrorAction SilentlyContinue
+    if (-not $codexCommand) {
+        $codexCommand = Get-Command codex -ErrorAction SilentlyContinue
+    }
+    if (-not $codexCommand) {
+        throw "Codex CLI was not found. Install it and run 'codex login' first."
+    }
+    $codexEntrypoint = Join-Path (Split-Path $codexCommand.Source) "node_modules\@openai\codex\bin\codex.js"
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    $env:AI_COMPANY_OS_ENABLE_CODEX_CLI = "1"
+    if ($nodeCommand -and (Test-Path $codexEntrypoint)) {
+        $env:AI_COMPANY_OS_CODEX_EXECUTABLE = $nodeCommand.Source
+        $env:AI_COMPANY_OS_CODEX_ENTRYPOINT = $codexEntrypoint
+    } else {
+        $env:AI_COMPANY_OS_CODEX_EXECUTABLE = $codexCommand.Source
+        Remove-Item Env:AI_COMPANY_OS_CODEX_ENTRYPOINT -ErrorAction SilentlyContinue
+    }
+    $env:AI_COMPANY_OS_CODEX_WORKSPACE_ROOT = $root
+    $env:AI_COMPANY_OS_MODEL_PROVIDER = "codex"
+    $deepSeekKeyFileAvailable = (-not [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY_FILE)) -and (Test-Path $env:DEEPSEEK_API_KEY_FILE)
+    if ((-not [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) -or $deepSeekKeyFileAvailable) {
+        $env:AI_COMPANY_OS_MODEL_FALLBACKS = "deepseek"
+    } else {
+        $env:AI_COMPANY_OS_MODEL_FALLBACKS = ""
+    }
 }
 
 function Test-Endpoint([string]$Url) {
@@ -32,6 +60,12 @@ if ($apiAlreadyRunning) {
     $schema = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/database/schema" -TimeoutSec 2
     if ($schema.backend -eq "memory") {
         throw "Port $ApiPort is running an in-memory API. Stop it, then run this script again to enable SQLite persistence."
+    }
+    if ($EnableCodexCore) {
+        $modelStatus = Invoke-RestMethod -Uri "http://127.0.0.1:$ApiPort/models/providers" -TimeoutSec 2
+        if ($modelStatus.default_provider -ne "codex") {
+            throw "Port $ApiPort is already running without the Codex core. Stop it, then run this script again."
+        }
     }
 }
 

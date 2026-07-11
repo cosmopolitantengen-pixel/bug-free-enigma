@@ -3,11 +3,14 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from app.core.models import ModelUsageRecord
 from app.models.providers import (
+    CodexCliProvider,
     DeepSeekChatProvider,
     DeterministicModelProvider,
     ModelProvider,
@@ -243,6 +246,7 @@ class ModelGateway:
                         }
                         for model, rate in self._pricing.get(name, {}).items()
                     },
+                    **_provider_status_details(adapter),
                 }
                 for name, adapter in sorted(self._providers.items())
             },
@@ -317,6 +321,25 @@ def create_model_gateway(
     usage_records: list[ModelUsageRecord] | None = None,
 ) -> ModelGateway:
     providers: dict[str, ModelProvider] = {"local": DeterministicModelProvider()}
+    if _enabled("AI_COMPANY_OS_ENABLE_CODEX_CLI"):
+        executable = os.getenv("AI_COMPANY_OS_CODEX_EXECUTABLE", "").strip()
+        executable = executable or shutil.which("codex") or ""
+        if not executable:
+            raise ModelProviderConfigurationError(
+                "Codex CLI is enabled but no codex executable was found"
+            )
+        providers["codex"] = CodexCliProvider(
+            executable,
+            workspace_root=os.getenv(
+                "AI_COMPANY_OS_CODEX_WORKSPACE_ROOT",
+                str(Path(__file__).resolve().parents[3]),
+            ),
+            entrypoint=os.getenv("AI_COMPANY_OS_CODEX_ENTRYPOINT") or None,
+            default_model=os.getenv(
+                "AI_COMPANY_OS_CODEX_MODEL", CodexCliProvider.DEFAULT_MODEL
+            ),
+            timeout_seconds=_codex_timeout_seconds(),
+        )
     api_key = (read_secret("OPENAI_API_KEY", "") or "").strip()
     if api_key:
         providers["openai"] = OpenAIResponsesProvider(
@@ -344,6 +367,9 @@ def create_model_gateway(
     if "openai" in providers:
         configured = _configured_models("AI_COMPANY_OS_ALLOWED_MODELS")
         allowed_models["openai"] = configured or {providers["openai"].default_model}
+    if "codex" in providers:
+        configured = _configured_models("AI_COMPANY_OS_CODEX_ALLOWED_MODELS")
+        allowed_models["codex"] = configured or {providers["codex"].default_model}
     if "deepseek" in providers:
         configured = _configured_models(
             "AI_COMPANY_OS_DEEPSEEK_ALLOWED_MODELS"
@@ -372,6 +398,11 @@ def create_model_gateway(
             ),
         }
     }
+    if "codex" in providers:
+        pricing["codex"] = {
+            model: ModelPricing(input_per_million=0, output_per_million=0)
+            for model in allowed_models["codex"]
+        }
     return ModelGateway(
         usage_records,
         providers=providers,
@@ -388,6 +419,15 @@ def _configured_models(setting_name: str) -> set[str]:
         for value in os.getenv(setting_name, "").split(",")
         if value.strip()
     }
+
+
+def _enabled(setting_name: str) -> bool:
+    return os.getenv(setting_name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _provider_status_details(adapter: ModelProvider) -> dict[str, object]:
+    details = getattr(adapter, "status_details", None)
+    return dict(details) if isinstance(details, dict) else {}
 
 
 def _configured_fallbacks() -> tuple[str, ...]:
@@ -424,5 +464,20 @@ def _timeout_seconds() -> float:
     if value <= 0 or value > 300:
         raise ModelProviderConfigurationError(
             "AI_COMPANY_OS_PROVIDER_TIMEOUT_SECONDS must be between 0 and 300"
+        )
+    return value
+
+
+def _codex_timeout_seconds() -> float:
+    raw = os.getenv("AI_COMPANY_OS_CODEX_TIMEOUT_SECONDS", "180")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ModelProviderConfigurationError(
+            "AI_COMPANY_OS_CODEX_TIMEOUT_SECONDS must be numeric"
+        ) from exc
+    if value <= 0 or value > 600:
+        raise ModelProviderConfigurationError(
+            "AI_COMPANY_OS_CODEX_TIMEOUT_SECONDS must be between 0 and 600"
         )
     return value
